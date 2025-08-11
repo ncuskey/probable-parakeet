@@ -166,8 +166,8 @@
     <div class="row">
       <label>River Style:</label>
       <select id="riverStyle" onchange="__state.recolor && __state.recolor();">
-        <option value="lines" selected>Lines</option>
-        <option value="polygons">Polygonal</option>
+        <option value="lines">Lines</option>
+        <option value="polygons" selected>Polygonal</option>
       </select>
     </div>
 
@@ -338,6 +338,7 @@
       window.__state.autoSeed = autoSeed;
       window.__state.drawCoastlines = drawCoastlines;
       window.__state.applyBorder = applyBorderMask;
+      window.__state.computeRivers = computeRivers;
 
       // Auto-generate: center island + N small hills
       autoSeed();
@@ -876,47 +877,138 @@
       }
 
       // --- Export Functions ---
-      function setPaint(el, prop, value) {
-        if (!value) return;
-        const m = value.match(/^rgba?\(([^)]+)\)/);
-        if (m) {
-          const parts = m[1].split(',').map(s => s.trim());
-          const [r,g,b,a] = [ +parts[0], +parts[1], +parts[2], parts[3] !== undefined ? +parts[3] : 1 ];
-          el.setAttribute(prop, `rgb(${r}, ${g}, ${b})`);
-          if (a !== undefined && a !== 1) el.setAttribute(prop + '-opacity', a);
-        } else {
-          el.setAttribute(prop, value);
-        }
+      function getUsedIds(svg) {
+        const used = new Set();
+        const ATTRS = [
+          'fill', 'stroke', 'filter', 'clip-path', 'mask',
+          'marker-start', 'marker-mid', 'marker-end', 'href', 'xlink:href'
+        ];
+        svg.querySelectorAll('*').forEach(el => {
+          for (const a of ATTRS) {
+            const v = el.getAttribute(a);
+            if (!v) continue;
+            // url(#id) or href="#id"
+            const m1 = v.match(/url\(#([^)]+)\)/);
+            if (m1) used.add(m1[1]);
+            const m2 = v.match(/^#(.+)/);
+            if (m2) used.add(m2[1]);
+          }
+        });
+        return used;
       }
 
-      function inlineSvgStyles(root) {
-        const attrs = [
-          'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
-          'opacity', 'fill-opacity', 'stroke-opacity', 'font-family', 'font-size',
-          'font-weight', 'paint-order', 'fill-rule'
-        ];
+      function pruneDefs(defs, used) {
+        defs.querySelectorAll('[id]').forEach(node => {
+          if (!used.has(node.id)) node.remove();
+        });
+      }
 
-        root.querySelectorAll('*').forEach(el => {
+      function ensureBackgroundOcean(svg, color) {
+        // Remove any prior injected bg
+        svg.querySelector('#_export_bg')?.remove();
+
+        const vb = svg.viewBox && svg.viewBox.baseVal;
+        const w = svg.getAttribute('width') || (vb ? vb.width : null);
+        const h = svg.getAttribute('height') || (vb ? vb.height : null);
+        if (!w || !h) return; // set width/height/viewBox upstream as you already do
+
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('id', '_export_bg');
+        rect.setAttribute('x', '0');
+        rect.setAttribute('y', '0');
+        rect.setAttribute('width', w);
+        rect.setAttribute('height', h);
+        rect.setAttribute('fill', color);
+
+        // Insert behind everything, but after <defs> if present
+        const firstRenderable = [...svg.childNodes].find(n => n.nodeType === 1 && n.tagName !== 'defs');
+        if (firstRenderable) svg.insertBefore(rect, firstRenderable);
+        else svg.appendChild(rect);
+      }
+
+      function inlineSvgStyles(svg, preservePatterns = false) {
+        const all = svg.querySelectorAll('*');
+
+        for (const el of all) {
           const cs = getComputedStyle(el);
 
-          attrs.forEach(a => {
-            // 1) NEVER override an explicit attribute (it's already correct)
-            if ((a === 'fill' || a === 'stroke') && el.hasAttribute(a)) return;
-
-            let v = cs.getPropertyValue(a);
-            if (!v || v === 'none' || v === 'normal') return;
-
-            if (a === 'fill' || a === 'stroke') {
-              setPaint(el, a, v); // your rgba→rgb + opacity splitter
-            } else {
-              el.setAttribute(a, v);
+          const setPaint = (prop, attr) => {
+            // Never overwrite explicit fill/stroke attributes that are already set
+            if ((attr === 'fill' || attr === 'stroke') && el.hasAttribute(attr)) {
+              return;
             }
-          });
+            
+            let v = cs[prop];
 
-          // If author styles were set via .style, keep them only if attribute not set
-          if (el.style && el.style.fill && !el.hasAttribute('fill')) setPaint(el, 'fill', el.style.fill);
-          if (el.style && el.style.stroke && !el.hasAttribute('stroke')) setPaint(el, 'stroke', el.style.stroke);
-        });
+            // Preserve patterns for SVG export
+            if (preservePatterns && v && v.startsWith('url(')) {
+              el.setAttribute(attr, v);
+              return;
+            }
+
+            // Normalize transparent cases
+            if (!v || v === 'none') {
+              el.setAttribute(attr, 'none');
+              return;
+            }
+            if (v.startsWith('rgba(')) {
+              const [, r, g, b, a] = v.match(/rgba?\((\d+),\s*(\d+),\s*(\d+),\s*([.\d]+)\)/) || [];
+              if (!r) { el.setAttribute(attr, 'none'); return; }
+              if (+a === 0) { el.setAttribute(attr, 'none'); return; } // **important**
+              el.setAttribute(attr, `rgb(${r}, ${g}, ${b})`);
+              el.setAttribute(attr + '-opacity', a);
+              return;
+            }
+            if (v.startsWith('rgb(')) {
+              el.setAttribute(attr, v);
+              return;
+            }
+
+            // Handle keywords like 'none'
+            if (v === 'transparent' || v === 'currentcolor') {
+              el.setAttribute(attr, 'none');
+            } else {
+              // last resort
+              el.setAttribute(attr, v);
+            }
+          };
+
+          setPaint('fill', 'fill');
+          setPaint('stroke', 'stroke');
+
+          // Stroke details
+          const sw = cs.strokeWidth; if (sw) el.setAttribute('stroke-width', sw);
+          const slc = cs.strokeLinecap; if (slc) el.setAttribute('stroke-linecap', slc);
+          const slj = cs.strokeLinejoin; if (slj) el.setAttribute('stroke-linejoin', slj);
+          const sda = cs.strokeDasharray; if (sda && sda !== 'none') el.setAttribute('stroke-dasharray', sda);
+          const sdo = cs.strokeDashoffset; if (sdo && sdo !== '0px') el.setAttribute('stroke-dashoffset', sdo);
+          
+          // Special handling for river elements to ensure they're visible
+          if (el.classList && (el.classList.contains('rivers') || el.classList.contains('riversShade'))) {
+            // Ensure river paths have proper stroke attributes
+            if (!el.hasAttribute('stroke') && !el.style.stroke) {
+              if (el.classList.contains('rivers')) {
+                el.setAttribute('stroke', '#4D83AE');
+              } else if (el.classList.contains('riversShade')) {
+                el.setAttribute('stroke', 'rgba(0,0,0,0.35)');
+              }
+            }
+            // Ensure river paths have stroke-width if not set
+            if (!el.hasAttribute('stroke-width') && !el.style.strokeWidth) {
+              el.setAttribute('stroke-width', '1');
+            }
+          }
+
+          // Opacities (element-level)
+          const op = cs.opacity; if (op && op !== '1') el.setAttribute('opacity', op);
+
+          // Text extras
+          const fw = cs.fontWeight; if (fw) el.setAttribute('font-weight', fw);
+          const fs = cs.fontSize; if (fs) el.setAttribute('font-size', fs);
+          const ff = cs.fontFamily; if (ff) el.setAttribute('font-family', ff);
+
+          const po = cs.paintOrder; if (po && po !== 'normal') el.setAttribute('paint-order', po);
+        }
       }
 
       function saveSVG(svgNode, filename = 'map.svg') {
@@ -925,10 +1017,37 @@
           window.__state.recolor();
         }
         
+        // Debug: Check if rivers exist before export
+        const originalRivers = svgNode.querySelectorAll('g.rivers path, g.riversShade path');
+        console.log(`Original rivers before export: ${originalRivers.length} paths`);
+        if (originalRivers.length === 0) {
+          console.log('No rivers found! Computing rivers...');
+          if (window.__state.computeRivers) {
+            window.__state.computeRivers();
+          }
+        }
+        
         const clone = svgNode.cloneNode(true);
         
-        // Inline computed styles to ensure colors are preserved in export
-        inlineSvgStyles(clone);
+        // Ensure ocean background is properly set
+        const oceanRect = clone.querySelector('rect.ocean');
+        if (oceanRect) {
+          oceanRect.setAttribute('fill', WATER_COLOR);
+          oceanRect.setAttribute('style', `fill: ${WATER_COLOR}`);
+          console.log(`Ocean rect found and styled with color: ${WATER_COLOR}`);
+        } else {
+          console.log('No ocean rect found in clone!');
+        }
+        
+        // Inline computed styles to ensure colors are preserved in export (preserve patterns)
+        inlineSvgStyles(clone, true);
+        
+        // Prune unused defs but keep referenced ones
+        const defs = clone.querySelector('defs');
+        if (defs) {
+          const usedIds = getUsedIds(clone);
+          pruneDefs(defs, usedIds);
+        }
         
         // Debug: Check what fills we have after inlining
         const allCells = clone.querySelectorAll('path.mapCell');
@@ -940,6 +1059,21 @@
           else coloredCells++;
         });
         console.log(`Export debug after inlining - Black: ${blackCells}, Colored: ${coloredCells}, None: ${noneCells}`);
+        
+        // Debug: Check SVG structure
+        console.log('SVG clone structure:', clone.innerHTML.substring(0, 500) + '...');
+        console.log('Ocean rect in clone:', clone.querySelector('rect.ocean')?.outerHTML);
+        
+        // Debug: Check river elements
+        const riverGroups = clone.querySelectorAll('g.rivers, g.riversShade');
+        console.log(`Found ${riverGroups.length} river groups in clone:`, riverGroups);
+        riverGroups.forEach((group, i) => {
+          const paths = group.querySelectorAll('path');
+          console.log(`River group ${i} (${group.className.baseVal}): ${paths.length} paths`);
+          if (paths.length > 0) {
+            console.log('Sample river path:', paths[0].outerHTML);
+          }
+        });
         
         // ensure inline styles/fonts if needed
         const svgText = new XMLSerializer().serializeToString(clone);
@@ -969,11 +1103,11 @@
           clone.setAttribute("viewBox", `0 0 ${w} ${h}`);
         }
         
-        // Inline computed styles to ensure colors are preserved in export
-        inlineSvgStyles(clone);
+        // Inline computed styles to ensure colors are preserved in export (raster-safe)
+        inlineSvgStyles(clone, false);
         
-        // Remove problematic attributes that can break canvas rendering
-        clone.querySelectorAll('[filter]').forEach(n => n.removeAttribute('filter'));
+        // Remove problematic attributes that can break canvas rendering (restrict to render tree)
+        clone.querySelectorAll(':not(defs) [filter]').forEach(n => n.removeAttribute('filter'));
         clone.querySelectorAll('[mask]').forEach(n => n.removeAttribute('mask'));
         clone.querySelectorAll('[mix-blend-mode],[style*="mix-blend-mode"]').forEach(n => {
           n.style.mixBlendMode = '';
@@ -984,6 +1118,15 @@
           const paint = getComputedStyle(el).fill;
           el.setAttribute('fill', paint && paint !== 'none' ? paint : WATER_COLOR);
         });
+        
+        // Add solid background ocean for raster-safe export
+        const oceanEl = clone.querySelector('#oceanBase, .ocean, [data-layer="ocean"]');
+        let oceanColor = WATER_COLOR;
+        if (oceanEl) {
+          const f = getComputedStyle(oceanEl).fill;
+          if (f && f.startsWith('rgb(')) oceanColor = f;
+        }
+        ensureBackgroundOcean(clone, oceanColor);
         
         // Remove unused defs if nothing references them
         if (!clone.querySelector('[fill^="url("],[stroke^="url("],[filter],[mask]')) {
@@ -1006,13 +1149,7 @@
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         
-        // Ensure a background when drawing to canvas
-        ctx.save();
-        ctx.fillStyle = WATER_COLOR;  // Use ocean color as background
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.restore();
-        
-        // Draw the SVG image
+        // Draw the SVG image (background is already included in SVG)
         ctx.drawImage(img, 0, 0, w, h);
         
         canvas.toBlob(blob => {
@@ -2017,6 +2154,48 @@
         // T36: Export functions are available
         assert('SVG export function is available', typeof window.saveSVG === 'function');
         assert('PNG export function is available', typeof window.savePNG === 'function');
+        
+        // T37: Ocean background is properly set for export
+        const svg = document.querySelector('svg');
+        const oceanRect = svg.querySelector('rect.ocean');
+        assert('Ocean background rect exists', !!oceanRect);
+        assert('Ocean background has correct fill color', oceanRect.getAttribute('fill') === WATER_COLOR);
+        
+        // T38: Rivers are properly computed and rendered
+        const riverGroups = svg.querySelectorAll('g.rivers, g.riversShade');
+        const riverPaths = svg.querySelectorAll('g.rivers path, g.riversShade path');
+        assert('River groups exist in SVG', riverGroups.length > 0);
+        assert('River paths are rendered', riverPaths.length > 0);
+        
+        // Check that rivers have proper styling
+        if (riverPaths.length > 0) {
+          const samplePath = riverPaths[0];
+          const hasStroke = samplePath.hasAttribute('stroke') || samplePath.style.stroke;
+          const hasStrokeWidth = samplePath.hasAttribute('stroke-width') || samplePath.style.strokeWidth;
+          assert('River paths have stroke attributes', hasStroke || hasStrokeWidth);
+        }
+        
+        // Test ocean export preservation
+        const clone = svg.cloneNode(true);
+        const cloneOcean = clone.querySelector('rect.ocean');
+        cloneOcean.setAttribute('fill', WATER_COLOR);
+        cloneOcean.setAttribute('style', `fill: ${WATER_COLOR}`);
+        inlineSvgStyles(clone, true);
+        assert('Ocean fill is preserved during export styling', cloneOcean.getAttribute('fill') === WATER_COLOR);
+        
+        // Test river export preservation
+        const exportRiverGroups = clone.querySelectorAll('g.rivers, g.riversShade');
+        const exportRiverPaths = clone.querySelectorAll('g.rivers path, g.riversShade path');
+        assert('River groups are present in export clone', exportRiverGroups.length > 0);
+        assert('River paths are present in export clone', exportRiverPaths.length > 0);
+        
+        // Check that river styles are properly inlined
+        if (exportRiverPaths.length > 0) {
+          const samplePath = exportRiverPaths[0];
+          const hasStroke = samplePath.hasAttribute('stroke') || samplePath.style.stroke;
+          const hasStrokeWidth = samplePath.hasAttribute('stroke-width') || samplePath.style.strokeWidth;
+          assert('River paths have stroke attributes inlined', hasStroke || hasStrokeWidth);
+        }
 
       } catch (e) {
         const li = document.createElement('li');
