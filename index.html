@@ -1011,6 +1011,24 @@
         }
       }
 
+      // Ensure coastline styling persists in exports even if computed styles are unavailable on clones
+      function ensureCoastlineStyle(svg) {
+        svg.querySelectorAll('g.coastline path.coast').forEach(el => {
+          if (!el.getAttribute('stroke') || el.getAttribute('stroke') === 'none') {
+            el.setAttribute('stroke', '#111');
+          }
+          if (!el.getAttribute('stroke-width')) {
+            el.setAttribute('stroke-width', '0.6px');
+          }
+          if (!el.getAttribute('fill')) {
+            el.setAttribute('fill', 'none');
+          }
+          if (!el.getAttribute('stroke-linejoin')) {
+            el.setAttribute('stroke-linejoin', 'round');
+          }
+        });
+      }
+
       function saveSVG(svgNode, filename = 'map.svg') {
         // Ensure the map is properly colored before export
         if (window.__state.recolor) {
@@ -1041,6 +1059,8 @@
         
         // Inline computed styles to ensure colors are preserved in export (preserve patterns)
         inlineSvgStyles(clone, true);
+        // Ensure coastline styling is present
+        ensureCoastlineStyle(clone);
         
         // Prune unused defs but keep referenced ones
         const defs = clone.querySelector('defs');
@@ -1105,6 +1125,8 @@
         
         // Inline computed styles to ensure colors are preserved in export (raster-safe)
         inlineSvgStyles(clone, false);
+        // Ensure coastline styling is present
+        ensureCoastlineStyle(clone);
         
         // Remove problematic attributes that can break canvas rendering (restrict to render tree)
         clone.querySelectorAll(':not(defs) [filter]').forEach(n => n.removeAttribute('filter'));
