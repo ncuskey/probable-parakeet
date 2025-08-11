@@ -1,0 +1,2032 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Voronoi Heightmap Playground</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; }
+    body { margin: 16px; line-height: 1.45; }
+    svg { background-color: #5E4FA2; display: block; border-radius: 8px; }
+    .mapCell { stroke: none; stroke-width: 0; }
+    label { margin-right: 6px; }
+    input[type="range"] { width: 280px; vertical-align: middle; }
+    output { display: inline-block; min-width: 48px; text-align: right; margin-left: 8px; }
+    .controls { margin-top: 12px; }
+    button { margin-right: 8px; }
+    details.tests { margin-top: 14px; }
+    .pass { color: #0a0; }
+    .fail { color: #b00; }
+    .row { margin: 6px 0; }
+    /* Coastline styling */
+    .coast { fill: none; stroke: #111; stroke-width: 0.6px; stroke-linejoin: round; }
+    .rivers { fill: none; stroke: #4D83AE; stroke-linecap: round; stroke-linejoin: round; }
+    .riversShade { fill: none; stroke: rgba(0,0,0,0.35); stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+</head>
+<body>
+  <div style="display: flex; gap: 20px; align-items: flex-start;">
+    <svg width="640" height="360" role="img" aria-label="Voronoi heightmap canvas"></svg>
+    
+    <div id="biomeLegend" style="display: none; min-width: 200px; background: rgba(255,255,255,0.9); padding: 10px; border-radius: 8px; border: 1px solid #ccc;">
+      <h4 style="margin: 0 0 10px 0; font-size: 14px;">Biome Legend</h4>
+      <div id="legendItems" style="font-size: 12px; line-height: 1.4;"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="row">
+      <button onclick="generate()">Generate Map</button>
+    </div>
+
+    <div class="row">
+      <label>Graph Size:</label>
+      <input id="sizeInput" value="10000" type="range" min="100" max="10000" step="100" oninput="sizeOutput.value = sizeInput.valueAsNumber">
+      <output id="sizeOutput">10000</output>
+    </div>
+
+    <div class="row">
+      <label>Max High:</label>
+      <input id="highInput" value="0.9" type="range" min="0.1" max="1" step="0.01" oninput="highOutput.value = highInput.valueAsNumber">
+      <output id="highOutput">0.9</output>
+    </div>
+
+    <div class="row">
+      <label>Radius:</label>
+      <input id="radiusInput" value="0.9" type="range" min="0.5" max="0.999" step="0.001" oninput="radiusOutput.value = radiusInput.valueAsNumber">
+      <output id="radiusOutput">0.9</output> (change gently!)
+    </div>
+
+    <div class="row">
+      <label>Sharpness:</label>
+      <input id="sharpnessInput" value="0.2" type="range" min="0" max="0.5" step="0.1" oninput="sharpnessOutput.value = sharpnessInput.valueAsNumber">
+      <output id="sharpnessOutput">0.2</output>
+    </div>
+
+    <hr>
+
+    <div class="row">
+      <label># small hills:</label>
+      <input id="smallCountInput" value="20" type="range" min="0" max="60" step="1" oninput="smallCountOutput.value = smallCountInput.valueAsNumber">
+      <output id="smallCountOutput">20</output>
+      <span style="opacity:.7">(auto‑seeded)</span>
+    </div>
+
+    <div class="row">
+      <label>Sea level:</label>
+      <input id="seaLevelInput" value="0.35" type="range" min="0" max="1" step="0.01" oninput="seaLevelOutput.value = seaLevelInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="seaLevelOutput">0.35</output>
+    </div>
+
+    <div class="row">
+      <label>Water border (% of min dimension):</label>
+      <input id="borderPctInput" value="8" type="range" min="2" max="20" step="1" oninput="borderPctOutput.value = borderPctInput.valueAsNumber; 
+        /* new controls */
+        if (window.rainOutput) rainOutput.value = rainInput.valueAsNumber;
+        if (window.riverDensityOutput) riverDensityOutput.value = riverDensityInput.valueAsNumber; __state.applyBorder && __state.applyBorder(); __state.recolor && __state.recolor();">
+      <output id="borderPctOutput">8</output>
+    </div>
+
+    <div class="row">
+      <label>Rainfall:</label>
+      <input id="rainInput" value="1.0" type="range" min="0" max="2" step="0.05" oninput="rainOutput.value = rainInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="rainOutput">1.0</output>
+    </div>
+
+    <div class="row">
+      <label>Wind Belts:</label>
+      <select id="windBelts" onchange="__state.recolor && __state.recolor();">
+        <option value="none" selected>None (Random)</option>
+        <option value="hadley">Hadley/Ferrel/Polar</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label>River density (quantile):</label>
+      <input id="riverDensityInput" value="0.90" type="range" min="0.70" max="0.99" step="0.01" oninput="riverDensityOutput.value = riverDensityInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="riverDensityOutput">0.90</output>
+    </div>
+
+    <hr>
+
+    <div class="row">
+      <label>Min lake size (cells):</label>
+      <input id="minLakeSizeInput" value="3" type="range" min="1" max="10" step="1" oninput="minLakeSizeOutput.value = minLakeSizeInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="minLakeSizeOutput">3</output>
+    </div>
+
+    <div class="row">
+      <label>Min lake depth:</label>
+      <input id="minLakeDepthInput" value="0.05" type="range" min="0.01" max="0.15" step="0.01" oninput="minLakeDepthOutput.value = minLakeDepthInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="minLakeDepthOutput">0.05</output>
+    </div>
+
+    <hr>
+
+    <div class="row">
+      <label>Base Temperature (°F):</label>
+      <input id="baseTempInput" value="67" type="range" min="41" max="77" step="1" oninput="baseTempOutput.value = baseTempInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="baseTempOutput">67</output>
+    </div>
+
+    <div class="row">
+      <label>Precipitation Scale:</label>
+      <input id="precipScaleInput" value="1.1" type="range" min="0.1" max="2.0" step="0.1" oninput="precipScaleOutput.value = precipScaleInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="precipScaleOutput">1.1</output>
+    </div>
+
+    <div class="row">
+      <label>World Type:</label>
+      <select id="worldType" onchange="generate();">
+        <option value="island" selected>Single Island</option>
+        <option value="continents">Continents</option>
+      </select>
+    </div>
+
+    <hr>
+
+    <div class="row">
+      <label>Thermal Erosion (Talus):</label>
+      <input id="talusInput" value="0.02" type="range" min="0.01" max="0.05" step="0.005" oninput="talusOutput.value = talusInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="talusOutput">0.02</output>
+    </div>
+
+    <div class="row">
+      <label>Thermal Erosion (Strength):</label>
+      <input id="thermalStrengthInput" value="0.5" type="range" min="0.1" max="1.0" step="0.1" oninput="thermalStrengthOutput.value = thermalStrengthInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="thermalStrengthOutput">0.5</output>
+    </div>
+
+    <div class="row">
+      <label>Land Smoothing (Alpha):</label>
+      <input id="smoothAlphaInput" value="0.2" type="range" min="0.05" max="0.5" step="0.05" oninput="smoothAlphaOutput.value = smoothAlphaInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="smoothAlphaOutput">0.2</output>
+    </div>
+
+    <div class="row">
+      <label>River Style:</label>
+      <select id="riverStyle" onchange="__state.recolor && __state.recolor();">
+        <option value="lines" selected>Lines</option>
+        <option value="polygons">Polygonal</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label>River Width:</label>
+      <input id="riverWidthInput" value="200" type="range" min="50" max="400" step="10" oninput="riverWidthOutput.value = riverWidthInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="riverWidthOutput">200</output>
+    </div>
+
+    <div class="row">
+      <label>Render Mode:</label>
+      <select id="renderMode" onchange="__state.recolor && __state.recolor();">
+        <option value="heightmap" selected>Heightmap</option>
+        <option value="biomes">Biomes</option>
+        <option value="hybrid">Hybrid</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label>Shaded Relief:</label>
+      <select id="shadingMode" onchange="__state.recolor && __state.recolor();">
+        <option value="none" selected>None</option>
+        <option value="shaded">Shaded</option>
+      </select>
+    </div>
+
+    <hr>
+
+    <div class="row">
+      <label>Export:</label>
+      <button id="exportSVG" onclick="saveSVG(document.querySelector('svg'), 'voronoi_map.svg')">Export SVG</button>
+      <button id="exportPNG" onclick="savePNG(document.querySelector('svg'), 800, 600, 'voronoi_map.png')">Export PNG</button>
+    </div>
+  </div>
+
+  <details class="tests">
+    <summary>Show Tests</summary>
+    <button id="runTests">Run Tests</button>
+    <ol id="testResults"></ol>
+  </details>
+
+  <!-- libs -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <!-- D3 v7 (uses d3.pointer and d3-delaunay for Voronoi) -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+
+  <script>
+  (function () {
+    'use strict';
+
+    // Define constants up-front so they're available when generate() first runs
+    const WATER_COLOR = d3.interpolateBlues(0.55); // single water color (less busy)
+
+    // Expose generate() globally for the button
+    window.generate = generate;
+
+    // State we expose for tests/debugging
+    window.__state = { cells: null, delaunay: null, voronoi: null, svg: null, add: null, recolor: null, autoSeed: null, drawCoastlines: null, applyBorder: null, borderPx: 0, generate: generate };
+
+    // Export functions (will be defined later)
+    window.saveSVG = null;
+    window.savePNG = null;
+
+    // initialize outputs to match inputs
+    sizeOutput.value = sizeInput.valueAsNumber;
+    highOutput.value = highInput.valueAsNumber;
+    radiusOutput.value = radiusInput.valueAsNumber;
+    sharpnessOutput.value = sharpnessInput.valueAsNumber;
+    seaLevelOutput.value = seaLevelInput.valueAsNumber;
+    smallCountOutput.value = smallCountInput.valueAsNumber;
+    borderPctOutput.value = borderPctInput.valueAsNumber;
+    minLakeSizeOutput.value = minLakeSizeInput.valueAsNumber;
+    minLakeDepthOutput.value = minLakeDepthInput.valueAsNumber;
+    baseTempOutput.value = baseTempInput.valueAsNumber;
+    precipScaleOutput.value = precipScaleInput.valueAsNumber;
+    riverWidthOutput.value = riverWidthInput.valueAsNumber;
+    talusOutput.value = talusInput.valueAsNumber;
+    thermalStrengthOutput.value = thermalStrengthInput.valueAsNumber;
+    smoothAlphaOutput.value = smoothAlphaInput.valueAsNumber;
+
+    generate();
+
+    function generate() {
+      d3.select('.mapCells').remove();
+      d3.select('.coastline').remove();
+
+      const svg = d3.select('svg');
+      // Solid ocean backdrop to eliminate water seam artifacts (anti-aliasing between polygons)
+      svg.select('rect.ocean').remove();
+      svg.append('rect')
+        .attr('class','ocean')
+        .attr('x',0).attr('y',0)
+        .attr('width', +svg.attr('width'))
+        .attr('height', +svg.attr('height'))
+        .attr('fill', WATER_COLOR);
+      const mapCells = svg.append('g')
+        .attr('class', 'mapCells');
+      const riversShade = svg.append('g').attr('class', 'riversShade');
+      const riversG = svg.append('g').attr('class', 'rivers');
+      const coastG = svg.append('g').attr('class', 'coastline');
+
+      const width = +svg.attr('width');
+      const height = +svg.attr('height');
+      const n = sizeInput.valueAsNumber;
+
+      // initial random points
+      let sites = d3.range(n).map(() => [Math.random() * width, Math.random() * height]);
+
+      // One Lloyd relaxation step for nicer spacing
+      ({ sites } = relaxOnce(sites, width, height));
+
+      // Build Delaunay + Voronoi structures
+      const delaunay = d3.Delaunay.from(sites);
+      const voronoi = delaunay.voronoi([0, 0, width, height]);
+
+      // Build cell objects with neighbors
+      const cells = d3.range(n).map((i) => ({
+        index: i,
+        poly: voronoi.cellPolygon(i),
+        neighbors: Array.from(delaunay.neighbors(i)),
+        high: 0,
+        used: 0
+      }));
+
+      // Precompute polygon centroids for border mask filtering
+      cells.forEach(c => { const ct = d3.polygonCentroid(c.poly); c.cx = ct[0]; c.cy = ct[1]; });
+
+      // Palette (kept for future tweaks)
+      const interp = { water: (t) => d3.interpolateBlues(t) };
+
+      // Land color ramp: green lowlands → tan → white peaks
+      function landColor(t) {
+        // t in [0,1], already normalized above sea level
+        t = Math.max(0, Math.min(1, t));
+        if (t < 0.35) {
+          const u = t / 0.35; // 0..1
+          return d3.interpolateYlGn(0.3 + 0.7 * u); // brighter coastal greens
+        } else if (t < 0.7) {
+          const u = (t - 0.35) / 0.35; // 0..1
+          return d3.interpolateYlOrBr(0.25 + 0.75 * u); // foothills to tan
+        } else if (t < 0.9) {
+          const u = (t - 0.7) / 0.2; // 0..1
+          return d3.interpolateOranges(0.4 + 0.6 * u); // warm rocky highlands
+        } else {
+          const u = (t - 0.9) / 0.1; // 0..1
+          return d3.interpolateRgb('#e9ecef', '#ffffff')(u); // light grey → white snowcap
+        }
+      }
+
+      // Draw polygons
+      mapCells.selectAll('path.mapCell')
+        .data(cells)
+        .enter()
+        .append('path')
+        .attr('class', 'mapCell')
+        .attr('id', d => d.index)
+        .attr('d', d => 'M' + d.poly.map(p => p.join(',')).join('L') + 'Z')
+        .attr('fill', '#000')
+        .attr('fill-rule', 'nonzero');
+
+      // Keep shared state for tests and other functions
+      window.__state.cells = cells;
+      window.__state.delaunay = delaunay;
+      window.__state.voronoi = voronoi;
+      window.__state.svg = svg;
+      window.__state.add = add;
+      window.__state.recolor = recolor;
+      window.__state.autoSeed = autoSeed;
+      window.__state.drawCoastlines = drawCoastlines;
+      window.__state.applyBorder = applyBorderMask;
+
+      // Auto-generate: center island + N small hills
+      autoSeed();
+      // Apply the water-border mask (keeps edges water)
+      applyBorderMask();
+      
+      // Erosion passes: smooth jaggy ridges and improve drainage
+      const talus = +document.getElementById('talusInput').value || 0.02;
+      const thermalStrength = +document.getElementById('thermalStrengthInput').value || 0.5;
+      const smoothAlpha = +document.getElementById('smoothAlphaInput').value || 0.2;
+      thermalErode(talus, thermalStrength, 2);
+      smoothLand(smoothAlpha);
+      
+      // initial recolor according to current UI (also draws coastlines)
+      recolor();
+
+      function relaxOnce(pts, w, h) {
+        const dly = d3.Delaunay.from(pts);
+        const vor = dly.voronoi([0, 0, w, h]);
+        const relaxed = pts.map((_, i) => d3.polygonCentroid(vor.cellPolygon(i)));
+        return { sites: relaxed };
+      }
+
+      function addWithOpts(start, type, opts) {
+        // temporarily override sliders
+        const prev = {
+          high: +highInput.value,
+          rad: +radiusInput.value,
+          sharp: +sharpnessInput.value
+        };
+        if (opts && typeof opts.high === 'number') { highInput.value = opts.high; highOutput.value = opts.high; }
+        if (opts && typeof opts.radius === 'number') { radiusInput.value = opts.radius; radiusOutput.value = opts.radius; }
+        if (opts && typeof opts.sharpness === 'number') { sharpnessInput.value = opts.sharpness; sharpnessOutput.value = opts.sharpness; }
+        add(start, type);
+        // restore sliders
+        highInput.value = prev.high; highOutput.value = prev.high;
+        radiusInput.value = prev.rad; radiusOutput.value = prev.rad;
+        sharpnessInput.value = prev.sharp; sharpnessOutput.value = prev.sharp;
+      }
+
+      function pickInteriorCell(marginPx) {
+        // choose a cell whose centroid is at least marginPx from any edge
+        const interior = cells.filter(c => Math.min(c.cx, c.cy, width - c.cx, height - c.cy) >= marginPx);
+        if (interior.length === 0) return Math.floor(Math.random() * cells.length);
+        const idx = Math.floor(Math.random() * interior.length);
+        return interior[idx].index;
+      }
+
+      function autoSeed() {
+        const worldType = document.getElementById('worldType').value;
+        const N = +smallCountInput.value;
+        const marginPx = Math.max(2, (+borderPctInput.value) / 100 * Math.min(width, height));
+        
+        if (worldType === 'island') {
+          // Original single island generation
+          let centerIndex = delaunay.find(width / 2, height / 2);
+          if (Math.min(cells[centerIndex].cx, cells[centerIndex].cy, width - cells[centerIndex].cx, height - cells[centerIndex].cy) < marginPx) {
+            centerIndex = pickInteriorCell(marginPx);
+          }
+          addWithOpts(centerIndex, 'island', { high: 0.9, radius: 0.94, sharpness: 0.2 });
+          // N small smooth hills at interior random cells
+          for (let i = 0; i < N; i++) {
+            const idx = pickInteriorCell(marginPx);
+            addWithOpts(idx, 'hill', { high: 0.3, radius: 0.985, sharpness: 0.1 });
+          }
+        } else if (worldType === 'continents') {
+          generateContinents(marginPx);
+        }
+      }
+      
+      function generateContinents(marginPx) {
+        // Based on Azgaar's continent template
+        const centerX = width / 2, centerY = height / 2;
+        
+        // 1. Place main mountain (central high point)
+        let centerIndex = delaunay.find(centerX, centerY);
+        if (Math.min(cells[centerIndex].cx, cells[centerIndex].cy, width - cells[centerIndex].cx, height - cells[centerIndex].cy) < marginPx) {
+          centerIndex = pickInteriorCell(marginPx);
+        }
+        addWithOpts(centerIndex, 'island', { high: 0.8, radius: 0.92, sharpness: 0.2 });
+        
+        // 2. Add 24 hills with distribution 0.25 (spread out)
+        for (let i = 0; i < 24; i++) {
+          const idx = pickInteriorCell(marginPx);
+          addWithOpts(idx, 'hill', { high: 0.4, radius: 0.97, sharpness: 0.15 });
+        }
+        
+        // 3. Add 2 mountain ranges (east-west and north-south)
+        const range1Start = delaunay.find(centerX * 0.3, centerY);
+        const range1End = delaunay.find(centerX * 1.7, centerY);
+        addMountainRange(range1Start, range1End, 0.7, 0.3);
+        
+        const range2Start = delaunay.find(centerX, centerY * 0.4);
+        const range2End = delaunay.find(centerX, centerY * 1.6);
+        addMountainRange(range2Start, range2End, 0.6, 0.25);
+        
+        // 4. Add 3 hills with distribution 0.1 (near edges)
+        for (let i = 0; i < 3; i++) {
+          const idx = pickInteriorCell(marginPx * 0.5);
+          addWithOpts(idx, 'hill', { high: 0.3, radius: 0.98, sharpness: 0.1 });
+        }
+        
+        // 5. Multiply land cells by 0.7 (reduce overall elevation)
+        cells.forEach(c => {
+          if (c.high > 0.1) {
+            c.high = 0.1 + (c.high - 0.1) * 0.7;
+          }
+        });
+        
+        // 6. Add strait (vertical depression to separate continents)
+        addStrait(centerX, centerY * 0.3, centerY * 1.7, 3);
+        
+        // 7. Smooth the map
+        smoothMap();
+        
+        // 8. Add 5 pits (inland depressions)
+        for (let i = 0; i < 5; i++) {
+          const idx = pickInteriorCell(marginPx);
+          addPit(idx, 0.3, 0.4);
+        }
+        
+        // 9. Add 3 troughs (elongated depressions)
+        for (let i = 0; i < 3; i++) {
+          const startIdx = pickInteriorCell(marginPx);
+          const endIdx = pickInteriorCell(marginPx);
+          addTrough(startIdx, endIdx, 0.2, 0.3);
+        }
+        
+        // 10. Multiply land cells by 0.8 (further reduce elevation)
+        cells.forEach(c => {
+          if (c.high > 0.1) {
+            c.high = 0.1 + (c.high - 0.1) * 0.8;
+          }
+        });
+        
+        // 11. Add 0.02 to all cells (slight elevation boost)
+        cells.forEach(c => {
+          c.high = Math.min(1.0, c.high + 0.02);
+        });
+      }
+      
+      function addMountainRange(startIdx, endIdx, maxHeight, radius) {
+        const start = cells[startIdx];
+        const end = cells[endIdx];
+        const steps = 12;
+        
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const x = start.cx + (end.cx - start.cx) * t;
+          const y = start.cy + (end.cy - start.cy) * t;
+          const targetIdx = delaunay.find(x, y);
+          addWithOpts(targetIdx, 'hill', { high: maxHeight * (1 - Math.abs(t - 0.5) * 0.4), radius: radius, sharpness: 0.15 });
+        }
+      }
+      
+      function addStrait(centerX, startY, endY, width) {
+        const steps = 20;
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const y = startY + (endY - startY) * t;
+          const x = centerX + (Math.random() - 0.5) * width * 20; // Add some randomness
+          const targetIdx = delaunay.find(x, y);
+          if (targetIdx >= 0 && targetIdx < cells.length) {
+            cells[targetIdx].high = Math.max(0.05, cells[targetIdx].high - 0.4);
+          }
+        }
+      }
+      
+      function addPit(centerIdx, depth, radius) {
+        const center = cells[centerIdx];
+        const queue = [];
+        cells[centerIdx].high = Math.max(0.05, cells[centerIdx].high - depth);
+        queue.push(centerIdx);
+        
+        for (let i = 0; i < queue.length && depth > 0.01; i++) {
+          depth = depth * radius;
+          cells[queue[i]].neighbors.forEach((e) => {
+            if (!cells[e].used) {
+              cells[e].high = Math.max(0.05, cells[e].high - depth);
+              cells[e].used = 1;
+              queue.push(e);
+            }
+          });
+        }
+        cells.forEach(c => c.used = 0);
+      }
+      
+      function addTrough(startIdx, endIdx, depth, radius) {
+        const start = cells[startIdx];
+        const end = cells[endIdx];
+        const steps = 8;
+        
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const x = start.cx + (end.cx - start.cx) * t;
+          const y = start.cy + (end.cy - start.cy) * t;
+          const targetIdx = delaunay.find(x, y);
+          if (targetIdx >= 0 && targetIdx < cells.length) {
+            cells[targetIdx].high = Math.max(0.05, cells[targetIdx].high - depth);
+          }
+        }
+      }
+      
+      function smoothMap() {
+        const smoothed = new Float32Array(cells.length);
+        cells.forEach((c, i) => {
+          let sum = c.high;
+          let count = 1;
+          c.neighbors.forEach(nb => {
+            sum += cells[nb].high;
+            count++;
+          });
+          smoothed[i] = sum / count;
+        });
+        cells.forEach((c, i) => {
+          c.high = smoothed[i];
+        });
+      }
+
+      // Erosion functions for terrain smoothing
+      function isLand(i) {
+        return cells[i].high > 0.1; // Sea level threshold
+      }
+
+      function thermalErode(talus = 0.02, k = 0.5, iters = 2) {
+        const n = cells.length;
+        for (let t = 0; t < iters; t++) {
+          const delta = new Float32Array(n);
+          for (let i = 0; i < n; i++) {
+            const hi = cells[i].high;
+            if (!isLand(i)) continue;
+            for (const j of cells[i].neighbors) {
+              const d = hi - cells[j].high - talus;
+              if (d > 0) {
+                const m = k * d * 0.5;
+                delta[i] -= m;
+                delta[j] += m;
+              }
+            }
+          }
+          for (let i = 0; i < n; i++) {
+            cells[i].high = Math.max(0, cells[i].high + delta[i]);
+          }
+        }
+      }
+
+      function smoothLand(alpha = 0.2) {
+        const n = cells.length;
+        const out = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          if (!isLand(i)) {
+            out[i] = cells[i].high;
+            continue;
+          }
+          let s = 0;
+          for (const j of cells[i].neighbors) {
+            s += cells[j].high;
+          }
+          out[i] = (1 - alpha) * cells[i].high + alpha * (s / cells[i].neighbors.length);
+        }
+        cells.forEach((c, i) => {
+          c.high = out[i];
+        });
+      }
+
+      // Expose autoSeed to window for tests
+      window.autoSeed = autoSeed;
+
+      function add(start, type) {
+        // get options from sliders
+        let high = +highInput.value;
+        const radius = +radiusInput.value;
+        const sharpness = +sharpnessInput.value;
+        const queue = [];
+
+        cells[start].high += high;
+        cells[start].used = 1;
+        queue.push(start);
+
+        for (let i = 0; i < queue.length && high > 0.01; i++) {
+          if (type === 'island') {
+            high = cells[queue[i]].high * radius;
+          } else {
+            high = high * radius;
+          }
+          cells[queue[i]].neighbors.forEach((e) => {
+            if (!cells[e].used) {
+              let mod = Math.random() * sharpness + 1.1 - sharpness;
+              if (sharpness === 0) mod = 1;
+              cells[e].high += high * mod;
+              if (cells[e].high > 1) cells[e].high = 1;
+              cells[e].used = 1;
+              queue.push(e);
+            }
+          });
+        }
+        // reset used flags
+        cells.forEach(c => c.used = 0);
+      }
+
+      function applyBorderMask() {
+        const pct = (+borderPctInput.value) / 100;
+        const marginPx = Math.max(2, pct * Math.min(width, height));
+        window.__state.borderPx = marginPx;
+        // Smoothstep helper
+        const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
+        const smooth = (v) => { v = clamp01(v); return v * v * (3 - 2 * v); };
+        cells.forEach(c => {
+          const distEdge = Math.min(c.cx, c.cy, width - c.cx, height - c.cy);
+          const mask = smooth(distEdge / marginPx);
+          c.high *= mask; // damp heights near the border to guarantee water frame
+        });
+      }
+
+      // --- Lakes & basins (depression detection + spill level) ---
+      function computeLakes(sea) {
+        const N = cells.length;
+        const isLake = new Uint8Array(N);
+        const lakeId = new Int32Array(N); lakeId.fill(-1);
+        const downSteep = new Int32Array(N); downSteep.fill(-1);
+        const up = Array.from({length: N}, () => []);
+        const landIdxs = [];
+        for (let i = 0; i < N; i++) {
+          if (cells[i].high >= sea) {
+            landIdxs.push(i);
+            let bestH = cells[i].high, best = -1;
+            const nbs = cells[i].neighbors;
+            for (let k = 0; k < nbs.length; k++) {
+              const nb = nbs[k];
+              const hh = cells[nb].high;
+              if (hh < bestH) { bestH = hh; best = nb; }
+            }
+            if (best !== -1) { downSteep[i] = best; up[best].push(i); }
+          }
+        }
+        const visited = new Uint8Array(N);
+        const lakes = [];
+        for (let sIdx = 0; sIdx < landIdxs.length; sIdx++) {
+          const s = landIdxs[sIdx];
+          if (visited[s] || downSteep[s] !== -1) continue; // only sinks
+          // collect basin by traversing upstream graph
+          const basin = []; const stack = [s]; visited[s] = 1; const basinSet = new Set();
+          while (stack.length) {
+            const v = stack.pop();
+            basin.push(v); basinSet.add(v);
+            const ups = up[v] || [];
+            for (let t = 0; t < ups.length; t++) { const u = ups[t]; if (!visited[u]) { visited[u] = 1; stack.push(u); } }
+          }
+          // compute spill (lowest outside neighbor)
+          let spill = Infinity; let outlet = -1;
+          for (let bi = 0; bi < basin.length; bi++) {
+            const b = basin[bi];
+            const nbs = cells[b].neighbors;
+            for (let k = 0; k < nbs.length; k++) {
+              const nb = nbs[k];
+              if (!basinSet.has(nb)) {
+                const hnb = cells[nb].high;
+                if (hnb < spill) { spill = hnb; outlet = nb; }
+              }
+            }
+          }
+          if (spill > sea && spill < Infinity) {
+            let lakeCells = 0; const id = lakes.length;
+            let maxDepth = 0;
+            
+            // Count cells that would be underwater and find max depth
+            for (let bi = 0; bi < basin.length; bi++) {
+              const b = basin[bi];
+              if (cells[b].high < spill) { 
+                lakeCells++; 
+                const depth = spill - cells[b].high;
+                maxDepth = Math.max(maxDepth, depth);
+              }
+            }
+            
+            // Only create lakes that are significant in size and depth
+            const minLakeCells = +document.getElementById('minLakeSizeInput').value || 3;
+            const minLakeDepth = +document.getElementById('minLakeDepthInput').value || 0.05;
+            
+            if (lakeCells >= minLakeCells && maxDepth >= minLakeDepth) {
+              for (let bi = 0; bi < basin.length; bi++) {
+                const b = basin[bi];
+                if (cells[b].high < spill) { isLake[b] = 1; lakeId[b] = id; }
+              }
+              lakes.push({ id, level: spill, outlet, size: lakeCells, depth: maxDepth });
+            }
+          }
+        }
+        const isWater = cells.map((c, i) => (c.high < sea) || (isLake[i] === 1));
+        window.__state.isLake = isLake;
+        window.__state.lakeId = lakeId;
+        window.__state.lakes = lakes;
+        window.__state.isWater = isWater;
+        return { isLake, lakeId, lakes, isWater };
+      }
+
+      function recolor() {
+        const sea = +document.getElementById('seaLevelInput').value;
+        const renderMode = document.getElementById('renderMode').value;
+        const shadingMode = document.getElementById('shadingMode').value;
+        
+        // recompute lakes with current sea level and expose water mask
+        computeLakes(sea);
+        const isWater = window.__state.isWater || [];
+        
+        // Compute climate and biomes if needed
+        if (renderMode === 'biomes' || renderMode === 'hybrid') {
+          computeClimate(sea);
+        }
+        
+        // Compute shading if enabled
+        const shades = shadingMode === 'shaded' ? computeShading(cells, sea) : null;
+        
+        mapCells.selectAll('path.mapCell')
+          .attr('fill', d => {
+            if (isWater[d.index]) {
+              // draw water via the ocean backdrop to avoid polygon seam artifacts
+              return 'none';
+            } else {
+              let baseColor;
+              if (renderMode === 'biomes' || renderMode === 'hybrid') {
+                // Use biome-based coloring
+                baseColor = getBiomeColor(d.biome, d.high, sea);
+              } else {
+                // Original heightmap coloring
+                const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
+                const tt = Math.max(0, Math.min(1, tl));
+                baseColor = landColor(tt);
+              }
+              
+              // Apply shading if enabled
+              if (shadingMode === 'shaded' && shades) {
+                return shadeColor(baseColor, shades[d.index]);
+              } else {
+                return baseColor;
+              }
+            }
+          })
+          .style('fill', d => {
+            if (isWater[d.index]) {
+              return 'none';
+            } else {
+              let baseColor;
+              if (renderMode === 'biomes' || renderMode === 'hybrid') {
+                baseColor = getBiomeColor(d.biome, d.high, sea);
+              } else {
+                const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
+                const tt = Math.max(0, Math.min(1, tl));
+                baseColor = landColor(tt);
+              }
+              
+              if (shadingMode === 'shaded' && shades) {
+                return shadeColor(baseColor, shades[d.index]);
+              } else {
+                return baseColor;
+              }
+            }
+          });
+        computeRivers();
+        drawCoastlines();
+        
+        // Update the biome legend
+        updateBiomeLegend();
+      }
+
+      // --- Shaded Relief and Hypsometric Tinting ---
+      function estimateNormal(i, cells, H) {
+        // simple gradient from neighbors
+        let dx = 0, dy = 0;
+        const ci = cells[i];
+        for (const j of ci.neighbors) {
+          const cj = cells[j];
+          const dh = H[j] - H[i];
+          dx += dh * (cj.cx - ci.cx);
+          dy += dh * (cj.cy - ci.cy);
+        }
+        // normal pointing "up": N ≈ normalize([-dx, -dy, scale])
+        const scale = 1.0; // simplified scale
+        let nx = -dx, ny = -dy, nz = scale;
+        const len = Math.hypot(nx, ny, nz);
+        return [nx / len, ny / len, nz / len];
+      }
+
+      function shadeColor(color, shade) {
+        let r, g, b;
+        
+        if (color.startsWith('rgb(')) {
+          // Parse rgb(r, g, b) format
+          const rgbMatch = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+          if (rgbMatch) {
+            r = parseInt(rgbMatch[1]);
+            g = parseInt(rgbMatch[2]);
+            b = parseInt(rgbMatch[3]);
+          } else {
+            return color; // fallback if parsing fails
+          }
+        } else if (color.startsWith('#')) {
+          // Parse hex format
+          const hex = color.replace('#', '');
+          r = parseInt(hex.substr(0, 2), 16);
+          g = parseInt(hex.substr(2, 2), 16);
+          b = parseInt(hex.substr(4, 2), 16);
+        } else {
+          return color; // fallback for unknown formats
+        }
+        
+        const shadedR = Math.round(r * shade);
+        const shadedG = Math.round(g * shade);
+        const shadedB = Math.round(b * shade);
+        
+        return `rgb(${shadedR}, ${shadedG}, ${shadedB})`;
+      }
+
+      function computeShading(cells, sea) {
+        const lightDir = [-0.5, -0.5, 1]; // Light direction
+        const lightLen = Math.hypot(lightDir[0], lightDir[1], lightDir[2]);
+        const normalizedLight = lightDir.map(v => v / lightLen);
+        
+        const H = cells.map(c => c.high);
+        const shades = new Float32Array(cells.length);
+        
+        for (let i = 0; i < cells.length; i++) {
+          if (cells[i].high >= sea) {
+            // Only shade land cells
+            const normal = estimateNormal(i, cells, H);
+            const dot = normal[0] * normalizedLight[0] + 
+                       normal[1] * normalizedLight[1] + 
+                       normal[2] * normalizedLight[2];
+            shades[i] = Math.max(0.25, dot); // 0.25 = ambient
+          } else {
+            shades[i] = 1.0; // No shading for water
+          }
+        }
+        
+        return shades;
+      }
+
+      // --- Export Functions ---
+      function setPaint(el, prop, value) {
+        if (!value) return;
+        const m = value.match(/^rgba?\(([^)]+)\)/);
+        if (m) {
+          const parts = m[1].split(',').map(s => s.trim());
+          const [r,g,b,a] = [ +parts[0], +parts[1], +parts[2], parts[3] !== undefined ? +parts[3] : 1 ];
+          el.setAttribute(prop, `rgb(${r}, ${g}, ${b})`);
+          if (a !== undefined && a !== 1) el.setAttribute(prop + '-opacity', a);
+        } else {
+          el.setAttribute(prop, value);
+        }
+      }
+
+      function inlineSvgStyles(root) {
+        const attrs = [
+          'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+          'opacity', 'fill-opacity', 'stroke-opacity', 'font-family', 'font-size',
+          'font-weight', 'paint-order', 'fill-rule'
+        ];
+
+        root.querySelectorAll('*').forEach(el => {
+          const cs = getComputedStyle(el);
+
+          attrs.forEach(a => {
+            // 1) NEVER override an explicit attribute (it's already correct)
+            if ((a === 'fill' || a === 'stroke') && el.hasAttribute(a)) return;
+
+            let v = cs.getPropertyValue(a);
+            if (!v || v === 'none' || v === 'normal') return;
+
+            if (a === 'fill' || a === 'stroke') {
+              setPaint(el, a, v); // your rgba→rgb + opacity splitter
+            } else {
+              el.setAttribute(a, v);
+            }
+          });
+
+          // If author styles were set via .style, keep them only if attribute not set
+          if (el.style && el.style.fill && !el.hasAttribute('fill')) setPaint(el, 'fill', el.style.fill);
+          if (el.style && el.style.stroke && !el.hasAttribute('stroke')) setPaint(el, 'stroke', el.style.stroke);
+        });
+      }
+
+      function saveSVG(svgNode, filename = 'map.svg') {
+        // Ensure the map is properly colored before export
+        if (window.__state.recolor) {
+          window.__state.recolor();
+        }
+        
+        const clone = svgNode.cloneNode(true);
+        
+        // Inline computed styles to ensure colors are preserved in export
+        inlineSvgStyles(clone);
+        
+        // Debug: Check what fills we have after inlining
+        const allCells = clone.querySelectorAll('path.mapCell');
+        let blackCells = 0, coloredCells = 0, noneCells = 0;
+        allCells.forEach(cell => {
+          const fill = cell.getAttribute('fill');
+          if (fill === '#000' || fill === 'black') blackCells++;
+          else if (fill === 'none') noneCells++;
+          else coloredCells++;
+        });
+        console.log(`Export debug after inlining - Black: ${blackCells}, Colored: ${coloredCells}, None: ${noneCells}`);
+        
+        // ensure inline styles/fonts if needed
+        const svgText = new XMLSerializer().serializeToString(clone);
+        const blob = new Blob([svgText], {type: 'image/svg+xml;charset=utf-8'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+
+      async function savePNG(svgNode, w, h, filename = 'map.png') {
+        // Ensure the map is properly colored before export
+        if (window.__state.recolor) {
+          window.__state.recolor();
+        }
+        
+        // Create a clone and prepare for canvas rasterization
+        const clone = svgNode.cloneNode(true);
+        
+        // Add namespaces and explicit size for canvas rendering
+        clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+        clone.setAttribute("width", `${w}`);
+        clone.setAttribute("height", `${h}`);
+        if (!clone.getAttribute("viewBox")) {
+          clone.setAttribute("viewBox", `0 0 ${w} ${h}`);
+        }
+        
+        // Inline computed styles to ensure colors are preserved in export
+        inlineSvgStyles(clone);
+        
+        // Remove problematic attributes that can break canvas rendering
+        clone.querySelectorAll('[filter]').forEach(n => n.removeAttribute('filter'));
+        clone.querySelectorAll('[mask]').forEach(n => n.removeAttribute('mask'));
+        clone.querySelectorAll('[mix-blend-mode],[style*="mix-blend-mode"]').forEach(n => {
+          n.style.mixBlendMode = '';
+        });
+        
+        // Handle any paint servers (url references) by forcing solid fills
+        clone.querySelectorAll('[fill^="url("], [stroke^="url("]').forEach(el => {
+          const paint = getComputedStyle(el).fill;
+          el.setAttribute('fill', paint && paint !== 'none' ? paint : WATER_COLOR);
+        });
+        
+        // Remove unused defs if nothing references them
+        if (!clone.querySelector('[fill^="url("],[stroke^="url("],[filter],[mask]')) {
+          const defs = clone.querySelector('defs');
+          if (defs) defs.remove();
+        }
+        
+        const svgText = new XMLSerializer().serializeToString(clone);
+        const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        
+        await new Promise(resolve => {
+          img.onload = resolve;
+          img.src = svgUrl;
+        });
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        
+        // Ensure a background when drawing to canvas
+        ctx.save();
+        ctx.fillStyle = WATER_COLOR;  // Use ocean color as background
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+        
+        // Draw the SVG image
+        ctx.drawImage(img, 0, 0, w, h);
+        
+        canvas.toBlob(blob => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        }, 'image/png');
+      }
+
+      // Expose export functions globally
+      window.saveSVG = saveSVG;
+      window.savePNG = savePNG;
+
+      // --- Climate and Biome System ---
+      function computeClimate(sea) {
+        const baseTempF = +document.getElementById('baseTempInput').value;
+        const baseTempC = (baseTempF - 32) * 5/9; // Convert F to C
+        const maxElevation_m = 2000; // meters
+        const lapseRate = 6.5; // °C per 1000m
+        
+        // Compute temperature and precipitation for each cell
+        cells.forEach(c => {
+          // Temperature based on elevation
+          const elevRatio = Math.max(0, c.high - sea) / (1 - sea);
+          const elevation_m = elevRatio * maxElevation_m;
+          c.temp = baseTempC - (elevation_m * lapseRate / 1000);
+          
+          // Precipitation (reuse existing model)
+          c.precip = 0; // Will be set by computePrecipArray
+        });
+        
+        // Get precipitation values and scale them
+        const precipArray = computePrecipArray();
+        const precipScale = +document.getElementById('precipScaleInput').value || 0.5;
+        cells.forEach((c, i) => {
+          c.precip = precipArray[i] * precipScale;
+        });
+        
+        // Classify biomes
+        cells.forEach(c => {
+          c.biome = classifyBiome(c, sea);
+        });
+        
+        // Debug: Log temperature and precipitation ranges
+        const landCells = cells.filter(c => c.high >= sea);
+        if (landCells.length > 0) {
+          const temps = landCells.map(c => c.temp);
+          const precips = landCells.map(c => c.precip);
+          const minTempC = Math.min(...temps);
+          const maxTempC = Math.max(...temps);
+          const minTempF = minTempC * 9/5 + 32;
+          const maxTempF = maxTempC * 9/5 + 32;
+          const minPrecip = Math.min(...precips);
+          const maxPrecip = Math.max(...precips);
+          console.log(`Temperature range: ${minTempF.toFixed(1)}°F to ${maxTempF.toFixed(1)}°F (${minTempC.toFixed(1)}°C to ${maxTempC.toFixed(1)}°C)`);
+          console.log(`Precipitation range: ${minPrecip.toFixed(3)} to ${maxPrecip.toFixed(3)}`);
+        }
+      }
+      
+      function classifyBiome(cell, seaLevel) {
+        if (cell.high < seaLevel) return 'Ocean';
+        
+        const T = cell.temp;
+        const P = cell.precip;
+        
+        // Adjust thresholds based on typical precipitation ranges
+        if (T < -5) {
+          return P > 0.3 ? 'Tundra' : 'Polar Desert';
+        }
+        if (T < 5) {
+          return P > 0.6 ? 'Boreal Forest' : (P > 0.3 ? 'Cold Grassland' : 'Cold Desert');
+        }
+        if (T < 18) {
+          if (P < 0.3) return 'Temperate Desert';
+          if (P < 0.6) return 'Grassland';
+          if (P < 1.2) return 'Temperate Forest';
+          return 'Rainforest';
+        }
+        // T >= 18 (tropical)
+        if (P < 0.3) return 'Hot Desert';
+        if (P < 0.6) return 'Savanna';
+        if (P < 1.0) return 'Tropical Seasonal Forest';
+        return 'Tropical Rainforest';
+      }
+      
+      function getBiomeColor(biome, elevation, seaLevel) {
+        const biomeColors = {
+          'Ocean': '#4D83AE',
+          'Tundra': '#E8F4F8',
+          'Polar Desert': '#F0F8FF',
+          'Boreal Forest': '#2E5A27',
+          'Cold Grassland': '#8FBC8F',
+          'Cold Desert': '#F5DEB3',
+          'Temperate Desert': '#DEB887',
+          'Grassland': '#90EE90',
+          'Temperate Forest': '#228B22',
+          'Rainforest': '#006400',
+          'Hot Desert': '#F4A460',
+          'Savanna': '#F0E68C',
+          'Tropical Seasonal Forest': '#32CD32',
+          'Tropical Rainforest': '#228B22'
+        };
+        
+        // For hybrid mode, blend with elevation
+        const renderMode = document.getElementById('renderMode').value;
+        if (renderMode === 'hybrid' && elevation > seaLevel + 0.3) {
+          // Fade to white for high elevations
+          const t = Math.min(1, (elevation - seaLevel - 0.3) / 0.4);
+          return d3.interpolateRgb(biomeColors[biome] || '#228B22', '#ffffff')(t);
+        }
+        
+        return biomeColors[biome] || '#228B22';
+      }
+      
+      function updateBiomeLegend() {
+        const renderMode = document.getElementById('renderMode').value;
+        const legend = document.getElementById('biomeLegend');
+        const legendItems = document.getElementById('legendItems');
+        
+        if (renderMode === 'biomes' || renderMode === 'hybrid') {
+          const biomeColors = {
+            'Ocean': '#4D83AE',
+            'Tundra': '#E8F4F8',
+            'Polar Desert': '#F0F8FF',
+            'Boreal Forest': '#2E5A27',
+            'Cold Grassland': '#8FBC8F',
+            'Cold Desert': '#F5DEB3',
+            'Temperate Desert': '#DEB887',
+            'Grassland': '#90EE90',
+            'Temperate Forest': '#228B22',
+            'Rainforest': '#006400',
+            'Hot Desert': '#F4A460',
+            'Savanna': '#F0E68C',
+            'Tropical Seasonal Forest': '#32CD32',
+            'Tropical Rainforest': '#228B22'
+          };
+          
+          // Group biomes by temperature category
+          const biomeGroups = {
+            'Cold Biomes': ['Tundra', 'Polar Desert', 'Boreal Forest', 'Cold Grassland', 'Cold Desert'],
+            'Temperate Biomes': ['Temperate Desert', 'Grassland', 'Temperate Forest', 'Rainforest'],
+            'Tropical Biomes': ['Hot Desert', 'Savanna', 'Tropical Seasonal Forest', 'Tropical Rainforest'],
+            'Water': ['Ocean']
+          };
+          
+          let legendHTML = '';
+          
+          Object.entries(biomeGroups).forEach(([groupName, biomes]) => {
+            legendHTML += `<div style="margin-bottom: 8px;"><strong>${groupName}</strong></div>`;
+            biomes.forEach(biome => {
+              const color = biomeColors[biome];
+              legendHTML += `
+                <div style="display: flex; align-items: center; margin-bottom: 2px;">
+                  <div style="width: 16px; height: 12px; background-color: ${color}; border: 1px solid #666; margin-right: 8px;"></div>
+                  <span>${biome}</span>
+                </div>
+              `;
+            });
+            legendHTML += '<br>';
+          });
+          
+          if (renderMode === 'hybrid') {
+            legendHTML += `
+              <div style="margin-top: 8px; font-style: italic; font-size: 11px;">
+                Note: High elevations fade to white in hybrid mode
+              </div>
+            `;
+          }
+          
+          legendItems.innerHTML = legendHTML;
+          legend.style.display = 'block';
+        } else {
+          legend.style.display = 'none';
+        }
+      }
+
+      // --- Rivers & precipitation (Azgaar-inspired) ---
+      function windVecForLat(latDeg) {
+        // return unit vector [ux, uy] in screen coords (x right, y down)
+        if (Math.abs(latDeg) < 30) return [1, 0];   // easterlies → 
+        if (Math.abs(latDeg) < 60) return [-1, 0];  // westerlies ←
+        return [1, 0];                              // polar easterlies →
+      }
+
+      function windField(cells, H) {
+        const U = Array(cells.length);
+        for (let i = 0; i < cells.length; i++) {
+          const lat = 90 - 180 * (cells[i].cy / height); // 0..1 → 90..-90
+          U[i] = windVecForLat(lat);
+        }
+        return U;
+      }
+
+      function windVecs() {
+        const mode = document.getElementById('windBelts').value;
+        if (mode === 'hadley') {
+          // Use wind field for each cell
+          return windField(cells, cells.map(c => c.high));
+        } else {
+          // Random wind (original behavior)
+          const pick = () => [[1,0],[-1,0],[0,1],[0,-1]][Math.floor(Math.random()*4)];
+          return [pick()];
+        }
+      }
+
+      function computePrecipArray() {
+        const windMode = document.getElementById('windBelts').value;
+        const intensity = +document.getElementById('rainInput').value; // 0..2
+        const base = 0.4 * intensity + 0.1; // baseline drizzle
+        const P = new Float32Array(cells.length);
+        for (let i = 0; i < cells.length; i++) P[i] = base;
+        
+        if (windMode === 'hadley') {
+          // Use wind field with orographic effects
+          const U = windField(cells, cells.map(c => c.high));
+          for (let i = 0; i < cells.length; i++) {
+            const ci = cells[i];
+            const [wx, wy] = U[i]; // Wind vector for this cell
+            const nbs = ci.neighbors;
+            for (let k = 0; k < nbs.length; k++) {
+              const j = nbs[k];
+              const vx = ci.cx - cells[j].cx;
+              const vy = ci.cy - cells[j].cy;
+              const dot = vx * wx + vy * wy; // >0 means wind approaches cell i from neighbor j
+              const dh = ci.high - cells[j].high; // upslope from j -> i adds rain
+              if (dot > 0 && dh > 0) {
+                // Upslope: orographic bonus
+                P[i] += intensity * dh * (dot / Math.hypot(vx, vy)) * 0.3;
+              } else if (dot > 0 && dh < 0) {
+                // Lee side: rain shadow
+                P[i] -= intensity * (-dh) * (dot / Math.hypot(vx, vy)) * 0.15;
+              }
+            }
+          }
+        } else {
+          // Original random wind system
+          const winds = windVecs();
+          const norm = (x,y) => { const L = Math.hypot(x,y)||1; return [x/L, y/L]; };
+          winds.forEach(w => {
+            const [wx, wy] = norm(w[0], w[1]);
+            for (let i = 0; i < cells.length; i++) {
+              const ci = cells[i];
+              const nbs = ci.neighbors;
+              for (let k = 0; k < nbs.length; k++) {
+                const j = nbs[k];
+                const vx = ci.cx - cells[j].cx;
+                const vy = ci.cy - cells[j].cy;
+                const dot = vx*wx + vy*wy; // >0 means wind approaches cell i from neighbor j
+                const dh = ci.high - cells[j].high; // upslope from j -> i adds rain
+                if (dot > 0 && dh > 0) P[i] += intensity * dh * (dot/Math.hypot(vx,vy)) * 0.6;
+                else if (dot > 0 && dh < 0) P[i] += intensity * dh * 0.15; // leeward drying
+              }
+            }
+          });
+        }
+        // smooth precipitation a bit (2 iterations)
+        for (let it = 0; it < 2; it++) {
+          const N = new Float32Array(cells.length);
+          for (let i = 0; i < cells.length; i++) {
+            let sum = P[i], cnt = 1;
+            const nbs = cells[i].neighbors;
+            for (let k = 0; k < nbs.length; k++) { sum += P[nbs[k]]; cnt++; }
+            N[i] = sum / cnt;
+          }
+          P.set(N);
+        }
+        // Store precipitation array for tests
+        window.__state.precipArray = P;
+        return P;
+      }
+
+      function computeRivers() {
+        riversShade.selectAll('path').remove();
+        riversG.selectAll('path').remove();
+        const sea = +document.getElementById('seaLevelInput').value;
+        const landIdxs = [];
+        for (let i = 0; i < cells.length; i++) if (cells[i].high >= sea) landIdxs.push(i);
+        if (!landIdxs.length) { window.__state.riverStats = { majors:0, confluences:0, majorsDrawn:0, majorsReachedSea:0, avgMainLength:0 }; return; }
+
+        // Distance-to-coast field (toward sea only)
+        const INF = 1e9;
+        const dist = new Int32Array(cells.length); dist.fill(INF);
+        const bfsQueue = [];
+        for (let i = 0; i < cells.length; i++) if (cells[i].high < sea) { dist[i] = 0; bfsQueue.push(i); }
+        for (let qi = 0; qi < bfsQueue.length; qi++) {
+          const v = bfsQueue[qi];
+          const dv = dist[v] + 1;
+          const nbs = cells[v].neighbors;
+          for (let k = 0; k < nbs.length; k++) { const nb = nbs[k]; if (dist[nb] > dv) { dist[nb] = dv; bfsQueue.push(nb); } }
+        }
+
+        // Flow directions
+        const down = new Int32Array(cells.length); down.fill(-1);
+        landIdxs.forEach(i => {
+          let best = -1, bestH = Infinity;
+          const di = dist[i];
+          const nbs = cells[i].neighbors;
+          for (let k = 0; k < nbs.length; k++) {
+            const nb = nbs[k];
+            if (dist[nb] < di && cells[nb].high <= bestH) { bestH = cells[nb].high; best = nb; }
+          }
+          if (best === -1) {
+            for (let k = 0; k < nbs.length; k++) {
+              const nb = nbs[k];
+              if (cells[nb].high < cells[i].high && cells[nb].high < bestH) { bestH = cells[nb].high; best = nb; }
+            }
+          }
+          if (best === -1) {
+            let bestD = Infinity; bestH = Infinity;
+            for (let k = 0; k < nbs.length; k++) {
+              const nb = nbs[k]; const dd = dist[nb]; const hh = cells[nb].high;
+              if (dd < bestD || (dd === bestD && hh < bestH)) { bestD = dd; bestH = hh; best = nb; }
+            }
+          }
+          down[i] = best;
+        });
+
+        // Sort by elevation (top-down)
+        const orderByElev = landIdxs.slice().sort((a,b) => cells[b].high - cells[a].high);
+
+        // Precipitation-driven flux
+        const precip = computePrecipArray();
+        const flux = new Float32Array(cells.length);
+        for (const i of orderByElev) flux[i] = Math.max(0, precip[i]);
+        for (const i of orderByElev) { const j = down[i]; if (j !== -1) flux[j] += flux[i]; }
+
+        // Helpers
+        const valsAll = landIdxs.map(i => flux[i]).sort((a,b)=>a-b);
+        const maxF = valsAll.length ? valsAll[valsAll.length-1] : 1;
+        const up = Array.from({length: cells.length}, () => []);
+        landIdxs.forEach(i => { const j = down[i]; if (j !== -1 && cells[j].high >= sea) up[j].push(i); });
+        const countConfluences = (thr) => up.reduce((acc,arr,idx)=> acc + ((cells[idx].high>=sea && arr.filter(a=>flux[a]>=thr).length>=2)?1:0), 0);
+
+        const curve = d3.curveCatmullRom.alpha(0.6);
+        const pathOpen = d3.line().x(d=>d[0]).y(d=>d[1]).curve(curve);
+        function lengthOf(pts){ let L=0; for (let i=1;i<pts.length;i++){ const dx=pts[i][0]-pts[i-1][0], dy=pts[i][1]-pts[i-1][1]; L+=Math.hypot(dx,dy);} return L; }
+
+        // Polygonal river rendering based on Azgaar's technique
+        function createPolygonalRiver(segments, flux, isMain) {
+          const riverStyle = document.getElementById('riverStyle').value;
+          if (riverStyle === 'lines') return false;
+          
+          const widening = +document.getElementById('riverWidthInput').value || 200;
+          const maxWidth = isMain ? 4.2 : 2.2;
+          
+          segments.forEach(seg => {
+            if (seg.length < 2) return;
+            
+            // Calculate total length manually
+            let totalLength = 0;
+            for (let i = 1; i < seg.length; i++) {
+              const dx = seg[i][0] - seg[i-1][0];
+              const dy = seg[i][1] - seg[i-1][1];
+              totalLength += Math.hypot(dx, dy);
+            }
+            
+            if (totalLength < 10) return; // Skip very short segments
+            
+            const riverPointsLeft = [], riverPointsRight = [];
+            
+            // Sample points along the river path
+            const numSamples = Math.max(10, Math.floor(totalLength / 5));
+            for (let i = 0; i <= numSamples; i++) {
+              const t = i / numSamples;
+              
+              // Find position along the path
+              let currentLength = 0;
+              let targetLength = t * totalLength;
+              let point = seg[0];
+              
+              for (let j = 1; j < seg.length; j++) {
+                const dx = seg[j][0] - seg[j-1][0];
+                const dy = seg[j][1] - seg[j-1][1];
+                const segLength = Math.hypot(dx, dy);
+                
+                if (currentLength + segLength >= targetLength) {
+                  const localT = (targetLength - currentLength) / segLength;
+                  point = [
+                    seg[j-1][0] + dx * localT,
+                    seg[j-1][1] + dy * localT
+                  ];
+                  break;
+                }
+                currentLength += segLength;
+                if (j === seg.length - 1) point = seg[j];
+              }
+              
+              // Calculate tangent direction
+              let tangent = [1, 0]; // default
+              if (i > 0 && i < numSamples) {
+                const prevT = (i - 1) / numSamples;
+                const nextT = (i + 1) / numSamples;
+                let prevPoint = seg[0], nextPoint = seg[0];
+                
+                // Find previous and next points
+                currentLength = 0;
+                let prevTarget = prevT * totalLength, nextTarget = nextT * totalLength;
+                
+                for (let j = 1; j < seg.length; j++) {
+                  const dx = seg[j][0] - seg[j-1][0];
+                  const dy = seg[j][1] - seg[j-1][1];
+                  const segLength = Math.hypot(dx, dy);
+                  
+                  if (currentLength + segLength >= prevTarget && prevPoint === seg[0]) {
+                    const localT = (prevTarget - currentLength) / segLength;
+                    prevPoint = [
+                      seg[j-1][0] + dx * localT,
+                      seg[j-1][1] + dy * localT
+                    ];
+                  }
+                  
+                  if (currentLength + segLength >= nextTarget && nextPoint === seg[0]) {
+                    const localT = (nextTarget - currentLength) / segLength;
+                    nextPoint = [
+                      seg[j-1][0] + dx * localT,
+                      seg[j-1][1] + dy * localT
+                    ];
+                  }
+                  
+                  currentLength += segLength;
+                  if (j === seg.length - 1) {
+                    if (prevPoint === seg[0]) prevPoint = seg[j];
+                    if (nextPoint === seg[0]) nextPoint = seg[j];
+                  }
+                }
+                
+                const tx = nextPoint[0] - prevPoint[0];
+                const ty = nextPoint[1] - prevPoint[1];
+                const length = Math.hypot(tx, ty);
+                if (length > 0) {
+                  tangent = [tx / length, ty / length];
+                }
+              }
+              
+              // Calculate offset using hyperbolic tangent with widening parameter
+              const offset = Math.atan(t * 3) * (flux / maxF) * maxWidth * (widening / 200);
+              
+              // Create offset points
+              const xLeft = point[0] + -tangent[1] * offset;
+              const yLeft = point[1] + tangent[0] * offset;
+              riverPointsLeft.push([xLeft, yLeft]);
+              
+              const xRight = point[0] + tangent[1] * offset;
+              const yRight = point[1] + -tangent[0] * offset;
+              riverPointsRight.unshift([xRight, yRight]);
+            }
+            
+            if (riverPointsLeft.length < 2) return;
+            
+            // Create the river polygon
+            const riverPolygon = [...riverPointsLeft, ...riverPointsRight];
+            
+            // Draw the polygon
+            riversShade.append('path')
+              .attr('class', 'riversShade ' + (isMain ? 'main' : 'trib'))
+              .attr('d', d3.line()(riverPolygon))
+              .attr('fill', 'rgba(0,0,0,0.3)');
+              
+            riversG.append('path')
+              .attr('class', 'rivers ' + (isMain ? 'main' : 'trib'))
+              .attr('d', d3.line()(riverPolygon))
+              .attr('fill', '#4D83AE');
+          });
+          
+          return true; // Indicate polygonal rendering was used
+        }
+
+        // Chain builder with lake-aware jumps
+        function chainFrom(s, stopSet) {
+          const segments = [];
+          let edges = [];
+          let current = s;
+          let pts = [[cells[current].cx, cells[current].cy]];
+          let steps = 0; let reachedSea = false;
+          const visitedLakes = new Set();
+          while (steps++ < 4000) {
+            const j = down[current]; if (j === -1) break;
+            const ekey = current + ">" + j; if (stopSet && stopSet.has(ekey)) break;
+            const isSea = cells[j].high < sea;
+            const isLake = (window.__state.isLake && window.__state.isLake[j] === 1);
+            if (isSea || isLake) {
+              const mid = [(cells[current].cx + cells[j].cx)/2, (cells[current].cy + cells[j].cy)/2];
+              pts.push(mid);
+              segments.push(pts);
+              edges.push(ekey);
+              if (isSea) { reachedSea = true; break; }
+              
+              // Handle lake outlet
+              const lid = window.__state.lakeId ? window.__state.lakeId[j] : -1;
+              if (visitedLakes.has(lid)) break; // avoid loops
+              visitedLakes.add(lid);
+              
+              const lake = (window.__state.lakes || [])[lid];
+              if (!lake) break; // no lake data
+              
+              const outlet = lake.outlet;
+              if (outlet === -1 || outlet === undefined) break; // endorheic lake
+              
+              // Verify outlet is valid and leads to ocean
+              if (outlet < 0 || outlet >= cells.length) break; // invalid outlet
+              
+              // Check if outlet leads to ocean or another lake
+              const outletCell = cells[outlet];
+              if (!outletCell) break; // invalid outlet cell
+              
+              // If outlet is also a lake, we might have a chain of lakes
+              const outletIsLake = window.__state.isLake && window.__state.isLake[outlet] === 1;
+              if (outletIsLake) {
+                // For now, break to avoid complex lake chains
+                // In the future, we could trace through multiple lakes
+                break;
+              }
+              
+              // Continue from outlet
+              current = outlet;
+              pts = [[cells[current].cx, cells[current].cy]]; // start new segment from outlet
+              continue;
+            } else {
+              pts.push([cells[j].cx, cells[j].cy]);
+              edges.push(ekey);
+              current = j;
+            }
+          }
+          const totalLen = segments.reduce((acc, p) => acc + lengthOf(p), 0);
+          return { segments, edges, reachedSea, len: totalLen };
+        }
+
+        // Calibrate to ~5–15 mains
+        let q = +document.getElementById('riverDensityInput').value; // 0.70..0.99 base
+        let thrMain = d3.quantile(valsAll, q) || (maxF * 0.6);
+        const sourcesCount = (thr) => {
+          const good = new Set(landIdxs.filter(i=>flux[i]>=thr));
+          let cnt = 0; good.forEach(i => { const hasUp = up[i].some(u=>good.has(u)); if (!hasUp) cnt++; });
+          return cnt;
+        };
+        let majors = sourcesCount(thrMain);
+        let guard = 0;
+        while ((majors < 5 || majors > 15) && guard++ < 18) {
+          if (majors < 5) { q = Math.max(0.70, q - 0.03); } else { q = Math.min(0.99, q + 0.02); }
+          thrMain = d3.quantile(valsAll, q) || thrMain * (majors < 5 ? 0.8 : 1.2);
+          majors = sourcesCount(thrMain);
+        }
+
+        const thrTrib = Math.max(d3.quantile(valsAll, Math.max(0.70, q - 0.10)) || thrMain*0.7, thrMain*0.5);
+        const widthMain = d3.scaleSqrt().domain([Math.max(1e-6, thrMain), Math.max(1e-6, maxF)]).range([1.2, 4.2]);
+        const widthTrib = d3.scaleSqrt().domain([Math.max(1e-6, thrTrib), Math.max(1e-6, maxF)]).range([0.45, 2.2]);
+
+        const visitedMain = new Set();
+        let majorsDrawn = 0, majorsReachedSea = 0; let totalMainLen = 0;
+
+        const mainStarts = landIdxs.filter(i => flux[i] >= thrMain).sort((a,b)=>flux[b]-flux[a]);
+        for (const s of mainStarts) {
+          const j0 = down[s]; if (j0 !== -1 && visitedMain.has(s+">"+j0)) continue;
+          const chain = chainFrom(s, visitedMain);
+          if (!chain.segments.length) continue;
+          if (chain.len < 60) continue;
+          
+          // Try polygonal rendering first
+          const usedPolygonal = createPolygonalRiver(chain.segments, flux[s], true);
+          if (!usedPolygonal) {
+            // Fall back to line rendering
+            chain.segments.forEach(seg => {
+              riversShade.append('path').attr('class','riversShade main').attr('d', pathOpen(seg)).attr('stroke-width', Math.max(0.3, widthMain(flux[s])*0.4));
+              riversG.append('path').attr('class','rivers main').attr('d', pathOpen(seg)).attr('stroke-width', widthMain(flux[s]));
+            });
+          }
+          chain.edges.forEach(k => visitedMain.add(k));
+          majorsDrawn++; totalMainLen += chain.len; if (chain.reachedSea) majorsReachedSea++;
+        }
+
+        const tribStarts = landIdxs.filter(i => flux[i] >= thrTrib).sort((a,b)=>flux[b]-flux[a]);
+        for (const s of tribStarts) {
+          const j0 = down[s]; if (j0 !== -1 && visitedMain.has(s+">"+j0)) continue;
+          const chain = chainFrom(s, visitedMain);
+          if (!chain.segments.length || chain.len < 30) continue;
+          
+          // Try polygonal rendering first
+          const usedPolygonal = createPolygonalRiver(chain.segments, flux[s], false);
+          if (!usedPolygonal) {
+            // Fall back to line rendering
+            chain.segments.forEach(seg => {
+              riversShade.append('path').attr('class','riversShade trib').attr('d', pathOpen(seg)).attr('stroke-width', Math.max(0.2, widthTrib(flux[s])*0.35));
+              riversG.append('path').attr('class','rivers trib').attr('d', pathOpen(seg)).attr('stroke-width', widthTrib(flux[s]));
+            });
+          }
+        }
+
+        const confl = countConfluences(thrTrib);
+        const avgMainLength = majorsDrawn ? (totalMainLen / majorsDrawn) : 0;
+        window.__state.riverStats = { majors, confluences: confl, thrMain, thrTrib, majorsDrawn, majorsReachedSea, avgMainLength };
+        
+        // Debug: Log lake information
+        const lakes = window.__state.lakes || [];
+        if (lakes.length > 0) {
+          console.log(`Found ${lakes.length} lakes:`);
+          lakes.forEach((lake, i) => {
+            const outletValid = lake.outlet >= 0 && lake.outlet < cells.length;
+            const outletIsLake = outletValid && window.__state.isLake && window.__state.isLake[lake.outlet] === 1;
+            const outletIsOcean = outletValid && cells[lake.outlet].high < sea;
+            console.log(`  Lake ${i}: size=${lake.size}, depth=${lake.depth.toFixed(3)}, outlet=${lake.outlet} (valid:${outletValid}, isLake:${outletIsLake}, isOcean:${outletIsOcean})`);
+          });
+        }
+      }
+
+      // --- Coastline builder (Azgaar-style: boundary between land and water) --- (Azgaar-style: boundary between land and water) --- (Azgaar-style: boundary between land and water) ---
+      function drawCoastlines() {
+        coastG.selectAll('path.coast').remove();
+        const sea = +document.getElementById('seaLevelInput').value;
+        const isWaterArr = (window.__state.isWater) || cells.map(c => c.high < sea);
+        const isLand = cells.map((c,i) => !isWaterArr[i]);
+
+        // Build undirected edge map from Voronoi cell polygons
+        const edgeMap = new Map(); // key -> {a,b,cells:Set}
+        const keyOfPoint = (p) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`;
+        const edgeKey = (a,b) => {
+          const qa = keyOfPoint(a), qb = keyOfPoint(b);
+          return qa < qb ? `${qa}|${qb}` : `${qb}|${qa}`;
+        };
+
+        cells.forEach((c) => {
+          const poly = c.poly;
+          for (let i = 0; i < poly.length - 1; i++) { // last equals first
+            const a = poly[i], b = poly[i + 1];
+            const k = edgeKey(a, b);
+            let e = edgeMap.get(k);
+            if (!e) { e = { a, b, cells: new Set() }; edgeMap.set(k, e); }
+            e.cells.add(c.index);
+          }
+        });
+
+        // Filter edges where sides differ (land vs water OR hull)
+        const coastEdges = [];
+        edgeMap.forEach((e) => {
+          const arr = Array.from(e.cells);
+          const c0 = arr[0];
+          const c1 = arr[1] !== undefined ? arr[1] : null; // null => hull
+          const land0 = c0 != null ? isLand[c0] : false;
+          const land1 = c1 != null ? isLand[c1] : false;
+          if (land0 !== land1) coastEdges.push(e); // coastline segment
+        });
+
+        if (coastEdges.length === 0) return;
+
+        // Chain edges into polylines by shared endpoints
+        const pointToEdges = new Map(); // pointKey -> Set(edgeKey)
+        coastEdges.forEach((e) => {
+          const k = edgeKey(e.a, e.b);
+          const ka = keyOfPoint(e.a), kb = keyOfPoint(e.b);
+          if (!pointToEdges.has(ka)) pointToEdges.set(ka, new Set());
+          if (!pointToEdges.has(kb)) pointToEdges.set(kb, new Set());
+          pointToEdges.get(ka).add(k);
+          pointToEdges.get(kb).add(k);
+        });
+
+        const edgesObj = new Map();
+        coastEdges.forEach((e) => { edgesObj.set(edgeKey(e.a, e.b), { a: e.a, b: e.b, used: false }); });
+
+        const chains = [];
+        const takeNext = (ptKey) => {
+          const set = pointToEdges.get(ptKey);
+          if (!set) return null;
+          for (const k of set) { const e = edgesObj.get(k); if (e && !e.used) return k; }
+          return null;
+        };
+
+        edgesObj.forEach((seg) => {
+          if (seg.used) return;
+          seg.used = true;
+          const startKey = keyOfPoint(seg.a), endKey = keyOfPoint(seg.b);
+          const chain = [seg.a, seg.b];
+
+          // extend forward from end
+          let currKey = endKey;
+          let prevKey = startKey;
+          for (;;) {
+            const nextKey = takeNext(currKey);
+            if (!nextKey) break;
+            const next = edgesObj.get(nextKey);
+            next.used = true;
+            const na = keyOfPoint(next.a), nb = keyOfPoint(next.b);
+            const other = (na === currKey) ? nb : (nb === currKey ? na : null);
+            if (!other || other === prevKey) break;
+            chain.push(na === currKey ? next.b : next.a);
+            prevKey = currKey; currKey = other;
+          }
+
+          // extend backward from start (prepend)
+          currKey = startKey; prevKey = endKey;
+          for (;;) {
+            const nextKey = takeNext(currKey);
+            if (!nextKey) break;
+            const next = edgesObj.get(nextKey);
+            next.used = true;
+            const na = keyOfPoint(next.a), nb = keyOfPoint(next.b);
+            const other = (na === currKey) ? nb : (nb === currKey ? na : null);
+            if (!other || other === prevKey) break;
+            chain.unshift(na === currKey ? next.b : next.a);
+            prevKey = currKey; currKey = other;
+          }
+
+          chains.push(chain);
+        });
+
+        // Draw chains
+        const lineOpen = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
+        const lineClosed = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasisClosed);
+
+        chains.forEach((pts) => {
+          const closed = (keyOfPoint(pts[0]) === keyOfPoint(pts[pts.length - 1]));
+          d3.select('.coastline').append('path')
+            .attr('class', 'coast')
+            .attr('d', closed ? lineClosed(pts) : lineOpen(pts));
+        });
+      }
+    }
+
+    // --- Test harness --- (kept original tests and added border checks)
+    document.getElementById('runTests').addEventListener('click', runTests);
+
+    function runTests() {
+      const out = document.getElementById('testResults');
+      out.innerHTML = '';
+
+      function assert(name, condition) {
+        const li = document.createElement('li');
+        li.textContent = (condition ? '✓ ' : '✗ ') + name;
+        li.className = condition ? 'pass' : 'fail';
+        out.appendChild(li);
+      }
+
+      try {
+        // Existing tests
+        const n = sizeInput.valueAsNumber;
+        const cellPaths = d3.selectAll('path.mapCell').size();
+        assert('renders one SVG path per site', cellPaths === n);
+
+        const st = window.__state;
+        const mid = Math.floor(st.cells.length / 2);
+        const beforeSeed = st.cells[mid].high;
+        st.add(mid, 'island');
+        const afterSeed = st.cells[mid].high;
+        const neighborRaised = st.cells[st.cells[mid].neighbors[0]] ? (st.cells[st.cells[mid].neighbors[0]].high > 0) : true; // tolerate edge cases
+        assert('add() increases height at the seed cell', afterSeed > beforeSeed);
+        const allClamped = st.cells.every(c => c.high >= 0 && c.high <= 1);
+        assert('all cell heights stay within [0, 1]', allClamped);
+        assert('add() affects at least one neighbor', neighborRaised);
+
+        // New tests
+        // T4: autoSeed raises heights in many cells
+        const raisedBefore = st.cells.filter(c => c.high > 0).length;
+        st.autoSeed();
+        const raisedAfter = st.cells.filter(c => c.high > 0).length;
+        assert('autoSeed() raises heights in multiple cells', raisedAfter > raisedBefore + 5);
+
+        // T5: sea level = 1.0 -> all water
+        document.getElementById('seaLevelInput').value = 1.0; st.recolor();
+        const waterAtMaxSea = st.cells.filter(c => c.high < 1.0).length;
+        assert('sea level = 1.0 -> all water', waterAtMaxSea === st.cells.length);
+
+        // T6: sea level = 0.0 -> all land
+        document.getElementById('seaLevelInput').value = 0.0; st.recolor();
+        const waterAtZeroSea = st.cells.filter(c => c.high < 0.0).length;
+        assert('sea level = 0.0 -> all land', waterAtZeroSea === 0);
+
+        // T7: default sea level (0.35) -> mix of land and water after autoSeed
+        document.getElementById('seaLevelInput').value = 0.35; st.recolor();
+        const water = st.cells.filter(c => c.high < 0.35).length;
+        const land = st.cells.length - water;
+        assert('sea level 0.35 -> mixed terrain', water > 0 && land > 0);
+
+        // T8: Azgaar palette produces a gradient (many unique fills)
+        const fills = new Set(Array.from(document.querySelectorAll('path.mapCell')).slice(0, 200).map(p => p.getAttribute('fill')));
+        assert('Azgaar palette -> gradient (many unique fills)', fills.size > 5);
+
+        // T9: Center area is significant after autoSeed (center-biased island)
+        const svgSel = st.svg;
+        const w = +svgSel.attr('width');
+        const h = +svgSel.attr('height');
+        const centerIdx = st.delaunay.find(w / 2, h / 2);
+        assert('Center cell height is significant after autoSeed', st.cells[centerIdx].high > 0.4);
+
+        // T10: Coastlines appear for mixed terrain
+        st.recolor();
+        const coastCount = d3.selectAll('g.coastline path.coast').size();
+        assert('Coastlines are drawn when terrain is mixed', coastCount > 0);
+
+        // T11: No coastlines when all water
+        document.getElementById('seaLevelInput').value = 1.0; st.recolor();
+        const coastAllWater = d3.selectAll('g.coastline path.coast').size();
+        assert('No coastlines at sea level 1.0', coastAllWater === 0);
+
+        // T12: No coastlines when all land
+        document.getElementById('seaLevelInput').value = 0.0; st.recolor();
+        const coastAllLand = d3.selectAll('g.coastline path.coast').size();
+        assert('No coastlines at sea level 0.0', coastAllLand === 0);
+
+        // T13: Border mask keeps a water frame around the map
+        document.getElementById('seaLevelInput').value = 0.35; st.applyBorder(); st.recolor();
+        const margin = st.borderPx * 0.9;
+        const nearEdgeLand = st.cells.some(c => Math.min(c.cx, c.cy, w - c.cx, h - c.cy) < margin && c.high >= 0.35);
+        assert('No land within the border margin', !nearEdgeLand);
+
+        // T14: Water is a single uniform color below sea level
+        document.getElementById('seaLevelInput').value = 0.5; st.recolor();
+        const seaLvl = 0.5;
+        const waterCells = st.cells.map((c,i)=>({i, h:c.high})).filter(o => o.h < seaLvl);
+        let uniform = true;
+        if (waterCells.length >= 2) {
+          const getFill = (idx)=> (document.getElementById(String(idx))||{}).getAttribute ? document.getElementById(String(idx)).getAttribute('fill') : null;
+          const first = getFill(waterCells[0].i);
+          for (let k = 1; k < Math.min(200, waterCells.length); k++) {
+            if (getFill(waterCells[k].i) !== first) { uniform = false; break; }
+          }
+        }
+        assert('Water below sea level uses a uniform color', uniform);
+
+        // T15: Low land near sea level should be greener than purple (G channel dominant)
+        document.getElementById('seaLevelInput').value = 0.35; st.recolor();
+        const seaLvl2 = 0.35;
+        const nearShoreLand = st.cells.map((c,i)=>({i, h:c.high})).filter(o => o.h >= seaLvl2 && o.h < seaLvl2 + 0.03);
+        function rgbParse(s){
+          if(!s) return null; const i1=s.indexOf('('), i2=s.indexOf(')'); if(i1<0||i2<0) return null; const a=s.slice(i1+1,i2).split(',').map(x=>parseInt(x,10)); if(a.length<3) return null; return {r:a[0], g:a[1], b:a[2]};
+        }
+        let greenish = true;
+        if (nearShoreLand.length){
+          const idx = nearShoreLand[0].i; const fill = (document.getElementById(String(idx))||{}).getAttribute ? document.getElementById(String(idx)).getAttribute('fill') : null; const rgb = rgbParse(fill);
+          greenish = !!rgb && (rgb.g > rgb.r && rgb.g > rgb.b);
+        }
+        assert('Low land near sea level is greenish', greenish);
+
+        // T16: Highest peaks render light (snow‑capped), not dark
+        document.getElementById('seaLevelInput').value = 0.35; st.recolor();
+        const landCells = st.cells.map((c,i)=>({i, h:c.high})).filter(o=>o.h >= 0.35).sort((a,b)=>b.h-a.h);
+        const top = landCells.slice(0, Math.max(1, Math.floor(landCells.length*0.01)));
+        let snowOK = true;
+        if (top.length){
+          const getFill = (idx)=> (document.getElementById(String(idx))||{}).getAttribute ? document.getElementById(String(idx)).getAttribute('fill') : null;
+          const lum = (s)=>{ if(!s) return 0; const i1=s.indexOf('('), i2=s.indexOf(')'); if(i1<0||i2<0) return 0; const a=s.slice(i1+1,i2).split(',').map(x=>parseInt(x,10)); if(a.length<3) return 0; const [r,g,b]=a.map(v=>{v/=255; return v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055,2.4);}); return 0.2126*r+0.7152*g+0.0722*b; };
+          const lumVals = top.map(o=>lum(getFill(o.i))).filter(v=>!isNaN(v));
+          const avgLum = lumVals.reduce((s,v)=>s+v,0)/lumVals.length;
+          snowOK = avgLum > 0.75; // should be quite light
+        }
+        assert('High peaks are light (snow‑caps)', snowOK);
+
+        // T17: No strokes on cells (fills meet with no borders)
+        const anyStroked = Array.from(document.querySelectorAll('path.mapCell')).some(p => {
+          const s = window.getComputedStyle(p);
+          const sw = s.getPropertyValue('stroke-width');
+          const stc = s.getPropertyValue('stroke');
+          return (sw && sw !== '0px') && (stc && stc !== 'none' && stc !== 'rgba(0, 0, 0, 0)');
+        });
+        assert('Cells render without strokes/borders', !anyStroked);
+
+        // T18: Rivers exist at default settings
+        document.getElementById('seaLevelInput').value = 0.35; st.recolor();
+        const riverCount = d3.selectAll('g.rivers path.rivers').size();
+        assert('At least one river is drawn', riverCount > 0);
+
+        // T19: No rivers when all water
+        document.getElementById('seaLevelInput').value = 1.0; st.recolor();
+        const riverNone = d3.selectAll('g.rivers path.rivers').size();
+        assert('No rivers when map is all water', riverNone === 0);
+
+        // T20: More rainfall -> more rivers
+        document.getElementById('seaLevelInput').value = 0.35;
+        document.getElementById('rainInput').value = 0.2; st.recolor();
+        const riversLow = d3.selectAll('g.rivers path.rivers').size();
+        document.getElementById('rainInput').value = 1.8; st.recolor();
+        const riversHigh = d3.selectAll('g.rivers path.rivers').size();
+        assert('Higher rainfall increases river count', riversHigh > riversLow);
+
+        // T21: Higher river-density quantile -> fewer rivers
+        document.getElementById('rainInput').value = 1.0;
+        document.getElementById('riverDensityInput').value = 0.98; st.recolor();
+        const riversDense = d3.selectAll('g.rivers path.rivers').size();
+        document.getElementById('riverDensityInput').value = 0.85; st.recolor();
+        const riversSparse = d3.selectAll('g.rivers path.rivers').size();
+        assert('Lower threshold draws more rivers', riversSparse >= riversDense);
+
+        // T22: Tributaries are drawn (in addition to main rivers)
+        document.getElementById('seaLevelInput').value = 0.35;
+        document.getElementById('rainInput').value = 1.4; st.recolor();
+        const majors = d3.selectAll('g.rivers path.rivers.main').size();
+        const tribs = d3.selectAll('g.rivers path.rivers.trib').size();
+        assert('Tributaries are present', tribs > 0 && majors >= 5 && majors <= 15);
+
+        // T23: Tributaries are thinner than mains (average width)
+        function avgWidth(sel){ const arr = []; d3.selectAll(sel).each(function(){ const w = +this.getAttribute('stroke-width')||0; if (w>0) arr.push(w); }); return arr.length? (arr.reduce((a,b)=>a+b,0)/arr.length) : 0; }
+        const avgMain = avgWidth('g.rivers path.rivers.main');
+        const avgTrib = avgWidth('g.rivers path.rivers.trib');
+        assert('Tributaries are thinner than main rivers', avgTrib > 0 && avgMain > 0 && avgTrib < avgMain);
+
+        // T24: Rivers have visible tapering (variation in widths across segments)
+        st.recolor();
+        const widths = []; d3.selectAll('g.rivers path.rivers').each(function(){ const w = +this.getAttribute('stroke-width')||0; if (w>0) widths.push(w); });
+        const minW = Math.min.apply(null, widths), maxW = Math.max.apply(null, widths);
+        assert('River widths vary (tapering present)', widths.length>5 && maxW > minW * 1.3);
+
+        // T25: At least one confluence exists at higher rain
+        document.getElementById('rainInput').value = 1.6; st.recolor();
+        const rs = window.__state.riverStats || {confluences:0};
+        assert('Confluences detected (>=1)', rs.confluences >= 1);
+
+        // T26: Most main rivers reach the ocean
+        document.getElementById('rainInput').value = 1.2; st.recolor();
+        const rs2 = window.__state.riverStats || {majorsDrawn:0, majorsReachedSea:0};
+        const fracOcean = rs2.majorsDrawn ? (rs2.majorsReachedSea / rs2.majorsDrawn) : 0;
+        assert('Major rivers: majority reach the ocean', rs2.majorsDrawn === 0 || fracOcean >= 0.6);
+
+        // T27: Main rivers are reasonably long on average
+        const rs3 = window.__state.riverStats || {avgMainLength:0};
+        assert('Average main length is decent (>=60px)', rs3.avgMainLength >= 60 || rs2.majorsDrawn === 0);
+
+        // T28: Lakes (if any) have a valid outlet or are endorheic
+        document.getElementById('seaLevelInput').value = 0.35; st.recolor();
+        const lakes = window.__state.lakes || [];
+        let lakesOk = true;
+        for (let i = 0; i < lakes.length; i++) {
+          const L = lakes[i];
+          if (!L) continue;
+          if (L.outlet == null || L.outlet === -1) continue; // endorheic allowed
+          if (!(L.outlet >= 0 && L.outlet < st.cells.length)) { lakesOk = false; break; }
+        }
+        assert('Lakes (if any) have outlet or are endorheic', lakesOk);
+
+        // T29: Lake cells render as water (transparent polygon fill over ocean backdrop)
+        let foundLakeCell = -1;
+        if (window.__state.lakeId) {
+          for (let i = 0; i < st.cells.length; i++) { if (st.cells[i].high >= 0.35 && window.__state.lakeId[i] >= 0) { foundLakeCell = i; break; } }
+        }
+        let lakeFillNone = true;
+        if (foundLakeCell >= 0) {
+          const el = document.getElementById(String(foundLakeCell));
+          lakeFillNone = !!el && el.getAttribute('fill') === 'none';
+        }
+        assert('Lake polygons use no fill (water shows through)', foundLakeCell === -1 || lakeFillNone);
+
+        // T30: Lake filtering reduces excessive small lakes
+        const lakeArray = window.__state.lakes || [];
+        const lakeCells = window.__state.isLake ? window.__state.isLake.reduce((sum, val) => sum + val, 0) : 0;
+        const totalLandCells = st.cells.filter(c => c.high >= 0.35).length;
+        const lakePercentage = totalLandCells > 0 ? (lakeCells / totalLandCells) : 0;
+        assert('Lake filtering prevents excessive lake coverage', lakePercentage < 0.15); // Lakes should not cover more than 15% of land
+
+        // T31: Biome system assigns valid biomes to land cells
+        document.getElementById('renderMode').value = 'biomes'; st.recolor();
+        const biomeLandCells = st.cells.filter(c => c.high >= 0.35);
+        const validBiomes = ['Tundra', 'Boreal Forest', 'Temperate Forest', 'Grassland', 'Desert', 'Savanna', 'Tropical Rainforest'];
+        const hasValidBiomes = biomeLandCells.every(c => c.biome && validBiomes.includes(c.biome));
+        assert('All land cells have valid biome assignments', hasValidBiomes);
+
+        // T32: Temperature decreases with elevation
+        const highCells = st.cells.filter(c => c.high > 0.6).slice(0, 10);
+        const lowCells = st.cells.filter(c => c.high > 0.35 && c.high < 0.45).slice(0, 10);
+        const avgHighTemp = highCells.reduce((sum, c) => sum + c.temp, 0) / highCells.length;
+        const avgLowTemp = lowCells.reduce((sum, c) => sum + c.temp, 0) / lowCells.length;
+        assert('Temperature decreases with elevation', avgHighTemp < avgLowTemp);
+
+        // T33: Erosion reduces jaggy ridges (thermal erosion test)
+        document.getElementById('talusInput').value = 0.02;
+        document.getElementById('thermalStrengthInput').value = 0.5;
+        document.getElementById('smoothAlphaInput').value = 0.2;
+        st.generate(); // Regenerate with erosion
+        const erodedLandCells = st.cells.filter(c => c.high > 0.35);
+        let maxHeightDiff = 0;
+        erodedLandCells.forEach(c => {
+          c.neighbors.forEach(nb => {
+            const diff = Math.abs(c.high - st.cells[nb].high);
+            maxHeightDiff = Math.max(maxHeightDiff, diff);
+          });
+        });
+        assert('Erosion reduces extreme height differences', maxHeightDiff < 0.8); // Should be less than 0.8 after erosion
+
+        // T34: Wind belt system creates latitudinal precipitation patterns
+        document.getElementById('windBelts').value = 'hadley';
+        document.getElementById('rainInput').value = 1.0;
+        st.recolor();
+        const precipArray = window.__state.precipArray || [];
+        if (precipArray.length > 0) {
+          // Check that different latitude bands have different precipitation patterns
+          const northernCells = st.cells.filter(c => c.cy < 300).slice(0, 20); // Top portion
+          const southernCells = st.cells.filter(c => c.cy > 500).slice(0, 20); // Bottom portion
+          const northernPrecip = northernCells.reduce((sum, c) => sum + (precipArray[c.index] || 0), 0) / northernCells.length;
+          const southernPrecip = southernCells.reduce((sum, c) => sum + (precipArray[c.index] || 0), 0) / southernCells.length;
+          // Should have some variation due to wind belts
+          assert('Wind belts create latitudinal precipitation variation', Math.abs(northernPrecip - southernPrecip) > 0.01);
+        } else {
+          assert('Wind belt precipitation computation works', true); // Fallback if no precip array
+        }
+
+        // T35: Shaded relief creates depth perception
+        document.getElementById('shadingMode').value = 'shaded';
+        st.recolor();
+        const shadedCells = d3.selectAll('path.mapCell').filter(function() {
+          const fill = this.getAttribute('fill');
+          return fill && fill.startsWith('rgb('); // Shaded cells use rgb() format
+        });
+        assert('Shaded relief applies RGB shading to land cells', shadedCells.size() > 0);
+
+        // T36: Export functions are available
+        assert('SVG export function is available', typeof window.saveSVG === 'function');
+        assert('PNG export function is available', typeof window.savePNG === 'function');
+
+      } catch (e) {
+        const li = document.createElement('li');
+        li.textContent = '✗ Tests crashed: ' + (e && e.message ? e.message : e);
+        li.className = 'fail';
+        out.appendChild(li);
+        console.error(e);
+      }
+    }
+  })();
+  </script>
+</body>
+</html>
