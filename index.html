@@ -29,11 +29,138 @@
     #routes .searoutes { stroke: #cfe9ff; stroke-width: 1.2px; fill: none; stroke-dasharray: 6 4; mix-blend-mode: overlay; }
     /* ensure export-friendly */
     #routes path { vector-effect: non-scaling-stroke; }
+
+    /* Modal styles */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.5);
+    }
+
+    .modal-content {
+      background-color: #fefefe;
+      margin: 5% auto;
+      padding: 0;
+      border: 1px solid #888;
+      border-radius: 8px;
+      width: 80%;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px 20px;
+      border-bottom: 1px solid #ddd;
+      background-color: #f8f9fa;
+      border-radius: 8px 8px 0 0;
+    }
+
+    .modal-header h2 {
+      margin: 0;
+      color: #333;
+      font-size: 1.5em;
+    }
+
+    .close {
+      color: #aaa;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .close:hover {
+      color: #000;
+    }
+
+    .modal-body {
+      padding: 20px;
+    }
+
+    .settings-tabs {
+      display: flex;
+      border-bottom: 1px solid #ddd;
+      margin-bottom: 20px;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      padding: 10px 20px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      font-size: 14px;
+      color: #666;
+    }
+
+    .tab-btn:hover {
+      background-color: #f0f0f0;
+    }
+
+    .tab-btn.active {
+      color: #333;
+      border-bottom-color: #007bff;
+      font-weight: bold;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .hint {
+      opacity: 0.7;
+      font-size: 0.9em;
+      color: #666;
+      margin-left: 8px;
+    }
+
+    .primary-btn {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .primary-btn:hover {
+      background-color: #0056b3;
+    }
+
+    .settings-btn {
+      background-color: #6c757d;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .settings-btn:hover {
+      background-color: #545b62;
+    }
   </style>
 </head>
 <body>
   <div style="display: flex; gap: 20px; align-items: flex-start;">
-    <svg width="640" height="360" role="img" aria-label="Voronoi heightmap canvas"></svg>
+    <div style="flex: 1; min-width: 0;">
+      <svg id="map" width="1280" height="560" viewBox="0 0 1280 560" role="img" aria-label="Voronoi heightmap canvas" style="width: 100%; height: auto; max-width: none;"></svg>
+    </div>
     
     <div id="biomeLegend" style="display: none; min-width: 200px; background: rgba(255,255,255,0.9); padding: 10px; border-radius: 8px; border: 1px solid #ccc;">
       <h4 style="margin: 0 0 10px 0; font-size: 14px;">Biome Legend</h4>
@@ -43,240 +170,255 @@
 
   <div class="controls">
     <div class="row">
-      <button onclick="generate()">Generate Map</button>
+      <button onclick="generate()" class="primary-btn">Generate Map</button>
+      <button onclick="toggleSettings()" class="settings-btn">⚙️ Settings</button>
     </div>
 
     <div class="row">
-      <label>Graph Size:</label>
-      <input id="sizeInput" value="10000" type="range" min="100" max="10000" step="100" oninput="sizeOutput.value = sizeInput.valueAsNumber">
-      <output id="sizeOutput">10000</output>
+      <button onclick="saveSVG(document.querySelector('svg'), 'voronoi_map.svg')">Export SVG</button>
+      <button onclick="savePNG(document.querySelector('svg'), 1280, 560, 'voronoi_map.png')">Export PNG</button>
     </div>
+  </div>
 
-    <div class="row">
-      <label>Max High:</label>
-      <input id="highInput" value="0.9" type="range" min="0.1" max="1" step="0.01" oninput="highOutput.value = highInput.valueAsNumber">
-      <output id="highOutput">0.9</output>
-    </div>
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Map Settings</h2>
+        <span class="close" onclick="toggleSettings()">&times;</span>
+      </div>
+      
+      <div class="modal-body">
+        <div class="settings-tabs">
+          <button class="tab-btn active" onclick="showTab('terrain')">Terrain</button>
+          <button class="tab-btn" onclick="showTab('climate')">Climate</button>
+          <button class="tab-btn" onclick="showTab('settlements')">Settlements</button>
+          <button class="tab-btn" onclick="showTab('routes')">Routes</button>
+        </div>
 
-    <div class="row">
-      <label>Radius:</label>
-      <input id="radiusInput" value="0.9" type="range" min="0.5" max="0.999" step="0.001" oninput="radiusOutput.value = radiusInput.valueAsNumber">
-      <output id="radiusOutput">0.9</output> (change gently!)
-    </div>
+        <!-- Terrain Tab -->
+        <div id="terrain-tab" class="tab-content active">
+          <div class="row">
+            <label>Graph Size:</label>
+            <input id="sizeInput" value="10000" type="range" min="100" max="10000" step="100" oninput="sizeOutput.value = sizeInput.valueAsNumber">
+            <output id="sizeOutput">10000</output>
+          </div>
 
-    <div class="row">
-      <label>Sharpness:</label>
-      <input id="sharpnessInput" value="0.2" type="range" min="0" max="0.5" step="0.1" oninput="sharpnessOutput.value = sharpnessInput.valueAsNumber">
-      <output id="sharpnessOutput">0.2</output>
-    </div>
+          <div class="row">
+            <label>Max High:</label>
+            <input id="highInput" value="0.9" type="range" min="0.1" max="1" step="0.01" oninput="highOutput.value = highInput.valueAsNumber">
+            <output id="highOutput">0.9</output>
+          </div>
 
-    <hr>
+          <div class="row">
+            <label>Radius:</label>
+            <input id="radiusInput" value="0.9" type="range" min="0.5" max="0.999" step="0.001" oninput="radiusOutput.value = radiusInput.valueAsNumber">
+            <output id="radiusOutput">0.9</output>
+            <span class="hint">(change gently!)</span>
+          </div>
 
-    <div class="row">
-      <label># small hills:</label>
-      <input id="smallCountInput" value="20" type="range" min="0" max="60" step="1" oninput="smallCountOutput.value = smallCountInput.valueAsNumber">
-      <output id="smallCountOutput">20</output>
-      <span style="opacity:.7">(auto‑seeded)</span>
-    </div>
+          <div class="row">
+            <label>Sharpness:</label>
+            <input id="sharpnessInput" value="0.2" type="range" min="0" max="0.5" step="0.1" oninput="sharpnessOutput.value = sharpnessInput.valueAsNumber">
+            <output id="sharpnessOutput">0.2</output>
+          </div>
 
-    <div class="row">
-      <label>Sea level:</label>
-      <input id="seaLevelInput" value="0.35" type="range" min="0" max="1" step="0.01" oninput="seaLevelOutput.value = seaLevelInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="seaLevelOutput">0.35</output>
-    </div>
+          <div class="row">
+            <label># Small Hills:</label>
+            <input id="smallCountInput" value="20" type="range" min="0" max="60" step="1" oninput="smallCountOutput.value = smallCountInput.valueAsNumber">
+            <output id="smallCountOutput">20</output>
+            <span class="hint">(auto‑seeded)</span>
+          </div>
 
-    <div class="row">
-      <label>Water border (% of min dimension):</label>
-      <input id="borderPctInput" value="8" type="range" min="2" max="20" step="1" oninput="borderPctOutput.value = borderPctInput.valueAsNumber; 
-        /* new controls */
-        if (window.rainOutput) rainOutput.value = rainInput.valueAsNumber;
-        if (window.riverDensityOutput) riverDensityOutput.value = riverDensityInput.valueAsNumber; __state.applyBorder && __state.applyBorder(); __state.recolor && __state.recolor();">
-      <output id="borderPctOutput">8</output>
-    </div>
+          <div class="row">
+            <label>Sea Level:</label>
+            <input id="seaLevelInput" value="0.35" type="range" min="0" max="1" step="0.01" oninput="seaLevelOutput.value = seaLevelInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="seaLevelOutput">0.35</output>
+          </div>
 
-    <div class="row">
-      <label>Rainfall:</label>
-      <input id="rainInput" value="1.0" type="range" min="0" max="2" step="0.05" oninput="rainOutput.value = rainInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="rainOutput">1.0</output>
-    </div>
+          <div class="row">
+            <label>Water Border (%):</label>
+            <input id="borderPctInput" value="8" type="range" min="2" max="20" step="1" oninput="borderPctOutput.value = borderPctInput.valueAsNumber; __state.applyBorder && __state.applyBorder(); __state.recolor && __state.recolor();">
+            <output id="borderPctOutput">8</output>
+          </div>
 
-    <div class="row">
-      <label>Wind Belts:</label>
-      <select id="windBelts" onchange="__state.recolor && __state.recolor();">
-        <option value="none" selected>None (Random)</option>
-        <option value="hadley">Hadley/Ferrel/Polar</option>
-      </select>
-    </div>
+          <div class="row">
+            <label>Min Lake Size:</label>
+            <input id="minLakeSizeInput" value="3" type="range" min="1" max="10" step="1" oninput="minLakeSizeOutput.value = minLakeSizeInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="minLakeSizeOutput">3</output>
+          </div>
 
-    <div class="row">
-      <label>River density (quantile):</label>
-      <input id="riverDensityInput" value="0.90" type="range" min="0.70" max="0.99" step="0.01" oninput="riverDensityOutput.value = riverDensityInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="riverDensityOutput">0.90</output>
-    </div>
+          <div class="row">
+            <label>Min Lake Depth:</label>
+            <input id="minLakeDepthInput" value="0.05" type="range" min="0.01" max="0.15" step="0.01" oninput="minLakeDepthOutput.value = minLakeDepthInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="minLakeDepthOutput">0.05</output>
+          </div>
 
-    <hr>
+          <div class="row">
+            <label>World Type:</label>
+            <select id="worldType" onchange="generate();">
+              <option value="island" selected>Single Island</option>
+              <option value="continents">Continents</option>
+            </select>
+          </div>
 
-    <div class="row">
-      <label>Min lake size (cells):</label>
-      <input id="minLakeSizeInput" value="3" type="range" min="1" max="10" step="1" oninput="minLakeSizeOutput.value = minLakeSizeInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="minLakeSizeOutput">3</output>
-    </div>
+          <div class="row">
+            <label>Thermal Erosion (Talus):</label>
+            <input id="talusInput" value="0.02" type="range" min="0.01" max="0.05" step="0.005" oninput="talusOutput.value = talusInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="talusOutput">0.02</output>
+          </div>
 
-    <div class="row">
-      <label>Min lake depth:</label>
-      <input id="minLakeDepthInput" value="0.05" type="range" min="0.01" max="0.15" step="0.01" oninput="minLakeDepthOutput.value = minLakeDepthInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="minLakeDepthOutput">0.05</output>
-    </div>
+          <div class="row">
+            <label>Thermal Erosion (Strength):</label>
+            <input id="thermalStrengthInput" value="0.5" type="range" min="0.1" max="1.0" step="0.1" oninput="thermalStrengthOutput.value = thermalStrengthInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="thermalStrengthOutput">0.5</output>
+          </div>
 
-    <hr>
+          <div class="row">
+            <label>Land Smoothing (Alpha):</label>
+            <input id="smoothAlphaInput" value="0.2" type="range" min="0.05" max="0.5" step="0.05" oninput="smoothAlphaOutput.value = smoothAlphaInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="smoothAlphaOutput">0.2</output>
+          </div>
 
-    <div class="row">
-      <label>Base Temperature (°F):</label>
-      <input id="baseTempInput" value="67" type="range" min="41" max="77" step="1" oninput="baseTempOutput.value = baseTempInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="baseTempOutput">67</output>
-    </div>
+          <div class="row">
+            <label>River Style:</label>
+            <select id="riverStyle" onchange="__state.recolor && __state.recolor();">
+              <option value="lines">Lines</option>
+              <option value="polygons" selected>Polygonal</option>
+            </select>
+          </div>
 
-    <div class="row">
-      <label>Precipitation Scale:</label>
-      <input id="precipScaleInput" value="1.1" type="range" min="0.1" max="2.0" step="0.1" oninput="precipScaleOutput.value = precipScaleInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="precipScaleOutput">1.1</output>
-    </div>
+          <div class="row">
+            <label>River Width:</label>
+            <input id="riverWidthInput" value="200" type="range" min="50" max="400" step="10" oninput="riverWidthOutput.value = riverWidthInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="riverWidthOutput">200</output>
+          </div>
+        </div>
 
-    <div class="row">
-      <label>World Type:</label>
-      <select id="worldType" onchange="generate();">
-        <option value="island" selected>Single Island</option>
-        <option value="continents">Continents</option>
-      </select>
-    </div>
+        <!-- Climate Tab -->
+        <div id="climate-tab" class="tab-content">
+          <div class="row">
+            <label>Rainfall:</label>
+            <input id="rainInput" value="1.0" type="range" min="0" max="2" step="0.05" oninput="rainOutput.value = rainInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="rainOutput">1.0</output>
+          </div>
 
-    <hr>
+          <div class="row">
+            <label>Wind Belts:</label>
+            <select id="windBelts" onchange="__state.recolor && __state.recolor();">
+              <option value="none" selected>None (Random)</option>
+              <option value="hadley">Hadley/Ferrel/Polar</option>
+            </select>
+          </div>
 
-    <div class="row">
-      <label>Thermal Erosion (Talus):</label>
-      <input id="talusInput" value="0.02" type="range" min="0.01" max="0.05" step="0.005" oninput="talusOutput.value = talusInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="talusOutput">0.02</output>
-    </div>
+          <div class="row">
+            <label>River Density:</label>
+            <input id="riverDensityInput" value="0.90" type="range" min="0.70" max="0.99" step="0.01" oninput="riverDensityOutput.value = riverDensityInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="riverDensityOutput">0.90</output>
+          </div>
 
-    <div class="row">
-      <label>Thermal Erosion (Strength):</label>
-      <input id="thermalStrengthInput" value="0.5" type="range" min="0.1" max="1.0" step="0.1" oninput="thermalStrengthOutput.value = thermalStrengthInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="thermalStrengthOutput">0.5</output>
-    </div>
+          <div class="row">
+            <label>Base Temperature (°F):</label>
+            <input id="baseTempInput" value="67" type="range" min="41" max="77" step="1" oninput="baseTempOutput.value = baseTempInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="baseTempOutput">67</output>
+          </div>
 
-    <div class="row">
-      <label>Land Smoothing (Alpha):</label>
-      <input id="smoothAlphaInput" value="0.2" type="range" min="0.05" max="0.5" step="0.05" oninput="smoothAlphaOutput.value = smoothAlphaInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="smoothAlphaOutput">0.2</output>
-    </div>
+          <div class="row">
+            <label>Precipitation Scale:</label>
+            <input id="precipScaleInput" value="1.1" type="range" min="0.1" max="2.0" step="0.1" oninput="precipScaleOutput.value = precipScaleInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <output id="precipScaleOutput">1.1</output>
+          </div>
 
-    <div class="row">
-      <label>River Style:</label>
-      <select id="riverStyle" onchange="__state.recolor && __state.recolor();">
-        <option value="lines">Lines</option>
-        <option value="polygons" selected>Polygonal</option>
-      </select>
-    </div>
+          <div class="row">
+            <label>Render Mode:</label>
+            <select id="renderMode" onchange="__state.recolor && __state.recolor();">
+              <option value="heightmap" selected>Heightmap</option>
+              <option value="biomes">Biomes</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
+          </div>
 
-    <div class="row">
-      <label>River Width:</label>
-      <input id="riverWidthInput" value="200" type="range" min="50" max="400" step="10" oninput="riverWidthOutput.value = riverWidthInput.valueAsNumber; __state.recolor && __state.recolor();">
-      <output id="riverWidthOutput">200</output>
-    </div>
+          <div class="row">
+            <label>Shaded Relief:</label>
+            <select id="shadingMode" onchange="__state.recolor && __state.recolor();">
+              <option value="none" selected>None</option>
+              <option value="shaded">Shaded</option>
+            </select>
+          </div>
+        </div>
 
-    <hr>
+        <!-- Settlements Tab -->
+        <div id="settlements-tab" class="tab-content">
+          <div class="row">
+            <label>Burgs Count:</label>
+            <input id="burgsCountInput" value="15" type="range" min="0" max="50" step="1" oninput="burgsCountOutput.value = burgsCountInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+            <output id="burgsCountOutput">15</output>
+          </div>
 
-    <div class="row">
-      <label>Burgs Count:</label>
-      <input id="burgsCountInput" value="15" type="range" min="0" max="50" step="1" oninput="burgsCountOutput.value = burgsCountInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-      <output id="burgsCountOutput">15</output>
-    </div>
+          <div class="row">
+            <label>Burg Spacing (px):</label>
+            <input id="burgSpacingInput" value="12" type="range" min="8" max="20" step="1" oninput="burgSpacingOutput.value = burgSpacingInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+            <output id="burgSpacingOutput">12</output>
+          </div>
 
-    <div class="row">
-      <label>Burg Spacing (px):</label>
-      <input id="burgSpacingInput" value="12" type="range" min="8" max="20" step="1" oninput="burgSpacingOutput.value = burgSpacingInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-      <output id="burgSpacingOutput">12</output>
-    </div>
+          <div class="row">
+            <label>River Weight:</label>
+            <input id="riverWeightInput" value="0.4" type="range" min="0" max="1" step="0.1" oninput="riverWeightOutput.value = riverWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+            <output id="riverWeightOutput">0.4</output>
+          </div>
 
-    <div class="row">
-      <label>River Weight:</label>
-      <input id="riverWeightInput" value="0.4" type="range" min="0" max="1" step="0.1" oninput="riverWeightOutput.value = riverWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-      <output id="riverWeightOutput">0.4</output>
-    </div>
+          <div class="row">
+            <label>Coast Weight:</label>
+            <input id="coastWeightInput" value="0.3" type="range" min="0" max="1" step="0.1" oninput="coastWeightOutput.value = coastWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+            <output id="coastWeightOutput">0.3</output>
+          </div>
 
-    <div class="row">
-      <label>Coast Weight:</label>
-      <input id="coastWeightInput" value="0.3" type="range" min="0" max="1" step="0.1" oninput="coastWeightOutput.value = coastWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-      <output id="coastWeightOutput">0.3</output>
-    </div>
+          <div class="row">
+            <label>Flatness Weight:</label>
+            <input id="flatnessWeightInput" value="0.2" type="range" min="0" max="1" step="0.1" oninput="flatnessWeightOutput.value = flatnessWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+            <output id="flatnessWeightOutput">0.2</output>
+          </div>
 
-    <div class="row">
-      <label>Flatness Weight:</label>
-      <input id="flatnessWeightInput" value="0.2" type="range" min="0" max="1" step="0.1" oninput="flatnessWeightOutput.value = flatnessWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-      <output id="flatnessWeightOutput">0.2</output>
-    </div>
+          <div class="row">
+            <label>Fertility Weight:</label>
+            <input id="fertilityWeightInput" value="0.1" type="range" min="0" max="1" step="0.1" oninput="fertilityWeightOutput.value = fertilityWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+            <output id="fertilityWeightOutput">0.1</output>
+          </div>
+        </div>
 
-    <div class="row">
-      <label>Fertility Weight:</label>
-      <input id="fertilityWeightInput" value="0.1" type="range" min="0" max="1" step="0.1" oninput="fertilityWeightOutput.value = fertilityWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-      <output id="fertilityWeightOutput">0.1</output>
-    </div>
+        <!-- Routes Tab -->
+        <div id="routes-tab" class="tab-content">
+          <div class="row">
+            <label>Road Density (Primary):</label>
+            <input id="roadDensityInput" value="0.6" type="range" min="0" max="1" step="0.05" oninput="roadDensityOutput.value = roadDensityInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+            <output id="roadDensityOutput">0.6</output>
+          </div>
 
-    <hr>
+          <div class="row">
+            <label>Trail Density (Local):</label>
+            <input id="trailDensityInput" value="0.5" type="range" min="0" max="1" step="0.05" oninput="trailDensityOutput.value = trailDensityInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+            <output id="trailDensityOutput">0.5</output>
+          </div>
 
-    <div class="row">
-      <label>Road Density (Primary links):</label>
-      <input id="roadDensityInput" value="0.6" type="range" min="0" max="1" step="0.05" oninput="roadDensityOutput.value = roadDensityInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
-      <output id="roadDensityOutput">0.6</output>
-    </div>
+          <div class="row">
+            <label>Slope Penalty:</label>
+            <input id="slopePenaltyInput" value="1.2" type="range" min="0" max="3" step="0.1" oninput="slopePenaltyOutput.value = slopePenaltyInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+            <output id="slopePenaltyOutput">1.2</output>
+          </div>
 
-    <div class="row">
-      <label>Trail Density (Local links):</label>
-      <input id="trailDensityInput" value="0.5" type="range" min="0" max="1" step="0.05" oninput="trailDensityOutput.value = trailDensityInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
-      <output id="trailDensityOutput">0.5</output>
-    </div>
+          <div class="row">
+            <label>River Crossing Penalty:</label>
+            <input id="riverPenaltyInput" value="1.0" type="range" min="0" max="3" step="0.1" oninput="riverPenaltyOutput.value = riverPenaltyInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+            <output id="riverPenaltyOutput">1.0</output>
+          </div>
 
-    <div class="row">
-      <label>Slope Penalty:</label>
-      <input id="slopePenaltyInput" value="1.2" type="range" min="0" max="3" step="0.1" oninput="slopePenaltyOutput.value = slopePenaltyInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
-      <output id="slopePenaltyOutput">1.2</output>
-    </div>
-
-    <div class="row">
-      <label>River Crossing Penalty:</label>
-      <input id="riverPenaltyInput" value="1.0" type="range" min="0" max="3" step="0.1" oninput="riverPenaltyOutput.value = riverPenaltyInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
-      <output id="riverPenaltyOutput">1.0</output>
-    </div>
-
-    <div class="row">
-      <label>Sea Routes:</label>
-      <input id="seaRoutesOnInput" type="checkbox" checked onchange="__state.computeRoutes && __state.computeRoutes();">
-      <span style="margin-left: 8px;">Enable sea routes</span>
-    </div>
-
-    <div class="row">
-      <label>Render Mode:</label>
-      <select id="renderMode" onchange="__state.recolor && __state.recolor();">
-        <option value="heightmap" selected>Heightmap</option>
-        <option value="biomes">Biomes</option>
-        <option value="hybrid">Hybrid</option>
-      </select>
-    </div>
-
-    <div class="row">
-      <label>Shaded Relief:</label>
-      <select id="shadingMode" onchange="__state.recolor && __state.recolor();">
-        <option value="none" selected>None</option>
-        <option value="shaded">Shaded</option>
-      </select>
-    </div>
-
-    <hr>
-
-    <div class="row">
-      <label>Export:</label>
-      <button id="exportSVG" onclick="saveSVG(document.querySelector('svg'), 'voronoi_map.svg')">Export SVG</button>
-      <button id="exportPNG" onclick="savePNG(document.querySelector('svg'), 1920, 1080, 'voronoi_map.png')">Export PNG</button>
+          <div class="row">
+            <label>Sea Routes:</label>
+            <input id="seaRoutesOnInput" type="checkbox" checked onchange="__state.computeRoutes && __state.computeRoutes();">
+            <span style="margin-left: 8px;">Enable sea routes</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -292,6 +434,14 @@
   <script src="https://d3js.org/d3.v7.min.js"></script>
 
   <script>
+    // Map size management function
+    function setMapSize(w, h) {
+      const svg = d3.select('#map');
+      svg.attr('width', w).attr('height', h).attr('viewBox', `0 0 ${w} ${h}`);
+      const canvas = document.getElementById('canvas');
+      if (canvas) { canvas.width = w; canvas.height = h; }
+    }
+
   (function () {
     'use strict';
 
@@ -3800,6 +3950,60 @@
         console.error(e);
       }
     }
+
+    // Modal and tab functionality
+    window.toggleSettings = function() {
+      const modal = document.getElementById('settingsModal');
+      if (modal.style.display === 'block') {
+        modal.style.display = 'none';
+      } else {
+        modal.style.display = 'block';
+      }
+    }
+
+    window.showTab = function(tabName) {
+      // Hide all tab contents
+      const tabContents = document.querySelectorAll('.tab-content');
+      tabContents.forEach(content => {
+        content.classList.remove('active');
+      });
+
+      // Remove active class from all tab buttons
+      const tabButtons = document.querySelectorAll('.tab-btn');
+      tabButtons.forEach(btn => {
+        btn.classList.remove('active');
+      });
+
+      // Show selected tab content
+      const selectedTab = document.getElementById(tabName + '-tab');
+      if (selectedTab) {
+        selectedTab.classList.add('active');
+      }
+
+      // Add active class to selected tab button
+      const selectedButton = document.querySelector(`[onclick="showTab('${tabName}')"]`);
+      if (selectedButton) {
+        selectedButton.classList.add('active');
+      }
+    }
+
+    // Close modal when clicking outside of it
+    window.onclick = function(event) {
+      const modal = document.getElementById('settingsModal');
+      if (event.target === modal) {
+        modal.style.display = 'none';
+      }
+    }
+
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') {
+        const modal = document.getElementById('settingsModal');
+        if (modal.style.display === 'block') {
+          modal.style.display = 'none';
+        }
+      }
+    });
   })();
   </script>
 </body>
