@@ -177,6 +177,44 @@
       <output id="riverWidthOutput">200</output>
     </div>
 
+    <hr>
+
+    <div class="row">
+      <label>Burgs Count:</label>
+      <input id="burgsCountInput" value="15" type="range" min="0" max="50" step="1" oninput="burgsCountOutput.value = burgsCountInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+      <output id="burgsCountOutput">15</output>
+    </div>
+
+    <div class="row">
+      <label>Burg Spacing (px):</label>
+      <input id="burgSpacingInput" value="12" type="range" min="8" max="20" step="1" oninput="burgSpacingOutput.value = burgSpacingInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+      <output id="burgSpacingOutput">12</output>
+    </div>
+
+    <div class="row">
+      <label>River Weight:</label>
+      <input id="riverWeightInput" value="0.4" type="range" min="0" max="1" step="0.1" oninput="riverWeightOutput.value = riverWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+      <output id="riverWeightOutput">0.4</output>
+    </div>
+
+    <div class="row">
+      <label>Coast Weight:</label>
+      <input id="coastWeightInput" value="0.3" type="range" min="0" max="1" step="0.1" oninput="coastWeightOutput.value = coastWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+      <output id="coastWeightOutput">0.3</output>
+    </div>
+
+    <div class="row">
+      <label>Flatness Weight:</label>
+      <input id="flatnessWeightInput" value="0.2" type="range" min="0" max="1" step="0.1" oninput="flatnessWeightOutput.value = flatnessWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+      <output id="flatnessWeightOutput">0.2</output>
+    </div>
+
+    <div class="row">
+      <label>Fertility Weight:</label>
+      <input id="fertilityWeightInput" value="0.1" type="range" min="0" max="1" step="0.1" oninput="fertilityWeightOutput.value = fertilityWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+      <output id="fertilityWeightOutput">0.1</output>
+    </div>
+
     <div class="row">
       <label>Render Mode:</label>
       <select id="renderMode" onchange="__state.recolor && __state.recolor();">
@@ -225,11 +263,28 @@
     window.generate = generate;
 
     // State we expose for tests/debugging
-    window.__state = { cells: null, delaunay: null, voronoi: null, svg: null, add: null, recolor: null, autoSeed: null, drawCoastlines: null, applyBorder: null, borderPx: 0, generate: generate };
+    window.__state = { cells: null, delaunay: null, voronoi: null, svg: null, add: null, recolor: null, autoSeed: null, drawCoastlines: null, applyBorder: null, borderPx: 0, generate: generate, burgs: [] };
 
     // Export functions (will be defined later)
     window.saveSVG = null;
     window.savePNG = null;
+
+    // Burg data model and generation constants
+    const BURG_TYPES = {
+      hamlet: { radius: 1.5, population: 100 },
+      town: { radius: 2.5, population: 1000 },
+      city: { radius: 3.5, population: 10000 },
+      capital: { radius: 4.5, population: 50000 },
+      port: { radius: 2.5, population: 2000 }
+    };
+
+    // Simple name generation (placeholder - can be enhanced with culture-based names)
+    const BURG_NAMES = [
+      'Riverton', 'Harborview', 'Stonebridge', 'Greenfield', 'Ironforge',
+      'Silverport', 'Goldcrest', 'Blackwood', 'Whitecliff', 'Redhaven',
+      'Bluewater', 'Fairview', 'Highland', 'Lowland', 'Midtown',
+      'Northport', 'Southgate', 'Eastside', 'Westend', 'Central'
+    ];
 
     // initialize outputs to match inputs
     sizeOutput.value = sizeInput.valueAsNumber;
@@ -247,12 +302,22 @@
     talusOutput.value = talusInput.valueAsNumber;
     thermalStrengthOutput.value = thermalStrengthInput.valueAsNumber;
     smoothAlphaOutput.value = smoothAlphaInput.valueAsNumber;
+    burgsCountOutput.value = burgsCountInput.valueAsNumber;
+    burgSpacingOutput.value = burgSpacingInput.valueAsNumber;
+    riverWeightOutput.value = riverWeightInput.valueAsNumber;
+    coastWeightOutput.value = coastWeightInput.valueAsNumber;
+    flatnessWeightOutput.value = flatnessWeightInput.valueAsNumber;
+    fertilityWeightOutput.value = fertilityWeightInput.valueAsNumber;
 
     generate();
 
     function generate() {
       d3.select('.mapCells').remove();
       d3.select('.coastline').remove();
+      d3.select('#burgs').remove();
+      
+      // Clear burgs from state
+      window.__state.burgs = [];
 
       const svg = d3.select('svg');
       // Solid ocean backdrop to eliminate water seam artifacts (anti-aliasing between polygons)
@@ -268,6 +333,7 @@
       const riversShade = svg.append('g').attr('class', 'riversShade');
       const riversG = svg.append('g').attr('class', 'rivers');
       const coastG = svg.append('g').attr('class', 'coastline');
+      const burgsG = svg.append('g').attr('id', 'burgs');
 
       const width = +svg.attr('width');
       const height = +svg.attr('height');
@@ -339,6 +405,8 @@
       window.__state.drawCoastlines = drawCoastlines;
       window.__state.applyBorder = applyBorderMask;
       window.__state.computeRivers = computeRivers;
+      window.__state.generateBurgs = generateBurgs;
+      window.__state.renderBurgs = renderBurgs;
 
       // Auto-generate: center island + N small hills
       autoSeed();
@@ -799,6 +867,7 @@
           });
         computeRivers();
         drawCoastlines();
+        generateBurgs();
         
         // Update the biome legend
         updateBiomeLegend();
@@ -1014,6 +1083,51 @@
               el.setAttribute('stroke-linejoin', 'round');
             }
           }
+          
+          // Special handling for burg elements to ensure they're visible
+          if (el.classList && el.classList.contains('burg')) {
+            // Burg groups don't need special handling, but their children do
+          }
+          
+          // Special handling for burg circles
+          if (el.tagName === 'circle' && el.parentElement && el.parentElement.classList && el.parentElement.classList.contains('burg')) {
+            // Ensure burg circles have proper attributes
+            if (!el.hasAttribute('fill') && !el.style.fill) {
+              el.setAttribute('fill', '#ff0000');
+            }
+            if (!el.hasAttribute('stroke') && !el.style.stroke) {
+              el.setAttribute('stroke', '#fff');
+            }
+            if (!el.hasAttribute('stroke-width') && !el.style.strokeWidth) {
+              el.setAttribute('stroke-width', '0.6');
+            }
+            if (!el.hasAttribute('paint-order') && !el.style.paintOrder) {
+              el.setAttribute('paint-order', 'stroke fill');
+            }
+            if (!el.hasAttribute('vector-effect') && !el.style.vectorEffect) {
+              el.setAttribute('vector-effect', 'non-scaling-stroke');
+            }
+          }
+          
+          // Special handling for burg port rectangles
+          if (el.tagName === 'rect' && el.parentElement && el.parentElement.classList && el.parentElement.classList.contains('burg')) {
+            // Ensure port rectangles have proper attributes
+            if (!el.hasAttribute('fill') && !el.style.fill) {
+              el.setAttribute('fill', '#4D83AE');
+            }
+            if (!el.hasAttribute('stroke') && !el.style.stroke) {
+              el.setAttribute('stroke', '#fff');
+            }
+            if (!el.hasAttribute('stroke-width') && !el.style.strokeWidth) {
+              el.setAttribute('stroke-width', '0.3');
+            }
+            if (!el.hasAttribute('paint-order') && !el.style.paintOrder) {
+              el.setAttribute('paint-order', 'stroke fill');
+            }
+            if (!el.hasAttribute('vector-effect') && !el.style.vectorEffect) {
+              el.setAttribute('vector-effect', 'non-scaling-stroke');
+            }
+          }
 
           // Opacities (element-level)
           const op = cs.opacity; if (op && op !== '1') el.setAttribute('opacity', op);
@@ -1053,6 +1167,19 @@
             // Check again after computing
             const newCoastlines = svgNode.querySelectorAll('g.coastline path.coast');
             console.log(`Coastlines after computing: ${newCoastlines.length} paths`);
+          }
+        }
+        
+        // Debug: Check if burgs exist before export
+        const originalBurgs = svgNode.querySelectorAll('#burgs g.burg');
+        console.log(`Original burgs before export: ${originalBurgs.length} burgs`);
+        if (originalBurgs.length === 0) {
+          console.log('No burgs found! Computing burgs...');
+          if (window.__state.generateBurgs) {
+            window.__state.generateBurgs();
+            // Check again after computing
+            const newBurgs = svgNode.querySelectorAll('#burgs g.burg');
+            console.log(`Burgs after computing: ${newBurgs.length} burgs`);
           }
         }
         
@@ -1115,6 +1242,17 @@
           }
         });
         
+        // Debug: Check burg elements
+        const burgGroups = clone.querySelectorAll('#burgs');
+        console.log(`Found ${burgGroups.length} burg groups in clone:`, burgGroups);
+        burgGroups.forEach((group, i) => {
+          const burgs = group.querySelectorAll('g.burg');
+          console.log(`Burg group ${i}: ${burgs.length} burgs`);
+          if (burgs.length > 0) {
+            console.log('Sample burg:', burgs[0].outerHTML);
+          }
+        });
+        
         // ensure inline styles/fonts if needed
         const svgText = new XMLSerializer().serializeToString(clone);
         const blob = new Blob([svgText], {type: 'image/svg+xml;charset=utf-8'});
@@ -1141,6 +1279,19 @@
             // Check again after computing
             const newCoastlines = svgNode.querySelectorAll('g.coastline path.coast');
             console.log(`Coastlines after computing: ${newCoastlines.length} paths`);
+          }
+        }
+        
+        // Debug: Check if burgs exist before export
+        const originalBurgs = svgNode.querySelectorAll('#burgs g.burg');
+        console.log(`Original burgs before PNG export: ${originalBurgs.length} burgs`);
+        if (originalBurgs.length === 0) {
+          console.log('No burgs found! Computing burgs...');
+          if (window.__state.generateBurgs) {
+            window.__state.generateBurgs();
+            // Check again after computing
+            const newBurgs = svgNode.querySelectorAll('#burgs g.burg');
+            console.log(`Burgs after computing: ${newBurgs.length} burgs`);
           }
         }
         
@@ -1930,6 +2081,289 @@
       }
     }
 
+    // --- Burgs (Settlements) System ---
+
+    /**
+     * Score a cell for settlement placement based on various factors
+     * @param {Object} cell - The cell to score
+     * @param {Array} cells - All cells array
+     * @param {number} sea - Sea level
+     * @returns {number} Score between 0 and 1
+     */
+    function scoreCellForSettlement(cell, cells, sea) {
+      const riverWeight = +document.getElementById('riverWeightInput').value || 0.4;
+      const coastWeight = +document.getElementById('coastWeightInput').value || 0.3;
+      const flatnessWeight = +document.getElementById('flatnessWeightInput').value || 0.2;
+      const fertilityWeight = +document.getElementById('fertilityWeightInput').value || 0.1;
+
+      // Skip water cells
+      if (cell.high < sea) return 0;
+      
+      // Skip very high peaks (too steep for settlements)
+      if (cell.high > 0.8) return 0;
+
+      let riverProximity = 0;
+      let coastProximity = 0;
+      let flatness = 0;
+      let fertility = 1; // Default fertility
+
+      // Calculate river proximity (check neighbors for rivers)
+      // Look for cells that are water but not lakes (i.e., rivers)
+      let riverNeighbors = 0;
+      cell.neighbors.forEach(nb => {
+        const neighborCell = cells[nb];
+        // Check if neighbor is water but not a lake
+        const isWater = neighborCell.high < sea;
+        const isLake = window.__state.isLake && window.__state.isLake[nb] === 1;
+        if (isWater && !isLake) {
+          riverNeighbors++;
+        }
+      });
+      riverProximity = Math.min(1, riverNeighbors / cell.neighbors.length * 3);
+
+      // Calculate coast proximity (distance to water)
+      let minWaterDist = Infinity;
+      for (let i = 0; i < cells.length; i++) {
+        if (cells[i].high < sea) {
+          const dist = Math.hypot(cell.cx - cells[i].cx, cell.cy - cells[i].cy);
+          minWaterDist = Math.min(minWaterDist, dist);
+        }
+      }
+      coastProximity = Math.max(0, 1 - minWaterDist / 100); // Prefer cells within 100px of coast
+
+      // Calculate flatness (inverse of slope)
+      let maxSlope = 0;
+      cell.neighbors.forEach(nb => {
+        const slope = Math.abs(cell.high - cells[nb].high);
+        maxSlope = Math.max(maxSlope, slope);
+      });
+      flatness = Math.max(0, 1 - maxSlope * 5); // Prefer flatter areas
+
+      // Calculate fertility (use precipitation if available)
+      if (window.__state.precipArray) {
+        fertility = Math.min(1, window.__state.precipArray[cell.index] || 0.5);
+      }
+
+      // Combine scores with weights
+      const score = riverWeight * riverProximity + 
+                   coastWeight * coastProximity + 
+                   flatnessWeight * flatness + 
+                   fertilityWeight * fertility;
+
+      // Debug: Log some sample scores
+      if (Math.random() < 0.01) { // Log 1% of cells for debugging
+        console.log(`Cell ${cell.index} scores - River: ${riverProximity.toFixed(2)}, Coast: ${coastProximity.toFixed(2)}, Flat: ${flatness.toFixed(2)}, Fert: ${fertility.toFixed(2)}, Total: ${score.toFixed(2)}`);
+      }
+
+      return Math.max(0, Math.min(1, score));
+    }
+
+    /**
+     * Poisson disk sampling for burg placement
+     * @param {Array} candidates - Array of {cell, score} objects
+     * @param {number} radiusPx - Minimum distance between burgs in pixels
+     * @returns {Array} Spaced subset of candidates
+     */
+    function poissonSample(candidates, radiusPx) {
+      const accepted = [];
+      const rejected = [];
+      
+      // Sort by score (highest first)
+      const sorted = candidates.sort((a, b) => b.score - a.score);
+      
+      for (const candidate of sorted) {
+        let tooClose = false;
+        
+        // Check distance to all accepted burgs
+        for (const acceptedBurg of accepted) {
+          const dist = Math.hypot(
+            candidate.cell.cx - acceptedBurg.cell.cx,
+            candidate.cell.cy - acceptedBurg.cell.cy
+          );
+          if (dist < radiusPx) {
+            tooClose = true;
+            break;
+          }
+        }
+        
+        if (!tooClose) {
+          accepted.push(candidate);
+        } else {
+          rejected.push(candidate);
+        }
+      }
+      
+      return accepted;
+    }
+
+    /**
+     * Create a burg object from a cell
+     * @param {Object} cell - The cell to place the burg on
+     * @param {Array} cells - All cells array
+     * @param {number} sea - Sea level
+     * @returns {Object} Burg object
+     */
+    function placeBurg(cell, cells, sea) {
+      const id = window.__state.burgs.length;
+      
+      // Determine if it's a port (near coast)
+      let isPort = false;
+      let minWaterDist = Infinity;
+      for (let i = 0; i < cells.length; i++) {
+        if (cells[i].high < sea) {
+          const dist = Math.hypot(cell.cx - cells[i].cx, cell.cy - cells[i].cy);
+          minWaterDist = Math.min(minWaterDist, dist);
+        }
+      }
+      isPort = minWaterDist < 30; // Within 30px of water
+
+      // Determine if it's on a river
+      let onRiver = false;
+      cell.neighbors.forEach(nb => {
+        const neighborCell = cells[nb];
+        // Check if neighbor is water but not a lake
+        const isWater = neighborCell.high < sea;
+        const isLake = window.__state.isLake && window.__state.isLake[nb] === 1;
+        if (isWater && !isLake) {
+          onRiver = true;
+        }
+      });
+
+      // Determine type and population
+      let type = 'town';
+      let population = 1000;
+      
+      if (isPort) {
+        type = 'port';
+        population = 2000;
+      } else if (onRiver) {
+        population = 1500;
+      }
+
+      // Generate name
+      const name = BURG_NAMES[id % BURG_NAMES.length] + (id > BURG_NAMES.length - 1 ? ` ${Math.floor(id / BURG_NAMES.length) + 1}` : '');
+
+      return {
+        id: id,
+        x: cell.cx,
+        y: cell.cy,
+        cell: cell.index,
+        cultureId: null, // Will be assigned in Regions phase
+        countryId: null, // Will be assigned in Regions phase
+        population: population,
+        type: type,
+        port: isPort,
+        onRiver: onRiver,
+        name: name
+      };
+    }
+
+    /**
+     * Generate burgs based on current settings
+     */
+    function generateBurgs() {
+      const count = +document.getElementById('burgsCountInput').value || 15;
+      const radiusPx = +document.getElementById('burgSpacingInput').value || 12;
+      const sea = +document.getElementById('seaLevelInput').value;
+      const cells = window.__state.cells;
+      
+      console.log(`Generating ${count} burgs with spacing ${radiusPx}px`);
+
+      // Get land cells
+      const landCells = cells.filter(c => c.high >= sea && c.high <= 0.8);
+      console.log(`Found ${landCells.length} land cells suitable for burgs`);
+      
+      if (landCells.length === 0) {
+        console.log('No suitable land cells for burgs');
+        window.__state.burgs = [];
+        renderBurgs();
+        return;
+      }
+
+      // Score all land cells
+      const candidates = landCells.map(cell => ({
+        cell: cell,
+        score: scoreCellForSettlement(cell, cells, sea)
+      }));
+
+      // Filter out low-scoring cells
+      const goodCandidates = candidates.filter(c => c.score > 0.1);
+      console.log(`Found ${goodCandidates.length} cells with good scores (>0.1)`);
+      
+      if (goodCandidates.length === 0) {
+        console.log('No suitable cells found for burgs');
+        window.__state.burgs = [];
+        renderBurgs();
+        return;
+      }
+
+      // Apply Poisson disk sampling
+      const spaced = poissonSample(goodCandidates, radiusPx);
+      console.log(`After spacing, ${spaced.length} candidates remain`);
+      
+      // Take top N by score
+      const picked = spaced.slice(0, count);
+      console.log(`Selected ${picked.length} burgs from candidates`);
+      
+      // Create burg objects
+      window.__state.burgs = picked.map(p => placeBurg(p.cell, cells, sea));
+      
+      console.log(`Generated ${window.__state.burgs.length} burgs`);
+      
+      // Render the burgs
+      renderBurgs();
+    }
+
+    /**
+     * Render burgs using D3 data-join
+     */
+    function renderBurgs() {
+      const burgsG = d3.select('#burgs');
+      console.log(`Rendering ${window.__state.burgs ? window.__state.burgs.length : 0} burgs`);
+      
+      // Clear existing burgs
+      burgsG.selectAll('*').remove();
+      
+      if (!window.__state.burgs || window.__state.burgs.length === 0) {
+        console.log('No burgs to render');
+        return;
+      }
+
+      // Create burg symbols
+      const burgs = burgsG.selectAll('g.burg')
+        .data(window.__state.burgs, d => d.id)
+        .enter()
+        .append('g')
+        .attr('class', 'burg')
+        .attr('data-burg-id', d => d.id);
+
+      // Add circles for burg symbols
+      burgs.append('circle')
+        .attr('cx', d => d.x)
+        .attr('cy', d => d.y)
+        .attr('r', d => BURG_TYPES[d.type] ? BURG_TYPES[d.type].radius : 2.5)
+        .attr('fill', '#ff0000')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', '0.6')
+        .attr('paint-order', 'stroke fill')
+        .attr('vector-effect', 'non-scaling-stroke');
+
+      // Add port symbols for ports
+      burgs.filter(d => d.port)
+        .append('rect')
+        .attr('x', d => d.x - 1.5)
+        .attr('y', d => d.y - 1.5)
+        .attr('width', 3)
+        .attr('height', 3)
+        .attr('fill', '#4D83AE')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', '0.3')
+        .attr('paint-order', 'stroke fill')
+        .attr('vector-effect', 'non-scaling-stroke');
+
+      console.log(`Rendered ${window.__state.burgs.length} burgs`);
+    }
+
     // --- Test harness --- (kept original tests and added border checks)
     document.getElementById('runTests').addEventListener('click', runTests);
 
@@ -2235,6 +2669,25 @@
         assert('Coastline groups exist in SVG', coastlineGroups.length > 0);
         assert('Coastline paths are rendered', coastlinePaths.length > 0);
         
+        // T38.6: Burgs are properly computed and rendered
+        const burgGroups = svg.querySelectorAll('#burgs');
+        const burgs = svg.querySelectorAll('#burgs g.burg');
+        assert('Burg groups exist in SVG', burgGroups.length > 0);
+        assert('Burgs are rendered', burgs.length > 0);
+        
+        // T38.7: Burgs have proper styling
+        if (burgs.length > 0) {
+          const sampleBurg = burgs[0];
+          const circle = sampleBurg.querySelector('circle');
+          assert('Burgs have circle elements', !!circle);
+          if (circle) {
+            const hasFill = circle.hasAttribute('fill');
+            const hasStroke = circle.hasAttribute('stroke');
+            const hasStrokeWidth = circle.hasAttribute('stroke-width');
+            assert('Burg circles have proper styling', hasFill && hasStroke && hasStrokeWidth);
+          }
+        }
+        
         // Check that rivers have proper styling
         if (riverPaths.length > 0) {
           const samplePath = riverPaths[0];
@@ -2277,6 +2730,24 @@
           const hasStroke = samplePath.hasAttribute('stroke') || samplePath.style.stroke;
           const hasStrokeWidth = samplePath.hasAttribute('stroke-width') || samplePath.style.strokeWidth;
           assert('Coastline paths have stroke attributes inlined', hasStroke || hasStrokeWidth);
+        }
+        
+        // T40: Burgs are properly exported
+        const exportBurgGroups = clone.querySelectorAll('#burgs');
+        const exportBurgs = clone.querySelectorAll('#burgs g.burg');
+        assert('Burg groups are present in export clone', exportBurgGroups.length > 0);
+        assert('Burgs are present in export clone', exportBurgs.length > 0);
+        
+        // Check that burg styles are properly inlined
+        if (exportBurgs.length > 0) {
+          const sampleBurg = exportBurgs[0];
+          const circle = sampleBurg.querySelector('circle');
+          if (circle) {
+            const hasFill = circle.hasAttribute('fill') || circle.style.fill;
+            const hasStroke = circle.hasAttribute('stroke') || circle.style.stroke;
+            const hasStrokeWidth = circle.hasAttribute('stroke-width') || circle.style.strokeWidth;
+            assert('Burg circles have style attributes inlined', hasFill && hasStroke && hasStrokeWidth);
+          }
         }
 
       } catch (e) {
