@@ -998,6 +998,22 @@
               el.setAttribute('stroke-width', '1');
             }
           }
+          
+          // Special handling for coastline elements to ensure they're visible
+          if (el.classList && el.classList.contains('coast')) {
+            // Ensure coastline paths have proper stroke attributes
+            if (!el.hasAttribute('stroke') && !el.style.stroke) {
+              el.setAttribute('stroke', '#111');
+            }
+            // Ensure coastline paths have stroke-width if not set
+            if (!el.hasAttribute('stroke-width') && !el.style.strokeWidth) {
+              el.setAttribute('stroke-width', '0.6px');
+            }
+            // Ensure coastline paths have stroke-linejoin if not set
+            if (!el.hasAttribute('stroke-linejoin') && !el.style.strokeLinejoin) {
+              el.setAttribute('stroke-linejoin', 'round');
+            }
+          }
 
           // Opacities (element-level)
           const op = cs.opacity; if (op && op !== '1') el.setAttribute('opacity', op);
@@ -1024,6 +1040,19 @@
           console.log('No rivers found! Computing rivers...');
           if (window.__state.computeRivers) {
             window.__state.computeRivers();
+          }
+        }
+        
+        // Debug: Check if coastlines exist before export
+        const originalCoastlines = svgNode.querySelectorAll('g.coastline path.coast');
+        console.log(`Original coastlines before export: ${originalCoastlines.length} paths`);
+        if (originalCoastlines.length === 0) {
+          console.log('No coastlines found! Computing coastlines...');
+          if (window.__state.drawCoastlines) {
+            window.__state.drawCoastlines();
+            // Check again after computing
+            const newCoastlines = svgNode.querySelectorAll('g.coastline path.coast');
+            console.log(`Coastlines after computing: ${newCoastlines.length} paths`);
           }
         }
         
@@ -1075,6 +1104,17 @@
           }
         });
         
+        // Debug: Check coastline elements
+        const coastlineGroups = clone.querySelectorAll('g.coastline');
+        console.log(`Found ${coastlineGroups.length} coastline groups in clone:`, coastlineGroups);
+        coastlineGroups.forEach((group, i) => {
+          const paths = group.querySelectorAll('path.coast');
+          console.log(`Coastline group ${i} (${group.className.baseVal}): ${paths.length} paths`);
+          if (paths.length > 0) {
+            console.log('Sample coastline path:', paths[0].outerHTML);
+          }
+        });
+        
         // ensure inline styles/fonts if needed
         const svgText = new XMLSerializer().serializeToString(clone);
         const blob = new Blob([svgText], {type: 'image/svg+xml;charset=utf-8'});
@@ -1089,6 +1129,19 @@
         // Ensure the map is properly colored before export
         if (window.__state.recolor) {
           window.__state.recolor();
+        }
+        
+        // Debug: Check if coastlines exist before export
+        const originalCoastlines = svgNode.querySelectorAll('g.coastline path.coast');
+        console.log(`Original coastlines before PNG export: ${originalCoastlines.length} paths`);
+        if (originalCoastlines.length === 0) {
+          console.log('No coastlines found! Computing coastlines...');
+          if (window.__state.drawCoastlines) {
+            window.__state.drawCoastlines();
+            // Check again after computing
+            const newCoastlines = svgNode.querySelectorAll('g.coastline path.coast');
+            console.log(`Coastlines after computing: ${newCoastlines.length} paths`);
+          }
         }
         
         // Create a clone and prepare for canvas rasterization
@@ -1762,6 +1815,8 @@
         const sea = +document.getElementById('seaLevelInput').value;
         const isWaterArr = (window.__state.isWater) || cells.map(c => c.high < sea);
         const isLand = cells.map((c,i) => !isWaterArr[i]);
+        
+        console.log(`Drawing coastlines - Sea level: ${sea}, Land cells: ${isLand.filter(l => l).length}, Water cells: ${isWaterArr.filter(w => w).length}`);
 
         // Build undirected edge map from Voronoi cell polygons
         const edgeMap = new Map(); // key -> {a,b,cells:Set}
@@ -1793,6 +1848,7 @@
           if (land0 !== land1) coastEdges.push(e); // coastline segment
         });
 
+        console.log(`Found ${coastEdges.length} coastline edges`);
         if (coastEdges.length === 0) return;
 
         // Chain edges into polylines by shared endpoints
@@ -1859,12 +1915,18 @@
         const lineOpen = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
         const lineClosed = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasisClosed);
 
+        console.log(`Created ${chains.length} coastline chains`);
         chains.forEach((pts) => {
           const closed = (keyOfPoint(pts[0]) === keyOfPoint(pts[pts.length - 1]));
-          d3.select('.coastline').append('path')
+          coastG.append('path')
             .attr('class', 'coast')
-            .attr('d', closed ? lineClosed(pts) : lineOpen(pts));
+            .attr('d', closed ? lineClosed(pts) : lineOpen(pts))
+            .attr('fill', 'none')
+            .attr('stroke', '#111')
+            .attr('stroke-width', '0.6px')
+            .attr('stroke-linejoin', 'round');
         });
+        console.log(`Drew ${chains.length} coastline paths`);
       }
     }
 
@@ -2167,6 +2229,12 @@
         assert('River groups exist in SVG', riverGroups.length > 0);
         assert('River paths are rendered', riverPaths.length > 0);
         
+        // T38.5: Coastlines are properly computed and rendered
+        const coastlineGroups = svg.querySelectorAll('g.coastline');
+        const coastlinePaths = svg.querySelectorAll('g.coastline path.coast');
+        assert('Coastline groups exist in SVG', coastlineGroups.length > 0);
+        assert('Coastline paths are rendered', coastlinePaths.length > 0);
+        
         // Check that rivers have proper styling
         if (riverPaths.length > 0) {
           const samplePath = riverPaths[0];
@@ -2195,6 +2263,20 @@
           const hasStroke = samplePath.hasAttribute('stroke') || samplePath.style.stroke;
           const hasStrokeWidth = samplePath.hasAttribute('stroke-width') || samplePath.style.strokeWidth;
           assert('River paths have stroke attributes inlined', hasStroke || hasStrokeWidth);
+        }
+        
+        // T39: Coastlines are properly exported
+        const exportCoastlineGroups = clone.querySelectorAll('g.coastline');
+        const exportCoastlinePaths = clone.querySelectorAll('g.coastline path.coast');
+        assert('Coastline groups are present in export clone', exportCoastlineGroups.length > 0);
+        assert('Coastline paths are present in export clone', exportCoastlinePaths.length > 0);
+        
+        // Check that coastline styles are properly inlined
+        if (exportCoastlinePaths.length > 0) {
+          const samplePath = exportCoastlinePaths[0];
+          const hasStroke = samplePath.hasAttribute('stroke') || samplePath.style.stroke;
+          const hasStrokeWidth = samplePath.hasAttribute('stroke-width') || samplePath.style.strokeWidth;
+          assert('Coastline paths have stroke attributes inlined', hasStroke || hasStrokeWidth);
         }
 
       } catch (e) {
