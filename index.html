@@ -442,6 +442,79 @@
       if (canvas) { canvas.width = w; canvas.height = h; }
     }
 
+    // Debug flag for performance
+    const DEBUG = false;
+
+    // Debounce function for UI updates
+    const rafDebounce = (fn) => {
+      let r = 0; 
+      return (...a) => { 
+        cancelAnimationFrame(r); 
+        r = requestAnimationFrame(() => fn(...a)); 
+      }; 
+    };
+
+    // Cached DOM elements for performance
+    const DOM = {
+      seaLevelInput: document.getElementById('seaLevelInput'),
+      seaRoutesOnInput: document.getElementById('seaRoutesOnInput'),
+      sizeInput: document.getElementById('sizeInput')
+    };
+
+    // Precipitation caching
+    let PRECIP = null;
+    function recomputePrecip() { 
+      PRECIP = computePrecipArray(); 
+    }
+
+    // Set up precipitation recomputation on climate changes
+    ['rainInput', 'windBelts'].forEach(id => {
+      const element = document.getElementById(id);
+      if (element) {
+        element.addEventListener('input', rafDebounce(recomputePrecip));
+      }
+    });
+
+    // Centralized route layer management
+    const RouteLayers = (() => {
+      const svg = d3.select('svg');
+      let root = d3.select('#routes');
+      if (root.empty()) {
+        root = svg.append('g').attr('id', 'routes');
+        root.append('g').attr('class', 'roads');
+        root.append('g').attr('class', 'trails');
+        root.append('g').attr('class', 'searoutes');
+        // Keep routes group above map only once
+        root.raise();
+      }
+      const g = {
+        root,
+        roads: root.select('.roads'),
+        trails: root.select('.trails'),
+        sea: root.select('.searoutes')
+      };
+      return g;
+    })();
+
+    // Route building optimization
+    function pathFromPolylines(lines) {
+      // lines: Array<Array<[x,y]>>
+      let d = '';
+      for (const L of lines) {
+        if (!L.length) continue;
+        d += `M${L[0][0]},${L[0][1]}`;
+        for (let i = 1; i < L.length; i++) d += `L${L[i][0]},${L[i][1]}`;
+      }
+      return d;
+    }
+
+    // Dirty flags for incremental updates
+    const RouteDirty = {
+      burgs: true,
+      landGraph: true,
+      sea: true
+    };
+
   (function () {
     'use strict';
 
@@ -598,7 +671,7 @@
       window.__state.voronoi = voronoi;
       window.__state.svg = svg;
       window.__state.add = add;
-      window.__state.recolor = recolor;
+      window.__state.recolor = rafDebounce(recolor);
       window.__state.autoSeed = autoSeed;
       window.__state.drawCoastlines = drawCoastlines;
       window.__state.applyBorder = applyBorderMask;
@@ -606,6 +679,13 @@
       window.__state.generateBurgs = generateBurgs;
       window.__state.renderBurgs = renderBurgs;
       window.__state.computeRoutes = computeRoutes;
+
+      // Initialize reusable typed arrays for performance
+      window.__state.tmp = {
+        dist: new Int32Array(cells.length),
+        down: new Int32Array(cells.length),
+        flux: new Float32Array(cells.length),
+      };
 
       // Auto-generate: center island + N small hills
       autoSeed();
@@ -1925,9 +2005,12 @@
         for (let i = 0; i < cells.length; i++) if (cells[i].high >= sea) landIdxs.push(i);
         if (!landIdxs.length) { window.__state.riverStats = { majors:0, confluences:0, majorsDrawn:0, majorsReachedSea:0, avgMainLength:0 }; return; }
 
+        // Use cached typed arrays
+        const {dist, down, flux} = window.__state.tmp;
+        dist.fill(1e9); down.fill(-1); flux.fill(0);
+
         // Distance-to-coast field (toward sea only)
         const INF = 1e9;
-        const dist = new Int32Array(cells.length); dist.fill(INF);
         const bfsQueue = [];
         for (let i = 0; i < cells.length; i++) if (cells[i].high < sea) { dist[i] = 0; bfsQueue.push(i); }
         for (let qi = 0; qi < bfsQueue.length; qi++) {
@@ -1938,7 +2021,6 @@
         }
 
         // Flow directions
-        const down = new Int32Array(cells.length); down.fill(-1);
         landIdxs.forEach(i => {
           let best = -1, bestH = Infinity;
           const di = dist[i];
@@ -1967,8 +2049,7 @@
         const orderByElev = landIdxs.slice().sort((a,b) => cells[b].high - cells[a].high);
 
         // Precipitation-driven flux
-        const precip = computePrecipArray();
-        const flux = new Float32Array(cells.length);
+        const precip = PRECIP || computePrecipArray();
         for (const i of orderByElev) flux[i] = Math.max(0, precip[i]);
         for (const i of orderByElev) { const j = down[i]; if (j !== -1) flux[j] += flux[i]; }
 
@@ -3445,21 +3526,23 @@
     function computeRoutes() {
       // Guard against calling before water mask exists
       if (!window.__state.isWater) {
-        const sea = +document.getElementById('seaLevelInput').value;
+        const sea = +DOM.seaLevelInput.value;
         computeLakes(sea);
       }
       
-      // Always create the three subgroups once
-      const svg = d3.select('svg');
-      const routesG = getOrCreateGroup(svg, 'routes');
-      const roadsG = getOrCreateGroup(routesG, 'roads');
-      const trailsG = getOrCreateGroup(routesG, 'trails');
-      const seaG = getOrCreateGroup(routesG, 'searoutes');
+      // Use centralized route layers
+      const roadsG = RouteLayers.roads;
+      const trailsG = RouteLayers.trails;
+      const seaG = RouteLayers.sea;
       
-      // Clear only the subgroups we're about to redraw
-      roadsG.selectAll('path').remove();
-      trailsG.selectAll('path').remove();
-      seaG.selectAll('path').remove();
+      // Incremental updates - only rebuild what's dirty
+      if (RouteDirty.burgs || RouteDirty.landGraph) {
+        roadsG.selectAll('path').remove();
+        trailsG.selectAll('path').remove();
+      }
+      if (RouteDirty.sea) {
+        seaG.selectAll('path').remove();
+      }
       
       const cells = window.__state.cells;
       const isWater = window.__state.isWater;
@@ -3472,8 +3555,10 @@
       const landGraph = buildLandGraph(cells, isWater);
       
       // Debug: Check if we have enough data
-      console.log('burgs', burgs.length);
-      console.log('land edges', landGraph.edges.length);
+      if (DEBUG) {
+        console.log('burgs', burgs.length);
+        console.log('land edges', landGraph.edges.length);
+      }
       
       markPorts(burgs, cells, isWater);
       
@@ -3484,13 +3569,13 @@
       buildLocalTrails(burgs, landGraph);
       
       // Build sea routes if enabled
-      if (document.getElementById('seaRoutesOnInput').checked) {
-        console.log('Sea routes enabled, building sea graph...');
+      if (DOM.seaRoutesOnInput.checked) {
+        if (DEBUG) console.log('Sea routes enabled, building sea graph...');
         const seaGraph = buildSeaGraph(cells, isWater);
-        console.log(`Sea graph: ${seaGraph.nodes.length} nodes, ${seaGraph.edges.length} edges`);
+        if (DEBUG) console.log(`Sea graph: ${seaGraph.nodes.length} nodes, ${seaGraph.edges.length} edges`);
         
         const portBurgs = burgs.filter(b => b.isPort);
-        console.log(`Found ${portBurgs.length} port burgs:`, portBurgs.map(p => ({ id: p.id, cell: p.cell, name: p.name })));
+        if (DEBUG) console.log(`Found ${portBurgs.length} port burgs:`, portBurgs.map(p => ({ id: p.id, cell: p.cell, name: p.name })));
         
         if (portBurgs.length >= 2) {
           // Group ports by landmass component for better sea route planning
@@ -3499,27 +3584,26 @@
             component.filter(burg => burg.isPort)
           ).filter(ports => ports.length > 0);
           
-          console.log(`Port components:`, portComponents.map(ports => ports.length));
+          if (DEBUG) console.log(`Port components:`, portComponents.map(ports => ports.length));
           
           // Build sea routes between different landmasses
           buildSeaBackbone(portBurgs, seaGraph, landGraph);
         } else {
-          console.log('Not enough port burgs for sea routes (need >= 2)');
+          if (DEBUG) console.log('Not enough port burgs for sea routes (need >= 2)');
         }
       } else {
-        console.log('Sea routes disabled');
+        if (DEBUG) console.log('Sea routes disabled');
       }
       
       // Remove any test/debug lines
       d3.select('#test-line, #debug-line, .test-line, .debug-line').remove();
       
-      // Bring routes to the front
-      d3.select('#routes').raise();
-      
       // Debug: Check what was actually rendered
-      console.log('roads:', document.querySelectorAll('#routes .roads path').length);
-      console.log('trails:', document.querySelectorAll('#routes .trails path').length);
-      console.log('sea:', document.querySelectorAll('#routes .searoutes path').length);
+      if (DEBUG) {
+        console.log('roads:', document.querySelectorAll('#routes .roads path').length);
+        console.log('trails:', document.querySelectorAll('#routes .trails path').length);
+        console.log('sea:', document.querySelectorAll('#routes .searoutes path').length);
+      }
     }
 
     // --- Test harness --- (kept original tests and added border checks)
