@@ -22,6 +22,13 @@
     .coast { fill: none; stroke: #111; stroke-width: 0.6px; stroke-linejoin: round; }
     .rivers { fill: none; stroke: #4D83AE; stroke-linecap: round; stroke-linejoin: round; }
     .riversShade { fill: none; stroke: rgba(0,0,0,0.35); stroke-linecap: round; stroke-linejoin: round; }
+    
+    /* Route styling */
+    #routes .roads { stroke: #6b4e16; stroke-width: 1.4px; fill: none; stroke-linecap: round; }
+    #routes .trails { stroke: #9b7b3a; stroke-width: 1.0px; fill: none; stroke-dasharray: 3 3; stroke-linecap: round; }
+    #routes .searoutes { stroke: #cfe9ff; stroke-width: 1.2px; fill: none; stroke-dasharray: 6 4; mix-blend-mode: overlay; }
+    /* ensure export-friendly */
+    #routes path { vector-effect: non-scaling-stroke; }
   </style>
 </head>
 <body>
@@ -215,6 +222,38 @@
       <output id="fertilityWeightOutput">0.1</output>
     </div>
 
+    <hr>
+
+    <div class="row">
+      <label>Road Density (Primary links):</label>
+      <input id="roadDensityInput" value="0.6" type="range" min="0" max="1" step="0.05" oninput="roadDensityOutput.value = roadDensityInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+      <output id="roadDensityOutput">0.6</output>
+    </div>
+
+    <div class="row">
+      <label>Trail Density (Local links):</label>
+      <input id="trailDensityInput" value="0.5" type="range" min="0" max="1" step="0.05" oninput="trailDensityOutput.value = trailDensityInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+      <output id="trailDensityOutput">0.5</output>
+    </div>
+
+    <div class="row">
+      <label>Slope Penalty:</label>
+      <input id="slopePenaltyInput" value="1.2" type="range" min="0" max="3" step="0.1" oninput="slopePenaltyOutput.value = slopePenaltyInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+      <output id="slopePenaltyOutput">1.2</output>
+    </div>
+
+    <div class="row">
+      <label>River Crossing Penalty:</label>
+      <input id="riverPenaltyInput" value="1.0" type="range" min="0" max="3" step="0.1" oninput="riverPenaltyOutput.value = riverPenaltyInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+      <output id="riverPenaltyOutput">1.0</output>
+    </div>
+
+    <div class="row">
+      <label>Sea Routes:</label>
+      <input id="seaRoutesOnInput" type="checkbox" checked onchange="__state.computeRoutes && __state.computeRoutes();">
+      <span style="margin-left: 8px;">Enable sea routes</span>
+    </div>
+
     <div class="row">
       <label>Render Mode:</label>
       <select id="renderMode" onchange="__state.recolor && __state.recolor();">
@@ -237,7 +276,7 @@
     <div class="row">
       <label>Export:</label>
       <button id="exportSVG" onclick="saveSVG(document.querySelector('svg'), 'voronoi_map.svg')">Export SVG</button>
-      <button id="exportPNG" onclick="savePNG(document.querySelector('svg'), 800, 600, 'voronoi_map.png')">Export PNG</button>
+      <button id="exportPNG" onclick="savePNG(document.querySelector('svg'), 1920, 1080, 'voronoi_map.png')">Export PNG</button>
     </div>
   </div>
 
@@ -308,6 +347,10 @@
     coastWeightOutput.value = coastWeightInput.valueAsNumber;
     flatnessWeightOutput.value = flatnessWeightInput.valueAsNumber;
     fertilityWeightOutput.value = fertilityWeightInput.valueAsNumber;
+    roadDensityOutput.value = roadDensityInput.valueAsNumber;
+    trailDensityOutput.value = trailDensityInput.valueAsNumber;
+    slopePenaltyOutput.value = slopePenaltyInput.valueAsNumber;
+    riverPenaltyOutput.value = riverPenaltyInput.valueAsNumber;
 
     generate();
 
@@ -315,6 +358,7 @@
       d3.select('.mapCells').remove();
       d3.select('.coastline').remove();
       d3.select('#burgs').remove();
+      d3.select('#routes').remove();
       
       // Clear burgs from state
       window.__state.burgs = [];
@@ -334,6 +378,10 @@
       const riversG = svg.append('g').attr('class', 'rivers');
       const coastG = svg.append('g').attr('class', 'coastline');
       const burgsG = svg.append('g').attr('id', 'burgs');
+      const routesG = svg.append('g').attr('id', 'routes');
+      const roadsG = routesG.append('g').attr('class', 'roads');
+      const trailsG = routesG.append('g').attr('class', 'trails');
+      const seaG = routesG.append('g').attr('class', 'searoutes');
 
       const width = +svg.attr('width');
       const height = +svg.attr('height');
@@ -407,6 +455,7 @@
       window.__state.computeRivers = computeRivers;
       window.__state.generateBurgs = generateBurgs;
       window.__state.renderBurgs = renderBurgs;
+      window.__state.computeRoutes = computeRoutes;
 
       // Auto-generate: center island + N small hills
       autoSeed();
@@ -868,6 +917,7 @@
         computeRivers();
         drawCoastlines();
         generateBurgs();
+        computeRoutes();
         
         // Update the biome legend
         updateBiomeLegend();
@@ -1128,6 +1178,57 @@
               el.setAttribute('vector-effect', 'non-scaling-stroke');
             }
           }
+          
+          // Special handling for route paths
+          if (el.tagName === 'path' && el.parentElement && el.parentElement.parentElement && el.parentElement.parentElement.id === 'routes') {
+            const routeType = el.parentElement.className.baseVal;
+            
+            if (routeType === 'roads') {
+              if (!el.hasAttribute('stroke') && !el.style.stroke) {
+                el.setAttribute('stroke', '#6b4e16');
+              }
+              if (!el.hasAttribute('stroke-width') && !el.style.strokeWidth) {
+                el.setAttribute('stroke-width', '1.2px');
+              }
+            } else if (routeType === 'trails') {
+              if (!el.hasAttribute('stroke') && !el.style.stroke) {
+                el.setAttribute('stroke', '#9b7b3a');
+              }
+              if (!el.hasAttribute('stroke-width') && !el.style.strokeWidth) {
+                el.setAttribute('stroke-width', '0.8px');
+              }
+              if (!el.hasAttribute('stroke-dasharray') && !el.style.strokeDasharray) {
+                el.setAttribute('stroke-dasharray', '3 3');
+              }
+            } else if (routeType === 'searoutes') {
+              if (!el.hasAttribute('stroke') && !el.style.stroke) {
+                el.setAttribute('stroke', '#ffffff');
+              }
+              if (!el.hasAttribute('stroke-width') && !el.style.strokeWidth) {
+                el.setAttribute('stroke-width', '1.0px');
+              }
+              if (!el.hasAttribute('stroke-dasharray') && !el.style.strokeDasharray) {
+                el.setAttribute('stroke-dasharray', '6 3');
+              }
+              if (!el.hasAttribute('opacity') && !el.style.opacity) {
+                el.setAttribute('opacity', '0.9');
+              }
+            }
+            
+            // Common route attributes
+            if (!el.hasAttribute('fill') && !el.style.fill) {
+              el.setAttribute('fill', 'none');
+            }
+            if (!el.hasAttribute('stroke-linecap') && !el.style.strokeLinecap) {
+              el.setAttribute('stroke-linecap', 'round');
+            }
+            if (!el.hasAttribute('stroke-linejoin') && !el.style.strokeLinejoin) {
+              el.setAttribute('stroke-linejoin', 'round');
+            }
+            if (!el.hasAttribute('vector-effect') && !el.style.vectorEffect) {
+              el.setAttribute('vector-effect', 'non-scaling-stroke');
+            }
+          }
 
           // Opacities (element-level)
           const op = cs.opacity; if (op && op !== '1') el.setAttribute('opacity', op);
@@ -1180,6 +1281,19 @@
             // Check again after computing
             const newBurgs = svgNode.querySelectorAll('#burgs g.burg');
             console.log(`Burgs after computing: ${newBurgs.length} burgs`);
+          }
+        }
+        
+        // Debug: Check if routes exist before export
+        const originalRoutes = svgNode.querySelectorAll('#routes path');
+        console.log(`Original routes before export: ${originalRoutes.length} routes`);
+        if (originalRoutes.length === 0) {
+          console.log('No routes found! Computing routes...');
+          if (window.__state.computeRoutes) {
+            window.__state.computeRoutes();
+            // Check again after computing
+            const newRoutes = svgNode.querySelectorAll('#routes path');
+            console.log(`Routes after computing: ${newRoutes.length} routes`);
           }
         }
         
@@ -1253,6 +1367,19 @@
           }
         });
         
+        // Debug: Check route elements
+        const routeGroups = clone.querySelectorAll('#routes');
+        console.log(`Found ${routeGroups.length} route groups in clone:`, routeGroups);
+        routeGroups.forEach((group, i) => {
+          const roads = group.querySelectorAll('.roads path');
+          const trails = group.querySelectorAll('.trails path');
+          const seaRoutes = group.querySelectorAll('.searoutes path');
+          console.log(`Route group ${i}: ${roads.length} roads, ${trails.length} trails, ${seaRoutes.length} sea routes`);
+          if (roads.length > 0) {
+            console.log('Sample road:', roads[0].outerHTML);
+          }
+        });
+        
         // ensure inline styles/fonts if needed
         const svgText = new XMLSerializer().serializeToString(clone);
         const blob = new Blob([svgText], {type: 'image/svg+xml;charset=utf-8'});
@@ -1292,6 +1419,19 @@
             // Check again after computing
             const newBurgs = svgNode.querySelectorAll('#burgs g.burg');
             console.log(`Burgs after computing: ${newBurgs.length} burgs`);
+          }
+        }
+        
+        // Debug: Check if routes exist before export
+        const originalRoutes = svgNode.querySelectorAll('#routes path');
+        console.log(`Original routes before PNG export: ${originalRoutes.length} routes`);
+        if (originalRoutes.length === 0) {
+          console.log('No routes found! Computing routes...');
+          if (window.__state.computeRoutes) {
+            window.__state.computeRoutes();
+            // Check again after computing
+            const newRoutes = svgNode.querySelectorAll('#routes path');
+            console.log(`Routes after computing: ${newRoutes.length} routes`);
           }
         }
         
@@ -2203,8 +2343,8 @@
      * @param {number} sea - Sea level
      * @returns {Object} Burg object
      */
-    function placeBurg(cell, cells, sea) {
-      const id = window.__state.burgs.length;
+    function placeBurg(cell, cells, sea, index) {
+      const id = index;
       
       // Determine if it's a port (near coast)
       let isPort = false;
@@ -2269,8 +2409,9 @@
       
       console.log(`Generating ${count} burgs with spacing ${radiusPx}px`);
 
-      // Get land cells
-      const landCells = cells.filter(c => c.high >= sea && c.high <= 0.8);
+      // Get land cells (use same logic as water detection)
+      const isWater = window.__state.isWater || [];
+      const landCells = cells.filter((c, i) => !isWater[i] && c.high <= 0.8);
       console.log(`Found ${landCells.length} land cells suitable for burgs`);
       
       if (landCells.length === 0) {
@@ -2306,7 +2447,7 @@
       console.log(`Selected ${picked.length} burgs from candidates`);
       
       // Create burg objects
-      window.__state.burgs = picked.map(p => placeBurg(p.cell, cells, sea));
+      window.__state.burgs = picked.map((p, index) => placeBurg(p.cell, cells, sea, index));
       
       console.log(`Generated ${window.__state.burgs.length} burgs`);
       
@@ -2349,7 +2490,7 @@
         .attr('vector-effect', 'non-scaling-stroke');
 
       // Add port symbols for ports
-      burgs.filter(d => d.port)
+      burgs.filter(d => d.isPort)
         .append('rect')
         .attr('x', d => d.x - 1.5)
         .attr('y', d => d.y - 1.5)
@@ -2362,6 +2503,873 @@
         .attr('vector-effect', 'non-scaling-stroke');
 
       console.log(`Rendered ${window.__state.burgs.length} burgs`);
+    }
+
+    // --- Routes System ---
+    
+    /**
+     * Build a navigation graph over land cells
+     * @param {Array} cells - All cells array
+     * @param {Array} isWater - Water mask array
+     * @returns {Object} Graph with nodes and edges
+     */
+    function buildLandGraph(cells, isWater) {
+      const nodes = [];
+      const edges = [];
+      
+      // Create nodes for all land cells
+      for (let i = 0; i < cells.length; i++) {
+        if (!isWater[i]) {
+          nodes.push({ i: i, x: cells[i].cx, y: cells[i].cy, high: cells[i].high });
+        }
+      }
+      
+      // Create edges between neighboring land cells
+      for (let i = 0; i < cells.length; i++) {
+        if (isWater[i]) continue; // Skip water cells
+        
+        const cell = cells[i];
+        for (const neighborIndex of cell.neighbors) {
+          if (neighborIndex > i && !isWater[neighborIndex]) { // Avoid duplicate edges
+            const neighbor = cells[neighborIndex];
+            const dist = Math.hypot(cell.cx - neighbor.cx, cell.cy - neighbor.cy);
+            const slope = Math.abs(cell.high - neighbor.high);
+            const riverCross = crossesRiverSegment(cell, neighbor) ? 1 : 0;
+            
+            const slopePenalty = +document.getElementById('slopePenaltyInput').value || 1.2;
+            const riverPenalty = +document.getElementById('riverPenaltyInput').value || 1.0;
+            
+            const w = dist * (1 + slope * slopePenalty + riverCross * riverPenalty);
+            
+            edges.push({
+              a: i,
+              b: neighborIndex,
+              dist: dist,
+              slope: slope,
+              riverCross: riverCross,
+              w: w
+            });
+          }
+        }
+      }
+      return { nodes, edges };
+    }
+    
+    /**
+     * Check if a path crosses a river segment
+     * @param {Object} cellA - First cell
+     * @param {Object} cellB - Second cell
+     * @returns {boolean} True if path crosses a river
+     */
+    function crossesRiverSegment(cellA, cellB) {
+      // Simple check: if either cell has a river neighbor, consider it a crossing
+      const isWater = window.__state.isWater || [];
+      const isLake = window.__state.isLake || [];
+      
+      // Check if either cell has a river neighbor (water but not lake)
+      for (const cell of [cellA, cellB]) {
+        for (const nb of cell.neighbors) {
+          const neighborCell = window.__state.cells[nb];
+          if (neighborCell) {
+            const isWaterNeighbor = neighborCell.high < (+document.getElementById('seaLevelInput').value || 0.35);
+            const isLakeNeighbor = isLake[nb] === 1;
+            if (isWaterNeighbor && !isLakeNeighbor) {
+              return true;
+            }
+          }
+        }
+      }
+      
+      return false;
+    }
+    
+    /**
+     * A* pathfinding algorithm for land navigation
+     * @param {number} startIndex - Starting cell index
+     * @param {number} endIndex - Ending cell index
+     * @param {Object} graph - Land graph
+     * @returns {Array} Path as array of cell indices
+     */
+    function shortestPath(startIndex, endIndex, graph) {
+      const cells = window.__state.cells;
+      const isWater = window.__state.isWater || [];
+      
+      // Skip if start or end is water
+      if (isWater[startIndex] || isWater[endIndex]) {
+        console.log(`shortestPath: start or end is water (start: ${isWater[startIndex]}, end: ${isWater[endIndex]})`);
+        return null;
+      }
+      
+      // Check if start and end are the same
+      if (startIndex === endIndex) {
+        console.log(`shortestPath: start and end are the same (${startIndex})`);
+        return [startIndex];
+      }
+      
+      // Simple BFS to find a path
+      const visited = new Set();
+      const queue = [[startIndex, [startIndex]]];
+      visited.add(startIndex);
+      
+      while (queue.length > 0) {
+        const [current, path] = queue.shift();
+        
+        if (current === endIndex) {
+          return path;
+        }
+        
+        // Check neighbors
+        const currentCell = cells[current];
+        for (const neighborIndex of currentCell.neighbors) {
+          if (visited.has(neighborIndex)) continue;
+          if (isWater[neighborIndex]) continue; // Skip water neighbors
+          
+          visited.add(neighborIndex);
+          queue.push([neighborIndex, [...path, neighborIndex]]);
+        }
+      }
+      
+      return null; // No path found
+    }
+    
+    /**
+     * Simple BFS pathfinding for sea navigation using the sea graph
+     * @param {number} startIndex - Starting cell index
+     * @param {number} endIndex - Ending cell index
+     * @param {Object} graph - Sea graph
+     * @returns {Array} Path as array of cell indices
+     */
+    function shortestPathSea(startIndex, endIndex, graph) {
+      const cells = window.__state.cells;
+      const isWater = window.__state.isWater || [];
+      
+      // Skip if start or end is not water
+      if (!isWater[startIndex] || !isWater[endIndex]) {
+        console.log(`shortestPathSea: start or end is not water (start: ${isWater[startIndex]}, end: ${isWater[endIndex]})`);
+        return null;
+      }
+      
+      // Check if start and end are the same
+      if (startIndex === endIndex) {
+        return [startIndex];
+      }
+      
+      // Weighted BFS using sea graph edges with offshore bias
+      const visited = new Set();
+      const queue = [[startIndex, [startIndex], 0]]; // [current, path, cost]
+      visited.add(startIndex);
+      
+      while (queue.length > 0) {
+        // Sort queue by cost to prefer lower-cost (more offshore) paths
+        queue.sort((a, b) => a[2] - b[2]);
+        const [current, path, cost] = queue.shift();
+        
+        if (current === endIndex) {
+          console.log(`shortestPathSea: found path with ${path.length} cells between ${startIndex} and ${endIndex}`);
+          return path;
+        }
+        
+        // Find all edges from current node in sea graph
+        for (const edge of graph.edges) {
+          let nextIndex = null;
+          if (edge.a === current) {
+            nextIndex = edge.b;
+          } else if (edge.b === current) {
+            nextIndex = edge.a;
+          }
+          
+          if (nextIndex !== null && !visited.has(nextIndex)) {
+            // Calculate cost based on distance and land proximity
+            const nextCell = cells[nextIndex];
+            let landProximity = 0;
+            
+            // Count land neighbors to bias away from coast
+            for (const nb of nextCell.neighbors) {
+              if (!isWater[nb]) {
+                landProximity += 1;
+              }
+            }
+            
+            // Higher cost for cells near land (encourages offshore routes)
+            const newCost = cost + edge.w + (landProximity * 10);
+            
+            visited.add(nextIndex);
+            queue.push([nextIndex, [...path, nextIndex], newCost]);
+          }
+        }
+      }
+      
+      console.log(`shortestPathSea: no path found between ${startIndex} and ${endIndex}`);
+      return null; // No path found
+    }
+    
+    /**
+     * Heuristic function for A* (Euclidean distance)
+     * @param {number} a - Cell index
+     * @param {number} b - Cell index
+     * @param {Array} cells - All cells array
+     * @returns {number} Heuristic value
+     */
+    function heuristic(a, b, cells) {
+      return Math.hypot(cells[a].cx - cells[b].cx, cells[a].cy - cells[b].cy);
+    }
+    
+    /**
+     * Convert path indices to polyline points
+     * @param {Array} pathIndices - Array of cell indices
+     * @returns {Array} Array of [x, y] points
+     */
+    function polylineFromPath(pathIndices) {
+      const cells = window.__state.cells;
+      return pathIndices.map(index => [cells[index].cx, cells[index].cy]);
+    }
+    
+    /**
+     * Smooth a polyline using Chaikin smoothing
+     * @param {Array} points - Array of [x, y] points
+     * @param {number} iterations - Number of smoothing iterations
+     * @returns {Array} Smoothed polyline
+     */
+    function smoothLine(points, iterations = 1) {
+      if (points.length < 3) return points;
+      
+      let smoothed = points;
+      for (let iter = 0; iter < iterations; iter++) {
+        const newPoints = [];
+        for (let i = 0; i < smoothed.length - 1; i++) {
+          const [x1, y1] = smoothed[i];
+          const [x2, y2] = smoothed[i + 1];
+          
+          newPoints.push([x1, y1]);
+          newPoints.push([(x1 + x2) / 2, (y1 + y2) / 2]);
+        }
+        newPoints.push(smoothed[smoothed.length - 1]);
+        smoothed = newPoints;
+      }
+      
+      return smoothed;
+    }
+    
+    /**
+     * Mark ports in burgs array
+     * @param {Array} burgs - Burgs array
+     * @param {Array} cells - All cells array
+     * @param {Array} isWater - Water mask array
+     */
+    function markPorts(burgs, cells, isWater) {
+      const sea = +document.getElementById('seaLevelInput').value;
+      
+      burgs.forEach(burg => {
+        // Check if burg is near water (within 16 pixels)
+        let minWaterDist = Infinity;
+        for (let i = 0; i < cells.length; i++) {
+          if (isWater[i]) {
+            const dist = Math.hypot(burg.x - cells[i].cx, burg.y - cells[i].cy);
+            minWaterDist = Math.min(minWaterDist, dist);
+          }
+        }
+        
+        burg.isPort = minWaterDist < 32; // Increased from 16 to 32 for better port detection
+      });
+    }
+    
+    /**
+     * Find the nearest water cell to a given cell
+     * @param {number} fromIndex - Starting cell index
+     * @param {Array} isWater - Water mask array
+     * @param {Array} cells - All cells array
+     * @returns {number} Index of nearest water cell, or -1 if none found
+     */
+    function nearestWaterCellIndex(fromIndex, isWater, cells) {
+      if (isWater[fromIndex]) return fromIndex;
+      const visited = new Uint8Array(cells.length);
+      const q = [fromIndex];
+      visited[fromIndex] = 1;
+      while (q.length) {
+        const i = q.shift();
+        for (const nb of cells[i].neighbors) {
+          if (visited[nb]) continue;
+          if (isWater[nb]) return nb;       // first water cell found
+          visited[nb] = 1;
+          q.push(nb);
+        }
+      }
+      return -1; // none found (shouldn't happen on coastal ports)
+    }
+    
+
+    
+    /**
+     * Helper function to get or create a group
+     * @param {Object} parent - Parent D3 selection
+     * @param {string} className - Class name for the group
+     * @returns {Object} D3 selection for the group
+     */
+    function getOrCreateGroup(parent, className) {
+      let group = parent.select(`.${className}`);
+      if (group.size() === 0) {
+        group = parent.append('g').attr('class', className);
+      }
+      return group;
+    }
+    
+    /**
+     * Find connected components of burgs using flood fill on land cells
+     * @param {Array} burgs - Burgs array
+     * @param {Object} landGraph - Land navigation graph
+     * @returns {Array} Array of arrays, each containing connected burgs
+     */
+    function findConnectedComponents(burgs, landGraph) {
+      if (burgs.length === 0) return [];
+      
+      const cells = window.__state.cells;
+      const isWater = window.__state.isWater || [];
+      
+      // Create a map of burg cell indices to burg objects
+      const burgByCell = new Map();
+      burgs.forEach(burg => burgByCell.set(burg.cell, burg));
+      
+      const components = [];
+      const visitedCells = new Set();
+      const visitedBurgs = new Set();
+      
+      for (const burg of burgs) {
+        if (visitedBurgs.has(burg.id)) continue;
+        
+        // Start a new component with this burg
+        const component = [];
+        const cellQueue = [burg.cell];
+        visitedCells.add(burg.cell);
+        visitedBurgs.add(burg.id);
+        component.push(burg);
+        
+        // Flood fill from this burg's cell to find all connected land cells
+        let floodSize = 0;
+        while (cellQueue.length > 0) {
+          const currentCellIndex = cellQueue.shift();
+          const currentCell = cells[currentCellIndex];
+          floodSize++;
+          
+          // Check all neighbors of this cell
+          for (const neighborIndex of currentCell.neighbors) {
+            if (visitedCells.has(neighborIndex)) continue;
+            if (isWater[neighborIndex]) continue; // Skip water cells
+            
+            visitedCells.add(neighborIndex);
+            cellQueue.push(neighborIndex);
+            
+            // If there's a burg on this cell, add it to the component
+            const neighborBurg = burgByCell.get(neighborIndex);
+            if (neighborBurg && !visitedBurgs.has(neighborBurg.id)) {
+              visitedBurgs.add(neighborBurg.id);
+              component.push(neighborBurg);
+              console.log(`Flood found burg ${neighborBurg.id} at cell ${neighborIndex}`);
+            }
+          }
+        }
+        console.log(`Flood from burg ${burg.id} (cell ${burg.cell}) explored ${floodSize} cells, found ${component.length} burgs`);
+        
+        components.push(component);
+      }
+      
+      console.log(`findConnectedComponents: found ${components.length} connected components:`, 
+        components.map(c => c.length));
+      
+      // Debug: show which burgs are in which component
+      components.forEach((component, i) => {
+        console.log(`Component ${i}:`, component.map(b => `burg ${b.id} (cell ${b.cell})`));
+      });
+      
+      // Debug: show burg positions to verify they're on different landmasses
+      console.log('Burg positions:', burgs.map(b => ({ id: b.id, cell: b.cell, x: cells[b.cell].cx, y: cells[b.cell].cy })));
+      
+      return components;
+    }
+    
+    /**
+     * Build primary road network (MST between major burgs)
+     * @param {Array} burgs - Burgs array
+     * @param {Object} landGraph - Land navigation graph
+     */
+    function buildBackboneRoads(burgs, landGraph) {
+      if (burgs.length < 2) return;
+      
+      const roadDensity = +document.getElementById('roadDensityInput').value || 0.6;
+      const hubCount = Math.max(2, Math.round(burgs.length * (0.35 + 0.5 * roadDensity)));
+      
+      // Group burgs by connected components
+      const components = findConnectedComponents(burgs, landGraph);
+      console.log(`Found ${components.length} connected land components`);
+      
+      // Build roads within each component
+      components.forEach((componentBurgs, componentIndex) => {
+        console.log(`Processing component ${componentIndex} with ${componentBurgs.length} burgs`);
+        if (componentBurgs.length < 2) {
+          console.log(`Component ${componentIndex} has < 2 burgs, skipping`);
+          return;
+        }
+        
+        // Select hubs within this component
+        const componentHubs = componentBurgs
+          .sort((a, b) => b.population - a.population)
+          .slice(0, Math.max(2, Math.round(componentBurgs.length * 0.6)));
+        
+        console.log(`Component ${componentIndex}: selected ${componentHubs.length} hubs from ${componentBurgs.length} burgs`);
+        
+        // Build complete graph of hub-to-hub path costs within component
+        const hubEdges = [];
+        
+        console.log(`Component ${componentIndex}: building ${componentHubs.length * (componentHubs.length - 1) / 2} potential hub connections`);
+        
+        for (let i = 0; i < componentHubs.length; i++) {
+          for (let j = i + 1; j < componentHubs.length; j++) {
+            console.log(`Trying path from hub ${i} (cell ${componentHubs[i].cell}) to hub ${j} (cell ${componentHubs[j].cell})`);
+            const path = shortestPath(componentHubs[i].cell, componentHubs[j].cell, landGraph);
+            if (path) {
+              console.log(`Found path: ${path.length} cells`);
+              const cost = path.reduce((total, index, i) => {
+                if (i === 0) return 0;
+                const prev = window.__state.cells[path[i - 1]];
+                const curr = window.__state.cells[index];
+                return total + Math.hypot(prev.cx - curr.cx, prev.cy - curr.cy);
+              }, 0);
+              hubEdges.push({ a: i, b: j, cost: cost, path: path });
+            } else {
+              console.log(`Component ${componentIndex}: no path between hubs ${i} and ${j} (cells ${componentHubs[i].cell} and ${componentHubs[j].cell})`);
+            }
+          }
+        }
+        
+        console.log(`Component ${componentIndex}: found ${hubEdges.length} valid hub connections`);
+        
+        // Sort edges by cost for Kruskal's algorithm
+        hubEdges.sort((a, b) => a.cost - b.cost);
+        
+        // Kruskal's algorithm for MST within component
+        const parent = new Array(componentHubs.length).fill(0).map((_, i) => i);
+        
+        function find(x) {
+          if (parent[x] !== x) {
+            parent[x] = find(parent[x]);
+          }
+          return parent[x];
+        }
+        
+        function union(x, y) {
+          parent[find(x)] = find(y);
+        }
+        
+        const mstEdges = [];
+        for (const edge of hubEdges) {
+          if (find(edge.a) !== find(edge.b)) {
+            union(edge.a, edge.b);
+            mstEdges.push(edge);
+          }
+        }
+        
+        // Render MST edges as roads
+        const roadsG = d3.select('#routes .roads');
+        const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
+        
+        mstEdges.forEach(edge => {
+          const points = polylineFromPath(edge.path);
+          const smoothed = smoothLine(points, 1);
+          
+          roadsG.append('path')
+            .attr('d', line(smoothed))
+            .attr('fill', 'none')
+            .attr('stroke', '#6b4e16')
+            .attr('stroke-width', '1.5px')
+            .attr('stroke-linecap', 'round')
+            .attr('stroke-linejoin', 'round')
+            .attr('vector-effect', 'non-scaling-stroke');
+        });
+        
+        console.log(`Component ${componentIndex}: ${mstEdges.length} roads between ${componentHubs.length} hubs`);
+      });
+      
+
+    }
+    
+    /**
+     * Build local trail network
+     * @param {Array} burgs - Burgs array
+     * @param {Object} landGraph - Land navigation graph
+     */
+    function buildLocalTrails(burgs, landGraph) {
+      if (burgs.length < 2) return;
+      
+      const trailDensity = +document.getElementById('trailDensityInput').value || 0.5;
+      const maxDistance = 160 + (trailDensity * 80); // 160-240px range
+      const maxConnections = Math.max(1, Math.round(1 + trailDensity * 2)); // 1-3 connections
+      
+
+      
+      const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
+      const existingTrails = [];
+      
+      // Group burgs by connected components
+      const components = findConnectedComponents(burgs, landGraph);
+      
+      // Build trails within each component
+      components.forEach((componentBurgs, componentIndex) => {
+        console.log(`Building trails for component ${componentIndex} with ${componentBurgs.length} burgs`);
+        if (componentBurgs.length < 2) {
+          console.log(`Component ${componentIndex} has < 2 burgs, skipping trails`);
+          return;
+        }
+        
+                  componentBurgs.forEach(burg => {
+            // Find nearby burgs within max distance (only within same component)
+            const nearby = componentBurgs
+              .filter(other => other !== burg)
+              .map(other => ({
+                burg: other,
+                dist: Math.hypot(burg.x - other.x, burg.y - other.y)
+              }))
+              .filter(item => item.dist <= maxDistance)
+              .sort((a, b) => a.dist - b.dist)
+              .slice(0, maxConnections);
+            
+            console.log(`Burg ${burg.id} (cell ${burg.cell}): found ${nearby.length} nearby burgs within ${maxDistance}px`);
+          
+          nearby.forEach(item => {
+            const path = shortestPath(burg.cell, item.burg.cell, landGraph);
+            if (path) {
+              const points = polylineFromPath(path);
+              const smoothed = smoothLine(points, 1);
+              
+              // Check for overlap with existing trails (simple bounding box check)
+              const trailKey = [Math.min(burg.cell, item.burg.cell), Math.max(burg.cell, item.burg.cell)].join('-');
+              if (!existingTrails.includes(trailKey)) {
+                existingTrails.push(trailKey);
+                
+                const trailsG = d3.select('#routes .trails');
+                trailsG.append('path')
+                  .attr('d', line(smoothed))
+                  .attr('fill', 'none')
+                  .attr('stroke', '#9b7b3a')
+                  .attr('stroke-width', '1px')
+                  .attr('stroke-dasharray', '3 3')
+                  .attr('stroke-linecap', 'round')
+                  .attr('stroke-linejoin', 'round')
+                  .attr('vector-effect', 'non-scaling-stroke');
+              }
+            }
+          });
+        });
+        
+        console.log(`Component ${componentIndex}: ${existingTrails.length} trails built`);
+      });
+      
+      console.log(`Total trails built: ${existingTrails.length}`);
+
+    }
+    
+    /**
+     * Build sea navigation graph
+     * @param {Array} cells - All cells array
+     * @param {Array} isWater - Water mask array
+     * @returns {Object} Sea navigation graph
+     */
+    function buildSeaGraph(cells, isWater) {
+      const nodes = [];
+      const edges = [];
+      
+      // Create nodes for all water cells
+      for (let i = 0; i < cells.length; i++) {
+        if (isWater[i]) {
+          nodes.push({ i: i, x: cells[i].cx, y: cells[i].cy });
+        }
+      }
+      
+      console.log(`buildSeaGraph: created ${nodes.length} water nodes`);
+      
+      // Create edges between neighboring water cells
+      for (let i = 0; i < cells.length; i++) {
+        if (!isWater[i]) continue; // Skip land cells
+        
+        const cell = cells[i];
+        for (const neighborIndex of cell.neighbors) {
+          if (neighborIndex > i && isWater[neighborIndex]) { // Avoid duplicate edges
+            const neighbor = cells[neighborIndex];
+            const dist = Math.hypot(cell.cx - neighbor.cx, cell.cy - neighbor.cy);
+            
+            // Add small penalty near land to bias routes offshore
+            let landPenalty = 0;
+            for (const nb of [cell, neighbor]) {
+              for (const nbIndex of nb.neighbors) {
+                if (!isWater[nbIndex]) {
+                  landPenalty += 0.1;
+                  break;
+                }
+              }
+            }
+            
+            const w = dist * (1 + landPenalty);
+            edges.push({ a: i, b: neighborIndex, dist: dist, w: w });
+          }
+        }
+      }
+      
+      console.log(`buildSeaGraph: created ${edges.length} water edges`);
+      return { nodes, edges };
+    }
+    
+    /**
+     * Disjoint Set Union (DSU) for tracking connected components
+     */
+    class DSU {
+      constructor(n) {
+        this.p = [...Array(n).keys()];
+        this.r = Array(n).fill(0);
+      }
+      
+      find(x) {
+        return this.p[x] === x ? x : this.p[x] = this.find(this.p[x]);
+      }
+      
+      union(a, b) {
+        a = this.find(a);
+        b = this.find(b);
+        if (a === b) return false;
+        if (this.r[a] < this.r[b]) [a, b] = [b, a];
+        this.p[b] = a;
+        if (this.r[a] === this.r[b]) this.r[a]++;
+        return true;
+      }
+    }
+    
+    /**
+     * Connect sea network ensuring all ports are connected
+     * @param {Array} ports - Array of port objects with cell indices
+     * @param {Array} mstEdges - MST edges from Kruskal
+     * @param {Function} oceanPath - Function to find ocean path between two cells
+     * @returns {Array} Array of path segments to render
+     */
+    function connectSeaNetwork(ports, mstEdges, oceanPath) {
+      const n = ports.length;
+      const dsu = new DSU(n);
+      const segments = [];
+      
+      // 1) Add MST edges (when path exists)
+      for (const [i, j] of mstEdges) {
+        const path = oceanPath(ports[i].cell, ports[j].cell);
+        if (path && path.length) {
+          segments.push(path);
+          dsu.union(i, j);
+        }
+      }
+      
+      // 2) Force-connect any remaining components
+      const root0 = dsu.find(0);
+      for (let u = 0; u < n; u++) {
+        if (dsu.find(u) === root0) continue;
+        
+        // Find nearest port in the main component by euclidean distance
+        let bestV = -1, bestD = Infinity;
+        for (let v = 0; v < n; v++) {
+          if (dsu.find(v) === root0) {
+            const dx = ports[u].x - ports[v].x;
+            const dy = ports[u].y - ports[v].y;
+            const d = dx * dx + dy * dy;
+            if (d < bestD) {
+              bestD = d;
+              bestV = v;
+            }
+          }
+        }
+        
+        const path = oceanPath(ports[u].cell, ports[bestV].cell);
+        if (path && path.length) {
+          segments.push(path);
+          dsu.union(u, bestV);
+        }
+      }
+      
+      return segments;
+    }
+    
+    /**
+     * Build sea route backbone
+     * @param {Array} portBurgs - Array of port burgs
+     * @param {Object} seaGraph - Sea navigation graph
+     */
+    function buildSeaBackbone(portBurgs, seaGraph, landGraph) {
+      if (portBurgs.length < 2) return;
+      const cells = window.__state.cells;
+      const isWater = window.__state.isWater;
+
+      // 1) Ensure at least one representative port per land component
+      const comps = findConnectedComponents(portBurgs, landGraph);
+      const reps = comps.map(c => c.slice().sort((a,b) => b.population - a.population)[0]);
+      
+      // 2) Optionally add more (by population) but never drop the reps
+      const desired = Math.max(reps.length, 8); // or expose as a slider
+      const more = portBurgs
+        .slice().sort((a,b) => b.population - a.population)
+        .filter(p => !reps.some(r => r.id === p.id))
+        .slice(0, Math.max(0, desired - reps.length));
+      const selected = reps.concat(more);
+      
+      console.log(`Building sea backbone for ${selected.length} ports (${reps.length} reps + ${more.length} more)`);
+      
+      // 3) Map selected ports to nearest WATER cell once
+      const topPorts = selected
+        .map(p => ({
+          ...p,
+          seaIndex: nearestWaterCellIndex(p.cell, isWater, cells)
+        }))
+        .filter(p => p.seaIndex >= 0);
+      
+      // Build complete graph of port-to-port sea path costs
+      const portEdges = [];
+      for (let i = 0; i < topPorts.length; i++) {
+        for (let j = i + 1; j < topPorts.length; j++) {
+          console.log(`Trying sea path from port ${i} (cell ${topPorts[i].cell} -> water ${topPorts[i].seaIndex}) to port ${j} (cell ${topPorts[j].cell} -> water ${topPorts[j].seaIndex})`);
+          const path = shortestPathSea(topPorts[i].seaIndex, topPorts[j].seaIndex, seaGraph);
+          if (path) {
+            console.log(`Found sea path: ${path.length} cells`);
+            const cost = path.reduce((total, index, i) => {
+              if (i === 0) return 0;
+              const prev = window.__state.cells[path[i - 1]];
+              const curr = window.__state.cells[index];
+              return total + Math.hypot(prev.cx - curr.cx, prev.cy - curr.cy);
+            }, 0);
+            portEdges.push({ a: i, b: j, cost: cost, path: path });
+          } else {
+            console.log(`No sea path found between ports ${i} and ${j}`);
+          }
+        }
+      }
+      
+      // Sort edges by cost for Kruskal's algorithm
+      portEdges.sort((a, b) => a.cost - b.cost);
+      
+      // Kruskal's algorithm for MST
+      const parent = new Array(topPorts.length).fill(0).map((_, i) => i);
+      
+      function find(x) {
+        if (parent[x] !== x) {
+          parent[x] = find(parent[x]);
+        }
+        return parent[x];
+      }
+      
+      function union(x, y) {
+        parent[find(x)] = find(y);
+      }
+      
+      const mstEdges = [];
+      for (const edge of portEdges) {
+        if (find(edge.a) !== find(edge.b)) {
+          union(edge.a, edge.b);
+          mstEdges.push(edge);
+        }
+      }
+      
+      // Render MST edges as sea routes
+      const seaG = d3.select('#routes .searoutes');
+      const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
+      
+      mstEdges.forEach(edge => {
+        const points = polylineFromPath(edge.path);
+        const smoothed = smoothLine(points, 1);
+        
+        seaG.append('path')
+          .attr('d', line(smoothed))
+          .attr('fill', 'none')
+          .attr('stroke', '#cfe9ff')
+          .attr('stroke-width', '1.2px')
+          .attr('stroke-dasharray', '6 4')
+          .attr('stroke-linecap', 'round')
+          .attr('stroke-linejoin', 'round')
+          .attr('opacity', '0.9')
+          .attr('vector-effect', 'non-scaling-stroke');
+      });
+    }
+    
+    /**
+     * Main routes computation function
+     */
+    function computeRoutes() {
+      // Guard against calling before water mask exists
+      if (!window.__state.isWater) {
+        const sea = +document.getElementById('seaLevelInput').value;
+        computeLakes(sea);
+      }
+      
+      // Always create the three subgroups once
+      const svg = d3.select('svg');
+      const routesG = getOrCreateGroup(svg, 'routes');
+      const roadsG = getOrCreateGroup(routesG, 'roads');
+      const trailsG = getOrCreateGroup(routesG, 'trails');
+      const seaG = getOrCreateGroup(routesG, 'searoutes');
+      
+      // Clear only the subgroups we're about to redraw
+      roadsG.selectAll('path').remove();
+      trailsG.selectAll('path').remove();
+      seaG.selectAll('path').remove();
+      
+      const cells = window.__state.cells;
+      const isWater = window.__state.isWater;
+      const burgs = window.__state.burgs || [];
+      
+      if (!cells || !isWater || burgs.length < 2) {
+        return;
+      }
+      
+      const landGraph = buildLandGraph(cells, isWater);
+      
+      // Debug: Check if we have enough data
+      console.log('burgs', burgs.length);
+      console.log('land edges', landGraph.edges.length);
+      
+      markPorts(burgs, cells, isWater);
+      
+      // Build primary roads
+      buildBackboneRoads(burgs, landGraph);
+      
+      // Build local trails
+      buildLocalTrails(burgs, landGraph);
+      
+      // Build sea routes if enabled
+      if (document.getElementById('seaRoutesOnInput').checked) {
+        console.log('Sea routes enabled, building sea graph...');
+        const seaGraph = buildSeaGraph(cells, isWater);
+        console.log(`Sea graph: ${seaGraph.nodes.length} nodes, ${seaGraph.edges.length} edges`);
+        
+        const portBurgs = burgs.filter(b => b.isPort);
+        console.log(`Found ${portBurgs.length} port burgs:`, portBurgs.map(p => ({ id: p.id, cell: p.cell, name: p.name })));
+        
+        if (portBurgs.length >= 2) {
+          // Group ports by landmass component for better sea route planning
+          const components = findConnectedComponents(burgs, landGraph);
+          const portComponents = components.map(component => 
+            component.filter(burg => burg.isPort)
+          ).filter(ports => ports.length > 0);
+          
+          console.log(`Port components:`, portComponents.map(ports => ports.length));
+          
+          // Build sea routes between different landmasses
+          buildSeaBackbone(portBurgs, seaGraph, landGraph);
+        } else {
+          console.log('Not enough port burgs for sea routes (need >= 2)');
+        }
+      } else {
+        console.log('Sea routes disabled');
+      }
+      
+      // Remove any test/debug lines
+      d3.select('#test-line, #debug-line, .test-line, .debug-line').remove();
+      
+      // Bring routes to the front
+      d3.select('#routes').raise();
+      
+      // Debug: Check what was actually rendered
+      console.log('roads:', document.querySelectorAll('#routes .roads path').length);
+      console.log('trails:', document.querySelectorAll('#routes .trails path').length);
+      console.log('sea:', document.querySelectorAll('#routes .searoutes path').length);
     }
 
     // --- Test harness --- (kept original tests and added border checks)
@@ -2688,6 +3696,23 @@
           }
         }
         
+        // T38.8: Routes are properly computed and rendered
+        const routeGroups = svg.querySelectorAll('#routes');
+        const roads = svg.querySelectorAll('#routes .roads path');
+        const trails = svg.querySelectorAll('#routes .trails path');
+        const seaRoutes = svg.querySelectorAll('#routes .searoutes path');
+        assert('Route groups exist in SVG', routeGroups.length > 0);
+        assert('Roads are rendered', roads.length > 0);
+        assert('Trails are rendered', trails.length > 0);
+        
+        // T38.9: Routes have proper styling
+        if (roads.length > 0) {
+          const sampleRoad = roads[0];
+          const hasStroke = sampleRoad.hasAttribute('stroke');
+          const hasStrokeWidth = sampleRoad.hasAttribute('stroke-width');
+          assert('Road paths have proper styling', hasStroke && hasStrokeWidth);
+        }
+        
         // Check that rivers have proper styling
         if (riverPaths.length > 0) {
           const samplePath = riverPaths[0];
@@ -2748,6 +3773,23 @@
             const hasStrokeWidth = circle.hasAttribute('stroke-width') || circle.style.strokeWidth;
             assert('Burg circles have style attributes inlined', hasFill && hasStroke && hasStrokeWidth);
           }
+        }
+        
+        // T41: Routes are properly exported
+        const exportRouteGroups = clone.querySelectorAll('#routes');
+        const exportRoads = clone.querySelectorAll('#routes .roads path');
+        const exportTrails = clone.querySelectorAll('#routes .trails path');
+        const exportSeaRoutes = clone.querySelectorAll('#routes .searoutes path');
+        assert('Route groups are present in export clone', exportRouteGroups.length > 0);
+        assert('Roads are present in export clone', exportRoads.length > 0);
+        assert('Trails are present in export clone', exportTrails.length > 0);
+        
+        // Check that route styles are properly inlined
+        if (exportRoads.length > 0) {
+          const sampleRoad = exportRoads[0];
+          const hasStroke = sampleRoad.hasAttribute('stroke') || sampleRoad.style.stroke;
+          const hasStrokeWidth = sampleRoad.hasAttribute('stroke-width') || sampleRoad.style.strokeWidth;
+          assert('Road paths have stroke attributes inlined', hasStroke && hasStrokeWidth);
         }
 
       } catch (e) {
