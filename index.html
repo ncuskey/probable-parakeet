@@ -200,8 +200,8 @@
         <div id="terrain-tab" class="tab-content active">
           <div class="row">
             <label>Graph Size:</label>
-            <input id="sizeInput" value="10000" type="range" min="100" max="10000" step="100" oninput="sizeOutput.value = sizeInput.valueAsNumber">
-            <output id="sizeOutput">10000</output>
+                    <input id="sizeInput" value="20000" type="range" min="100" max="25000" step="500" oninput="sizeOutput.value = sizeInput.valueAsNumber">
+              <output id="sizeOutput">20000</output>
           </div>
 
           <div class="row">
@@ -461,6 +461,21 @@
       sizeInput: document.getElementById('sizeInput')
     };
 
+    // Canvas-based terrain rendering for performance
+    const TerrainCanvas = (() => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      let terrainDirty = true;
+      
+      return {
+        canvas,
+        ctx,
+        setDirty: () => { terrainDirty = true; },
+        isDirty: () => terrainDirty,
+        markClean: () => { terrainDirty = false; }
+      };
+    })();
+
     // Precipitation caching
     let PRECIP = null;
     function recomputePrecip() { 
@@ -472,6 +487,14 @@
       const element = document.getElementById(id);
       if (element) {
         element.addEventListener('input', rafDebounce(recomputePrecip));
+      }
+    });
+
+    // Set up terrain dirty flag triggers
+    ['seaLevelInput', 'talusInput', 'thermalStrengthInput', 'smoothAlphaInput'].forEach(id => {
+      const element = document.getElementById(id);
+      if (element) {
+        element.addEventListener('input', () => TerrainCanvas.setDirty());
       }
     });
 
@@ -654,16 +677,47 @@
         }
       }
 
-      // Draw polygons
-      mapCells.selectAll('path.mapCell')
-        .data(cells)
-        .enter()
-        .append('path')
-        .attr('class', 'mapCell')
-        .attr('id', d => d.index)
-        .attr('d', d => 'M' + d.poly.map(p => p.join(',')).join('L') + 'Z')
-        .attr('fill', '#000')
-        .attr('fill-rule', 'nonzero');
+      // Draw polygons - use canvas for large maps, SVG for smaller ones
+      const useCanvas = cells.length > 8000;
+      
+      if (useCanvas) {
+        // Canvas-based rendering for large maps
+        TerrainCanvas.canvas.width = width;
+        TerrainCanvas.canvas.height = height;
+        TerrainCanvas.ctx.fillStyle = '#000';
+        
+        cells.forEach(cell => {
+          if (cell.poly.length > 2) {
+            TerrainCanvas.ctx.beginPath();
+            TerrainCanvas.ctx.moveTo(cell.poly[0][0], cell.poly[0][1]);
+            for (let i = 1; i < cell.poly.length; i++) {
+              TerrainCanvas.ctx.lineTo(cell.poly[i][0], cell.poly[i][1]);
+            }
+            TerrainCanvas.ctx.closePath();
+            TerrainCanvas.ctx.fill();
+          }
+        });
+        
+        // Add canvas as image to SVG
+        const dataURL = TerrainCanvas.canvas.toDataURL();
+        mapCells.append('image')
+          .attr('href', dataURL)
+          .attr('width', width)
+          .attr('height', height)
+          .attr('x', 0)
+          .attr('y', 0);
+      } else {
+        // SVG-based rendering for smaller maps
+        mapCells.selectAll('path.mapCell')
+          .data(cells)
+          .enter()
+          .append('path')
+          .attr('class', 'mapCell')
+          .attr('id', d => d.index)
+          .attr('d', d => 'M' + d.poly.map(p => p.join(',')).join('L') + 'Z')
+          .attr('fill', '#000')
+          .attr('fill-rule', 'nonzero');
+      }
 
       // Keep shared state for tests and other functions
       window.__state.cells = cells;
@@ -698,6 +752,9 @@
       const smoothAlpha = +document.getElementById('smoothAlphaInput').value || 0.2;
       thermalErode(talus, thermalStrength, 2);
       smoothLand(smoothAlpha);
+      
+      // Mark terrain as dirty for canvas rendering
+      TerrainCanvas.setDirty();
       
       // initial recolor according to current UI (also draws coastlines)
       recolor();
@@ -1099,51 +1156,94 @@
         // Compute shading if enabled
         const shades = shadingMode === 'shaded' ? computeShading(cells, sea) : null;
         
-        mapCells.selectAll('path.mapCell')
-          .attr('fill', d => {
-            if (isWater[d.index]) {
-              // draw water via the ocean backdrop to avoid polygon seam artifacts
-              return 'none';
-            } else {
-              let baseColor;
-              if (renderMode === 'biomes' || renderMode === 'hybrid') {
-                // Use biome-based coloring
-                baseColor = getBiomeColor(d.biome, d.high, sea);
-              } else {
-                // Original heightmap coloring
-                const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
-                const tt = Math.max(0, Math.min(1, tl));
-                baseColor = landColor(tt);
-              }
-              
-              // Apply shading if enabled
-              if (shadingMode === 'shaded' && shades) {
-                return shadeColor(baseColor, shades[d.index]);
-              } else {
-                return baseColor;
-              }
+        // Check if we're using canvas rendering
+        const useCanvas = cells.length > 8000;
+        
+        if (useCanvas && TerrainCanvas.isDirty()) {
+          // Re-render canvas for large maps
+          TerrainCanvas.canvas.width = width;
+          TerrainCanvas.canvas.height = height;
+          
+          cells.forEach(cell => {
+            if (isWater[cell.index]) {
+              // Skip water cells - they're handled by ocean backdrop
+              return;
             }
-          })
-          .style('fill', d => {
-            if (isWater[d.index]) {
-              return 'none';
+            
+            let baseColor;
+            if (renderMode === 'biomes' || renderMode === 'hybrid') {
+              baseColor = getBiomeColor(cell.biome, cell.high, sea);
             } else {
-              let baseColor;
-              if (renderMode === 'biomes' || renderMode === 'hybrid') {
-                baseColor = getBiomeColor(d.biome, d.high, sea);
-              } else {
-                const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
-                const tt = Math.max(0, Math.min(1, tl));
-                baseColor = landColor(tt);
+              const tl = (cell.high - sea) / Math.max(1 - sea, 0.0001);
+              const tt = Math.max(0, Math.min(1, tl));
+              baseColor = landColor(tt);
+            }
+            
+            if (shadingMode === 'shaded' && shades) {
+              baseColor = shadeColor(baseColor, shades[cell.index]);
+            }
+            
+            // Draw cell on canvas
+            TerrainCanvas.ctx.fillStyle = baseColor;
+            if (cell.poly.length > 2) {
+              TerrainCanvas.ctx.beginPath();
+              TerrainCanvas.ctx.moveTo(cell.poly[0][0], cell.poly[0][1]);
+              for (let i = 1; i < cell.poly.length; i++) {
+                TerrainCanvas.ctx.lineTo(cell.poly[i][0], cell.poly[i][1]);
               }
-              
-              if (shadingMode === 'shaded' && shades) {
-                return shadeColor(baseColor, shades[d.index]);
-              } else {
-                return baseColor;
-              }
+              TerrainCanvas.ctx.closePath();
+              TerrainCanvas.ctx.fill();
             }
           });
+          
+          // Update canvas image in SVG
+          const dataURL = TerrainCanvas.canvas.toDataURL();
+          mapCells.select('image').attr('href', dataURL);
+          TerrainCanvas.markClean();
+        } else if (!useCanvas) {
+          // SVG-based rendering for smaller maps
+          mapCells.selectAll('path.mapCell')
+            .attr('fill', d => {
+              if (isWater[d.index]) {
+                return 'none';
+              } else {
+                let baseColor;
+                if (renderMode === 'biomes' || renderMode === 'hybrid') {
+                  baseColor = getBiomeColor(d.biome, d.high, sea);
+                } else {
+                  const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
+                  const tt = Math.max(0, Math.min(1, tl));
+                  baseColor = landColor(tt);
+                }
+                
+                if (shadingMode === 'shaded' && shades) {
+                  return shadeColor(baseColor, shades[d.index]);
+                } else {
+                  return baseColor;
+                }
+              }
+            })
+            .style('fill', d => {
+              if (isWater[d.index]) {
+                return 'none';
+              } else {
+                let baseColor;
+                if (renderMode === 'biomes' || renderMode === 'hybrid') {
+                  baseColor = getBiomeColor(d.biome, d.high, sea);
+                } else {
+                  const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
+                  const tt = Math.max(0, Math.min(1, tl));
+                  baseColor = landColor(tt);
+                }
+                
+                if (shadingMode === 'shaded' && shades) {
+                  return shadeColor(baseColor, shades[d.index]);
+                } else {
+                  return baseColor;
+                }
+              }
+            });
+        }
         computeRivers();
         drawCoastlines();
         generateBurgs();
