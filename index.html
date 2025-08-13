@@ -502,19 +502,19 @@
 
           <div class="row">
             <label>Roads:</label>
-            <input id="roadsOnInput" type="checkbox" checked onchange="__state.computeRoutes && __state.computeRoutes();">
+            <input id="roadsOnInput" type="checkbox" checked onchange="toggleRoutes('roads', this.checked);">
             <span style="margin-left: 8px;">Enable primary roads</span>
           </div>
 
           <div class="row">
             <label>Trails:</label>
-            <input id="trailsOnInput" type="checkbox" checked onchange="__state.computeRoutes && __state.computeRoutes();">
+            <input id="trailsOnInput" type="checkbox" checked onchange="toggleRoutes('trails', this.checked);">
             <span style="margin-left: 8px;">Enable local trails</span>
           </div>
 
           <div class="row">
             <label>Sea Routes:</label>
-            <input id="seaRoutesOnInput" type="checkbox" checked onchange="__state.computeRoutes && __state.computeRoutes();">
+            <input id="seaRoutesOnInput" type="checkbox" checked onchange="toggleRoutes('searoutes', this.checked);">
             <span style="margin-left: 8px;">Enable sea routes</span>
           </div>
         </div>
@@ -664,6 +664,22 @@
       }
       return d;
     }
+    
+    /**
+     * Draw lines with instrumentation for debugging
+     * @param {string} selector - CSS selector for the target group
+     * @param {Array} lines - Array of polylines
+     */
+    function drawLines(selector, lines) {
+      const d = pathFromPolylines(lines);
+      const sel = d3.select(selector);
+      sel.selectAll('path').data([0]).join('path').attr('d', d);
+
+      // Quick instrumentation
+      const segs = lines.reduce((a, L) => a + Math.max(0, L.length - 1), 0);
+      const len = lines.reduce((a, L) => a + L.reduce((s, [x, y], i) => s + (i ? Math.hypot(x - L[i - 1][0], y - L[i - 1][1]) : 0), 0), 0);
+      console.log(selector, { polylines: lines.length, segments: segs, totalLength: len.toFixed(1) });
+    }
 
     // SVG Path simplification using Ramer-Douglas-Peucker algorithm
     function simplifyPath(points, tolerance = 0.2) {
@@ -728,6 +744,18 @@
       result.push(points[points.length - 1]);
       
       return result;
+    }
+    
+    /**
+     * Adaptive path simplification based on map size
+     * @param {Array} lines - Array of polylines
+     * @param {number} width - Map width
+     * @param {number} height - Map height
+     * @returns {Array} Simplified polylines
+     */
+    function adaptiveSimplify(lines, width, height) {
+      const tol = Math.max(0.2, Math.min(1.5, Math.sqrt(width * height) / 1800));
+      return lines.map(L => simplifyPath(L, tol));
     }
 
     // Dirty flags for incremental updates
@@ -865,6 +893,22 @@
 
     // Expose generate() globally for the button
     window.generate = generate;
+    
+    /**
+     * Fast toggle for route visibility without recomputation
+     * @param {string} routeType - Type of route ('roads', 'trails', 'searoutes')
+     * @param {boolean} visible - Whether to show or hide
+     */
+    function toggleRoutes(routeType, visible) {
+      const selector = `#routes .${routeType}`;
+      const group = d3.select(selector);
+      if (group.size() > 0) {
+        group.style('display', visible ? null : 'none');
+      }
+      
+      // Only recompute if density/slope settings changed
+      // For now, just do fast toggle - can be enhanced later
+    }
 
     // State we expose for tests/debugging
     window.__state = { cells: null, delaunay: null, voronoi: null, svg: null, add: null, recolor: null, autoSeed: null, drawCoastlines: null, applyBorder: null, borderPx: 0, generate: generate, burgs: [] };
@@ -4697,6 +4741,9 @@
       
       // Optional: Add one-liner after rendering to confirm you drew something
       console.log('sea:', document.querySelectorAll('#routes .searoutes path').length);
+      
+      // Raise burgs above routes for crisp rendering
+      d3.select('#burgs').raise();
       } catch (error) {
         console.error('Error in computeRoutes:', error);
       } finally {
