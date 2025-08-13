@@ -6036,8 +6036,12 @@
         const targetWithSea = portsWithSeaIndex.find(ps => ps.id === targetPort.id);
         if (!targetWithSea) return;
         
+        // Get the distances from the source island's data
+        const sourceIslandData = islandDistances.get(connection.fromIsland);
+        if (!sourceIslandData) return;
+        
         // Use the distances from dijkstraSea to find the actual path
-        const path = findPathFromDistances(connection.fromSeaIndex, targetWithSea.seaIndex, seaGraph, distances);
+        const path = findPathFromDistances(connection.fromSeaIndex, targetWithSea.seaIndex, seaGraph, sourceIslandData.distances);
         if (path) {
           const points = polylineFromPath(path);
           const smoothed = smoothLine(points, 1);
@@ -6102,6 +6106,7 @@
            // More aggressive gap patching: add if detour is ≥3× direct route (was 4×)
            if (viaExistingCost >= 3 * directCost) {
              gapPatches.push({
+               islandId: islandId, // Track which island this gap patch belongs to
                fromPort: farthestPort,
                fromSeaIndex: farthestWithSea.seaIndex,
                toPort: otherPort,
@@ -6158,7 +6163,11 @@
        
        // Render gap patches
        gapPatches.forEach(patch => {
-         const path = findPathFromDistances(patch.fromSeaIndex, patch.toSeaIndex, seaGraph, distances);
+         // Get the distances from the island this gap patch belongs to
+         const islandData = islandDistances.get(patch.islandId);
+         if (!islandData) return;
+         
+         const path = findPathFromDistances(patch.fromSeaIndex, patch.toSeaIndex, seaGraph, islandData.distances);
          if (path) {
            const points = polylineFromPath(path);
            const smoothed = smoothLine(points, 1);
