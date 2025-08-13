@@ -25,8 +25,9 @@
     
     /* Route styling */
     #routes .roads { stroke: #6b4e16; stroke-width: 1.4px; fill: none; stroke-linecap: round; }
-    #routes .trails { stroke: #9b7b3a; stroke-width: 1.0px; fill: none; stroke-dasharray: 3 3; stroke-linecap: round; }
-    #routes .searoutes { stroke: #cfe9ff; stroke-width: 1.2px; fill: none; stroke-dasharray: 6 4; mix-blend-mode: overlay; }
+#routes .trails { stroke: #9b7b3a; stroke-width: 1.0px; fill: none; stroke-dasharray: 3 3; stroke-linecap: round; }
+#routes .searoutes { stroke: #cfe9ff; stroke-width: 1.2px; fill: none; stroke-dasharray: 6 4; mix-blend-mode: overlay; }
+#routes .primary-road { stroke: #8B4513; stroke-width: 3px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
     /* ensure export-friendly */
     #routes path { vector-effect: non-scaling-stroke; }
 
@@ -3369,6 +3370,7 @@
         population: population,
         type: type,
         port: isPort,
+        isSignificantPort: false, // Capitals are not significant ports (ports should be cities)
         onRiver: onRiver,
         name: name
       };
@@ -3456,16 +3458,31 @@
       // Generate villages using inland/road economic scoring
       const villages = generateVillages(cells, [...capitals, ...cities], villageCount, null);
       
-      // === PHASE 5: Add Spur Roads to Settlements ===
-      ProgressManager.update(87, 'Placing settlements...', 'Adding spur roads to settlements...');
+      // === PHASE 5: Ensure Island Ports ===
+      ProgressManager.update(87, 'Placing settlements...', 'Ensuring each island has ports...');
+      
+      // Combine all settlement types
+      let allBurgs = [...capitals, ...cities, ...villages];
+      
+      // Ensure each island has at least one significant port
+      allBurgs = ensureIslandPorts(cells, allBurgs, isWater);
+      
+      // === PHASE 6: Connect Capitals to Ports ===
+      ProgressManager.update(88, 'Placing settlements...', 'Connecting capitals to ports...');
+      
+      // Connect non-port capitals to nearest ports
+      connectCapitalsToPorts(allBurgs, cells, isWater);
+      
+      // === PHASE 7: Add Spur Roads to Settlements ===
+      ProgressManager.update(89, 'Placing settlements...', 'Adding spur roads to settlements...');
       
       // Add spur roads to cities and villages that aren't on existing routes
       [...cities, ...villages].forEach(settlement => {
         ensureSpurToRoad(settlement, isRouteCell, nearestRouteCell, addSpurRoad);
       });
       
-      // Combine all settlement types
-      window.__state.burgs = [...capitals, ...cities, ...villages];
+      // Store final burgs
+      window.__state.burgs = allBurgs;
       
       console.log(`Generated ${capitals.length} capitals + ${cities.length} cities + ${villages.length} villages = ${window.__state.burgs.length} total burgs`);
       
@@ -3566,14 +3583,14 @@
         .attr('vector-effect', 'non-scaling-stroke')
         .text('★');
 
-      // Add port symbols for ports (anchor) - cities and villages can be ports
-      burgs.filter(d => d.port && d.type !== 'capital')
+      // Add port symbols for ports (anchor) - only cities can be ports
+      burgs.filter(d => d.port && d.type === 'city')
         .append('text')
         .attr('x', d => d.x)
         .attr('y', d => d.y + 1)
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'middle')
-        .attr('font-size', d => d.type === 'city' ? '4px' : '3px')
+        .attr('font-size', '4px')
         .attr('fill', '#fff')
         .attr('stroke', '#000')
         .attr('stroke-width', '0.3')
@@ -3891,6 +3908,11 @@
         }
         city.port = minWaterDist < 25; // Within 25px of water
         
+        // Cities can be ports (significant settlements)
+        if (city.port) {
+          city.isSignificantPort = true; // Mark as significant port
+        }
+        
         // Determine if it's on a river
         c.neighbors.forEach(nb => {
           const neighborCell = cells[nb];
@@ -3972,15 +3994,9 @@
           onRiver: false
         };
         
-        // Determine if it's a port (near coast) - less likely for villages
-        let minWaterDist = Infinity;
-        for (let i = 0; i < cells.length; i++) {
-          if (isWater[i]) {
-            const dist = Math.hypot(c.cx - cells[i].cx, c.cy - cells[i].cy);
-            minWaterDist = Math.min(minWaterDist, dist);
-          }
-        }
-        village.port = minWaterDist < 10; // Only very close to water
+        // Villages should not be ports (ports must be significant settlements)
+        village.port = false; // Villages cannot be ports
+        village.isSignificantPort = false;
         
         // Determine if it's on a river
         c.neighbors.forEach(nb => {
@@ -4007,6 +4023,168 @@
 
       console.log(`Generated ${villages.length} villages using inland/road economic scoring`);
       return villages;
+    }
+
+    /**
+     * Ensure each island has at least one significant port
+     * @param {Array} cells - All cells array
+     * @param {Array} allBurgs - Array of all burgs (capitals + cities + villages)
+     * @param {Array} isWater - Water mask array
+     * @returns {Array} Updated burgs array with port assignments
+     */
+    function ensureIslandPorts(cells, allBurgs, isWater) {
+      // Group burgs by island (connected land components)
+      const islandGroups = findConnectedComponents(allBurgs, cells, isWater);
+      
+      for (let islandIndex = 0; islandIndex < islandGroups.length; islandIndex++) {
+        const islandBurgs = islandGroups[islandIndex];
+        const ports = islandBurgs.filter(burg => burg.isSignificantPort);
+        
+        if (ports.length === 0) {
+          // No ports on this island - find best candidate
+          console.log(`Island ${islandIndex} has no ports, finding best candidate...`);
+          
+          let bestPortCandidate = null;
+          let bestPortScore = -1;
+          
+          for (const burg of islandBurgs) {
+            if (burg.type !== 'city') continue; // Only cities can be ports
+            
+            // Calculate port suitability score
+            let portScore = 0;
+            
+            // Cities are the only port candidates
+            portScore += 10;
+            
+            // Check coastal proximity
+            let minWaterDist = Infinity;
+            for (let i = 0; i < cells.length; i++) {
+              if (isWater[i]) {
+                const dist = Math.hypot(burg.x - cells[i].cx, burg.y - cells[i].cy);
+                minWaterDist = Math.min(minWaterDist, dist);
+              }
+            }
+            
+            if (minWaterDist < 50) { // Within 50px of water
+              portScore += Math.max(0, 20 - minWaterDist); // Closer = better
+            }
+            
+            if (portScore > bestPortScore) {
+              bestPortScore = portScore;
+              bestPortCandidate = burg;
+            }
+          }
+          
+          if (bestPortCandidate) {
+            bestPortCandidate.port = true;
+            bestPortCandidate.isSignificantPort = true;
+            console.log(`Promoted ${bestPortCandidate.type} ${bestPortCandidate.id} to port on island ${islandIndex}`);
+          } else {
+            console.log(`No suitable port candidate found on island ${islandIndex}`);
+          }
+        }
+      }
+      
+      return allBurgs;
+    }
+
+    /**
+     * Connect capitals to nearest ports with primary roads
+     * @param {Array} allBurgs - Array of all burgs
+     * @param {Array} cells - All cells array
+     * @param {Array} isWater - Water mask array
+     */
+    function connectCapitalsToPorts(allBurgs, cells, isWater) {
+      const capitals = allBurgs.filter(burg => burg.type === 'capital');
+      const ports = allBurgs.filter(burg => burg.isSignificantPort);
+      
+      if (ports.length === 0) {
+        console.log('No ports found, skipping capital-to-port connections');
+        return;
+      }
+      
+      // Group burgs by island for regional connections
+      const islandGroups = findConnectedComponents(allBurgs, cells, isWater);
+      
+      for (const capital of capitals) {
+        // Capitals are never significant ports, so always connect them
+        
+        // Find capital's island
+        let capitalIsland = null;
+        for (let i = 0; i < islandGroups.length; i++) {
+          if (islandGroups[i].some(burg => burg.id === capital.id)) {
+            capitalIsland = i;
+            break;
+          }
+        }
+        
+        if (capitalIsland === null) continue;
+        
+        // Find nearest port on same island
+        const islandPorts = islandGroups[capitalIsland].filter(burg => burg.isSignificantPort);
+        
+        if (islandPorts.length === 0) {
+          console.log(`No ports on capital ${capital.id}'s island, skipping connection`);
+          continue;
+        }
+        
+        // Find closest port
+        let nearestPort = null;
+        let minDist = Infinity;
+        
+        for (const port of islandPorts) {
+          const dist = Math.hypot(capital.x - port.x, capital.y - port.y);
+          if (dist < minDist) {
+            minDist = dist;
+            nearestPort = port;
+          }
+        }
+        
+        if (nearestPort) {
+          console.log(`Connecting capital ${capital.id} to port ${nearestPort.id} (distance: ${minDist.toFixed(1)}px)`);
+          
+          // Build road from capital to port
+          const landGraph = window.__state.landGraph;
+          if (landGraph) {
+            const pathCells = shortestPath(capital.cell, nearestPort.cell, landGraph, new Set(), new Set());
+            if (pathCells && pathCells.length > 0) {
+              // Add as primary road (thicker line)
+              addPrimaryRoad(pathCells, {kind: "capital-to-port"});
+            }
+          }
+        }
+      }
+    }
+
+    /**
+     * Add a primary road (thicker than regular roads)
+     * @param {Array} pathCells - Array of cell indices forming the path
+     * @param {Object} options - Road options
+     */
+    function addPrimaryRoad(pathCells, options = {}) {
+      const roadsG = d3.select('#routes .roads');
+      if (roadsG.empty()) return;
+      
+      // Create primary road path
+      const pathCoords = pathCells.map(cellId => {
+        const cell = window.__state.cells[cellId];
+        return [cell.cx, cell.cy];
+      });
+      
+      const line = d3.line()
+        .x(d => d[0])
+        .y(d => d[1])
+        .curve(d3.curveBasis);
+      
+      roadsG.append('path')
+        .attr('class', 'primary-road')
+        .attr('d', line(pathCoords))
+        .attr('stroke', '#8B4513') // Brown color for primary roads
+        .attr('stroke-width', '3px') // Thicker than regular roads
+        .attr('fill', 'none')
+        .attr('stroke-linecap', 'round')
+        .attr('stroke-linejoin', 'round')
+        .attr('vector-effect', 'non-scaling-stroke');
     }
 
     /**
