@@ -3529,10 +3529,10 @@
         .attr('cx', d => d.x)
         .attr('cy', d => d.y)
         .attr('r', d => {
-          if (d.type === 'capital') return 4; // Capitals are largest
-          if (d.type === 'city') return 3.5; // Cities are large
+          if (d.type === 'capital') return 5; // Capitals are largest
+          if (d.type === 'city' && d.port) return 4.5; // Port cities are very large
+          if (d.type === 'city') return 4; // Cities are large
           if (d.type === 'village') return 2.5; // Villages are smallest
-          if (d.port) return 3; // Ports are medium (fallback)
           return 2.5; // Default size
         })
         .each(function(d) {
@@ -3561,8 +3561,9 @@
         })
         .attr('stroke', '#fff')
         .attr('stroke-width', d => {
-          if (d.type === 'capital') return '1.0';
-          if (d.type === 'city') return '0.8';
+          if (d.type === 'capital') return '1.2';
+          if (d.type === 'city' && d.port) return '1.0';
+          if (d.type === 'city') return '0.9';
           return '0.6'; // Villages and others
         })
         .attr('paint-order', 'stroke fill')
@@ -3575,7 +3576,7 @@
         .attr('y', d => d.y + 1)
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'middle')
-        .attr('font-size', '6px')
+        .attr('font-size', '7px')
         .attr('fill', '#fff')
         .attr('stroke', '#000')
         .attr('stroke-width', '0.5')
@@ -3590,7 +3591,7 @@
         .attr('y', d => d.y + 1)
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'middle')
-        .attr('font-size', '4px')
+        .attr('font-size', '5px')
         .attr('fill', '#fff')
         .attr('stroke', '#000')
         .attr('stroke-width', '0.3')
