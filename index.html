@@ -20,8 +20,8 @@
     .row { margin: 6px 0; }
     /* Coastline styling */
       .coast { fill: none; stroke: #111; stroke-width: 0.6px; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-    .rivers { fill: none; stroke: #4D83AE; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-    .riversShade { fill: none; stroke: rgba(0,0,0,0.35); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+    .rivers { stroke: #4D83AE; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+    .riversShade { stroke: rgba(0,0,0,0.35); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
     
     /* Route styling */
     #routes .roads { stroke: #6b4e16; stroke-width: 1.4px; fill: none; stroke-linecap: round; }
@@ -439,8 +439,8 @@
         <div id="settlements-tab" class="tab-content">
           <div class="row">
             <label>Burgs Count:</label>
-            <input id="burgsCountInput" value="15" type="range" min="0" max="50" step="1" oninput="burgsCountOutput.value = burgsCountInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-            <output id="burgsCountOutput">15</output>
+            <input id="burgsCountInput" value="25" type="range" min="0" max="50" step="1" oninput="burgsCountOutput.value = burgsCountInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
+<output id="burgsCountOutput">25</output>
           </div>
 
     <div class="row">
@@ -2740,14 +2740,16 @@
             const riverPolygon = [...riverPointsLeft, ...riverPointsRight];
             
             // Draw the polygon
+            const polygonPath = 'M' + riverPolygon.map(p => p.join(',')).join('L') + 'Z';
+            
             riversShade.append('path')
               .attr('class', 'riversShade ' + (isMain ? 'main' : 'trib'))
-              .attr('d', d3.line()(riverPolygon))
+              .attr('d', polygonPath)
               .attr('fill', 'rgba(0,0,0,0.3)');
               
             riversG.append('path')
               .attr('class', 'rivers ' + (isMain ? 'main' : 'trib'))
-              .attr('d', d3.line()(riverPolygon))
+              .attr('d', polygonPath)
               .attr('fill', '#4D83AE');
           });
           
@@ -3373,18 +3375,17 @@
     }
 
     /**
-     * Generate burgs based on current settings
+     * Generate burgs using Azgaar's economic approach
      */
     function generateBurgs() {
-      const totalCount = +document.getElementById('burgsCountInput').value || 15;
-      const capitalCount = Math.max(2, Math.floor(totalCount * 0.3)); // 30% capitals
-      const townCount = totalCount - capitalCount;
-      const capitalSpacing = +document.getElementById('burgSpacingInput').value * 2 || 24; // Larger spacing for capitals
-      const townSpacing = +document.getElementById('burgSpacingInput').value || 12;
+      const totalCount = +document.getElementById('burgsCountInput').value || 25;
+      const capitalCount = Math.max(2, Math.floor(totalCount * 0.12)); // 12% capitals
+      const cityCount = Math.floor(totalCount * 0.28); // 28% cities/ports
+      const villageCount = totalCount - capitalCount - cityCount; // 60% villages
       const sea = +document.getElementById('seaLevelInput').value;
       const cells = window.__state.cells;
       
-      console.log(`Generating ${capitalCount} capitals + ${townCount} towns with spacing ${capitalSpacing}px/${townSpacing}px`);
+      console.log(`Generating ${capitalCount} capitals + ${cityCount} cities + ${villageCount} villages using economic approach`);
       
       // Update progress during burg generation
       ProgressManager.update(82, 'Placing settlements...', 'Scoring land cells for capitals...');
@@ -3401,7 +3402,7 @@
         return;
       }
 
-      // === PHASE 1: Place Capitals ===
+      // === PHASE 1: Place Capitals (keep existing approach for now) ===
       ProgressManager.update(83, 'Placing settlements...', 'Placing capital cities...');
       
       // Score all land cells for capitals (emphasize strategic locations)
@@ -3422,6 +3423,7 @@
       }
 
       // Apply Poisson disk sampling for capitals
+      const capitalSpacing = +document.getElementById('burgSpacingInput').value * 2 || 24;
       const spacedCapitals = poissonSample(goodCapitalCandidates, capitalSpacing);
       console.log(`After capital spacing, ${spacedCapitals.length} candidates remain`);
       
@@ -3432,57 +3434,50 @@
       // Create capital burg objects
       const capitals = pickedCapitals.map((p, index) => placeBurg(p.cell, cells, sea, index, 'capital'));
       
-      // === PHASE 2: Build Capital Road Network ===
-      ProgressManager.update(84, 'Placing settlements...', 'Building capital road network...');
+      // === PHASE 2: Build Roads First (for economic scoring) ===
+      ProgressManager.update(84, 'Placing settlements...', 'Building road network for economic scoring...');
+      
+      // Build land graph and roads between capitals
+      const landGraph = buildLandGraph(cells, isWater);
+      window.__state.landGraph = landGraph; // Store for later use
       
       // Build roads between capitals (this will be used for town scoring)
       buildCapitalRoads(capitals);
       
-      // === PHASE 3: Place Towns with Road-Aware Scoring ===
-      ProgressManager.update(85, 'Placing settlements...', 'Placing towns with road access...');
+      // === PHASE 3: Place Cities (coastal/river focused) ===
+      ProgressManager.update(85, 'Placing settlements...', 'Placing cities with coastal/river focus...');
       
-      // Re-score all land cells for towns (including road access bonus)
-      const townCandidates = landCells.map(cell => ({
-        cell: cell,
-        score: scoreCellForTown(cell, cells, sea, capitals)
-      }));
-
-      // Filter out low-scoring cells and existing capital locations
-      const capitalCells = new Set(capitals.map(c => c.cell));
-      const goodTownCandidates = townCandidates.filter(c => 
-        c.score > 0.1 && !capitalCells.has(c.cell)
-      );
-      console.log(`Found ${goodTownCandidates.length} cells with good town scores (>0.1)`);
+      // Generate cities using coastal/river economic scoring
+      const cities = generateCities(cells, capitals, cityCount, null);
       
-      if (goodTownCandidates.length === 0) {
-        console.log('No suitable cells found for towns');
-        window.__state.burgs = capitals;
-        renderBurgs();
-        return;
-      }
-
-      // Apply Poisson disk sampling for towns
-      const spacedTowns = poissonSample(goodTownCandidates, townSpacing);
-      console.log(`After town spacing, ${spacedTowns.length} candidates remain`);
+      // === PHASE 4: Place Villages (inland/road focused) ===
+      ProgressManager.update(86, 'Placing settlements...', 'Placing villages with inland/road focus...');
       
-      // Take top N towns by score
-      const pickedTowns = spacedTowns.slice(0, townCount);
-      console.log(`Selected ${pickedTowns.length} towns from candidates`);
+      // Generate villages using inland/road economic scoring
+      const villages = generateVillages(cells, [...capitals, ...cities], villageCount, null);
       
-      // Create town burg objects
-      const towns = pickedTowns.map((p, index) => placeBurg(p.cell, cells, sea, capitals.length + index, 'town'));
+      // === PHASE 5: Add Spur Roads to Settlements ===
+      ProgressManager.update(87, 'Placing settlements...', 'Adding spur roads to settlements...');
       
-      // Combine capitals and towns
-      window.__state.burgs = [...capitals, ...towns];
+      // Add spur roads to cities and villages that aren't on existing routes
+      [...cities, ...villages].forEach(settlement => {
+        ensureSpurToRoad(settlement, isRouteCell, nearestRouteCell, addSpurRoad);
+      });
       
-      console.log(`Generated ${capitals.length} capitals + ${towns.length} towns = ${window.__state.burgs.length} total burgs`);
+      // Combine all settlement types
+      window.__state.burgs = [...capitals, ...cities, ...villages];
+      
+      console.log(`Generated ${capitals.length} capitals + ${cities.length} cities + ${villages.length} villages = ${window.__state.burgs.length} total burgs`);
       
       // Debug: Log sample burgs
       if (capitals.length > 0) {
         console.log('Sample capital:', capitals[0]);
       }
-      if (towns.length > 0) {
-        console.log('Sample town:', towns[0]);
+      if (cities.length > 0) {
+        console.log('Sample city:', cities[0]);
+      }
+      if (villages.length > 0) {
+        console.log('Sample village:', villages[0]);
       }
       
       // Render the burgs
@@ -3517,9 +3512,11 @@
         .attr('cx', d => d.x)
         .attr('cy', d => d.y)
         .attr('r', d => {
-          if (d.type === 'capital') return 4; // Capitals are larger
-          if (d.port) return 3; // Ports are medium
-          return 2.5; // Towns are smallest
+          if (d.type === 'capital') return 4; // Capitals are largest
+          if (d.type === 'city') return 3.5; // Cities are large
+          if (d.type === 'village') return 2.5; // Villages are smallest
+          if (d.port) return 3; // Ports are medium (fallback)
+          return 2.5; // Default size
         })
         .each(function(d) {
           // Debug: Log each burg's properties
@@ -3528,10 +3525,14 @@
           let color;
           if (d.type === 'capital') {
             color = '#ff0000'; // Red for capitals
+          } else if (d.type === 'city') {
+            color = '#0066cc'; // Blue for cities
+          } else if (d.type === 'village') {
+            color = '#ff6600'; // Orange for villages
           } else if (d.port) {
-            color = '#0066cc'; // Lighter blue for ports
+            color = '#0066cc'; // Blue for ports (fallback)
           } else {
-            color = '#ff6600'; // Orange for towns
+            color = '#ff6600'; // Orange for towns (fallback)
           }
           
           console.log(`Burg ${d.id} assigned color: ${color}`);
@@ -3542,7 +3543,11 @@
             .attr('fill', color);
         })
         .attr('stroke', '#fff')
-        .attr('stroke-width', d => d.type === 'capital' ? '1.0' : '0.6')
+        .attr('stroke-width', d => {
+          if (d.type === 'capital') return '1.0';
+          if (d.type === 'city') return '0.8';
+          return '0.6'; // Villages and others
+        })
         .attr('paint-order', 'stroke fill')
         .attr('vector-effect', 'non-scaling-stroke');
 
@@ -3561,14 +3566,14 @@
         .attr('vector-effect', 'non-scaling-stroke')
         .text('★');
 
-      // Add port symbols for ports (anchor)
+      // Add port symbols for ports (anchor) - cities and villages can be ports
       burgs.filter(d => d.port && d.type !== 'capital')
         .append('text')
         .attr('x', d => d.x)
         .attr('y', d => d.y + 1)
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'middle')
-        .attr('font-size', '4px')
+        .attr('font-size', d => d.type === 'city' ? '4px' : '3px')
         .attr('fill', '#fff')
         .attr('stroke', '#000')
         .attr('stroke-width', '0.3')
@@ -3590,6 +3595,606 @@
           console.log('First circle fill:', burgCircles[0].getAttribute('fill'), burgCircles[0].style.fill);
         }
       }
+    }
+
+    // --- Azgaar-Style Economic Town Placement ---
+    
+    // Town placement weights (configurable)
+    const TOWN_WEIGHTS = {
+      wElev:  1.0,     // penalty for elevation
+      wRiver: 0.18,    // bonus ~ river flux
+      wHarbor: 0.8,    // bonus for sheltered coast
+      wPath:  0.65,    // bonus for road usage (sqrt)
+      wCross: 0.9,     // bonus for crossroads (deg-1)
+      wNearRoad: 0.0,  // (optional) small penalty by distance to nearest road
+      jitter: 0.05     // % noise of total score
+    };
+
+    // City weights - focused on coastal/river access and trade
+    const CITY_WEIGHTS = {
+      wElev:  0.8,     // less penalty for elevation (cities can be on hills)
+      wRiver: 0.4,     // strong bonus for rivers (trade routes)
+      wHarbor: 1.2,    // very strong bonus for harbors (trade)
+      wCoast: 0.6,     // bonus for coastal access
+      wPath:  0.4,     // moderate bonus for road usage
+      wCross: 0.7,     // moderate bonus for crossroads
+      wNearRoad: 0.0,  // no penalty for distance to roads
+      jitter: 0.03     // less randomness for cities
+    };
+
+    // Village weights - focused on inland development and agriculture
+    const VILLAGE_WEIGHTS = {
+      wElev:  1.2,     // strong penalty for elevation (villages prefer flat land)
+      wRiver: 0.15,    // moderate bonus for rivers (water source)
+      wHarbor: 0.0,    // no bonus for harbors (inland)
+      wCoast: 0.0,     // no bonus for coast (inland)
+      wPath:  0.8,     // strong bonus for road usage (connectivity)
+      wCross: 1.1,     // strong bonus for crossroads (trade)
+      wFlat:  0.9,     // bonus for flat land (agriculture)
+      wNearRoad: 0.1,  // small penalty for being far from roads
+      jitter: 0.08     // more randomness for villages
+    };
+
+    /**
+     * Build road usage data for economic scoring
+     * @param {Object} routeData - Object containing routes and trails arrays
+     * @param {Array} cells - All cells array
+     */
+    function buildRoadUsage(routeData, cells) {
+      // Zero out road usage data
+      for (const c of cells) { 
+        c.path = 0; 
+        c.cross = 0; 
+      }
+      
+      // Count how many times each cell appears in any land route
+      const touchBy = new Map(); // cellId -> Set(cellId neighbors touched by a route)
+      
+      const bump = (id, nextId) => {
+        if (id == null) return;
+        cells[id].path++;
+        if (nextId != null) {
+          let S = touchBy.get(id);
+          if (!S) { S = new Set(); touchBy.set(id, S); }
+          S.add(nextId);
+        }
+      };
+
+      const visit = (segments) => {
+        for (const seg of segments) {
+          // seg should be an array of cell indices along the path (inclusive)
+          for (let i = 0; i < seg.length; i++) {
+            bump(seg[i], seg[i+1]);
+            bump(seg[i], seg[i-1]);
+          }
+        }
+      };
+
+      visit(routeData.routes || []);
+      visit(routeData.trails || []);
+
+      // crossroads = number of *distinct* neighbors a route touches from this cell
+      for (const [id, set] of touchBy.entries()) {
+        cells[id].cross = set.size; // deg along route network
+      }
+      
+      console.log(`Road usage built: ${cells.filter(c => c.path > 0).length} cells have road usage`);
+    }
+
+    /**
+     * Calculate geographic score for a cell
+     * @param {Object} c - Cell object
+     * @returns {number} Geographic score
+     */
+    function geographicScore(c) {
+      const elevP = Math.max(0, 1 - c.high);         // lowland best
+      const riverB = Math.sqrt(Math.max(0, c.riverFlux || 0));
+      const harborB = c.hasHarbor ? 1 : 0;
+      return TOWN_WEIGHTS.wElev * elevP
+           + TOWN_WEIGHTS.wRiver * riverB
+           + TOWN_WEIGHTS.wHarbor * harborB;
+    }
+
+    /**
+     * Calculate city geographic score (coastal/river focused)
+     * @param {Object} c - Cell object
+     * @param {Array} cells - All cells array
+     * @param {Array} isWater - Water mask array
+     * @returns {number} City geographic score
+     */
+    function cityGeographicScore(c, cells, isWater) {
+      const elevP = Math.max(0, 1 - c.high);         // lowland preferred
+      const riverB = Math.sqrt(Math.max(0, c.riverFlux || 0));
+      const harborB = c.hasHarbor ? 1 : 0;
+      
+      // Calculate coastal access
+      let coastB = 0;
+      let minWaterDist = Infinity;
+      for (let i = 0; i < cells.length; i++) {
+        if (isWater[i]) {
+          const dist = Math.hypot(c.cx - cells[i].cx, c.cy - cells[i].cy);
+          minWaterDist = Math.min(minWaterDist, dist);
+        }
+      }
+      if (minWaterDist < 50) { // Within 50px of water
+        coastB = Math.max(0, 1 - (minWaterDist / 50));
+      }
+      
+      return CITY_WEIGHTS.wElev * elevP
+           + CITY_WEIGHTS.wRiver * riverB
+           + CITY_WEIGHTS.wHarbor * harborB
+           + CITY_WEIGHTS.wCoast * coastB;
+    }
+
+    /**
+     * Calculate village geographic score (inland/agriculture focused)
+     * @param {Object} c - Cell object
+     * @param {Array} cells - All cells array
+     * @param {Array} isWater - Water mask array
+     * @returns {number} Village geographic score
+     */
+    function villageGeographicScore(c, cells, isWater) {
+      const elevP = Math.max(0, 1 - c.high);         // flat land preferred
+      const riverB = Math.sqrt(Math.max(0, c.riverFlux || 0));
+      const flatB = Math.max(0, 1 - c.high);         // flat land bonus for agriculture
+      
+      // Calculate distance to nearest road for penalty
+      let nearRoadDist = 0;
+      if (VILLAGE_WEIGHTS.wNearRoad > 0) {
+        // Simple distance calculation - could be optimized
+        let minRoadDist = Infinity;
+        for (let i = 0; i < cells.length; i++) {
+          if ((cells[i].path || 0) > 0) {
+            const dist = Math.hypot(c.cx - cells[i].cx, c.cy - cells[i].cy);
+            minRoadDist = Math.min(minRoadDist, dist);
+          }
+        }
+        nearRoadDist = minRoadDist < Infinity ? minRoadDist : 100; // Default penalty if no roads
+      }
+      
+      return VILLAGE_WEIGHTS.wElev * elevP
+           + VILLAGE_WEIGHTS.wRiver * riverB
+           + VILLAGE_WEIGHTS.wFlat * flatB
+           - VILLAGE_WEIGHTS.wNearRoad * nearRoadDist;
+    }
+
+    /**
+     * Calculate economic score for a cell
+     * @param {Object} c - Cell object
+     * @param {number} nearestRoadDist - Distance to nearest road (optional)
+     * @returns {number} Economic score
+     */
+    function economicScore(c, nearestRoadDist = 0) {
+      const pathB = Math.sqrt(c.path || 0);
+      const crossB = Math.max(0, (c.cross || 0) - 1);
+      const nearRoadPenalty = (TOWN_WEIGHTS.wNearRoad > 0) ? (nearestRoadDist * TOWN_WEIGHTS.wNearRoad) : 0;
+      return TOWN_WEIGHTS.wPath * pathB
+           + TOWN_WEIGHTS.wCross * crossB
+           - nearRoadPenalty;
+    }
+
+    /**
+     * Calculate city economic score (trade focused)
+     * @param {Object} c - Cell object
+     * @returns {number} City economic score
+     */
+    function cityEconomicScore(c) {
+      const pathB = Math.sqrt(c.path || 0);
+      const crossB = Math.max(0, (c.cross || 0) - 1);
+      return CITY_WEIGHTS.wPath * pathB
+           + CITY_WEIGHTS.wCross * crossB;
+    }
+
+    /**
+     * Calculate village economic score (connectivity focused)
+     * @param {Object} c - Cell object
+     * @returns {number} Village economic score
+     */
+    function villageEconomicScore(c) {
+      const pathB = Math.sqrt(c.path || 0);
+      const crossB = Math.max(0, (c.cross || 0) - 1);
+      return VILLAGE_WEIGHTS.wPath * pathB
+           + VILLAGE_WEIGHTS.wCross * crossB;
+    }
+
+    /**
+     * Add random jitter to scores
+     * @param {number} base - Base score
+     * @returns {number} Score with jitter
+     */
+    function randomJitter(base) {
+      const j = TOWN_WEIGHTS.jitter;
+      return base * ((Math.random() * 2 * j) - j); // ±j%
+    }
+
+    /**
+     * Add random jitter to city scores
+     * @param {number} base - Base score
+     * @returns {number} Score with jitter
+     */
+    function cityRandomJitter(base) {
+      const j = CITY_WEIGHTS.jitter;
+      return base * ((Math.random() * 2 * j) - j); // ±j%
+    }
+
+    /**
+     * Add random jitter to village scores
+     * @param {number} base - Base score
+     * @returns {number} Score with jitter
+     */
+    function villageRandomJitter(base) {
+      const j = VILLAGE_WEIGHTS.jitter;
+      return base * ((Math.random() * 2 * j) - j); // ±j%
+    }
+
+    /**
+     * Generate cities using coastal/river economic approach
+     * @param {Array} cells - All cells array
+     * @param {Array} capitals - Array of capital burgs
+     * @param {number} targetCityCount - Number of cities to generate
+     * @param {Function} nameFor - Name generation function
+     * @returns {Array} Array of city burgs
+     */
+    function generateCities(cells, capitals, targetCityCount, nameFor) {
+      const sea = +document.getElementById('seaLevelInput').value;
+      const isWater = window.__state.isWater || [];
+      
+      // Mark capitals + neighbors as reserved
+      const used = new Uint8Array(cells.length);
+      for (const cap of capitals) {
+        used[cap.cell] = 1;
+        for (const n of cells[cap.cell].neighbors) used[n] = 1;
+      }
+
+      // Score all land cells for cities
+      const scored = [];
+      for (let i = 0; i < cells.length; i++) {
+        const c = cells[i];
+        if (isWater[i] || used[i]) continue;
+        
+        const geoScore = cityGeographicScore(c, cells, isWater);
+        const econScore = cityEconomicScore(c);
+        const base = geoScore + econScore;
+        const score = base + cityRandomJitter(base);
+        scored.push({i, score});
+      }
+
+      scored.sort((a, b) => b.score - a.score);
+
+      const cities = [];
+      for (const s of scored) {
+        if (cities.length >= targetCityCount) break;
+        if (used[s.i]) continue;
+        const c = cells[s.i];
+        if (isWater[s.i]) continue;
+
+        // Place city (burg)
+        const city = {
+          cell: s.i,
+          x: c.cx, 
+          y: c.cy,
+          type: "city",
+          name: nameFor ? nameFor(c) : null,
+          id: capitals.length + cities.length,
+          population: 2000,
+          port: false,
+          onRiver: false
+        };
+        
+        // Determine if it's a port (near coast)
+        let minWaterDist = Infinity;
+        for (let i = 0; i < cells.length; i++) {
+          if (isWater[i]) {
+            const dist = Math.hypot(c.cx - cells[i].cx, c.cy - cells[i].cy);
+            minWaterDist = Math.min(minWaterDist, dist);
+          }
+        }
+        city.port = minWaterDist < 25; // Within 25px of water
+        
+        // Determine if it's on a river
+        c.neighbors.forEach(nb => {
+          const neighborCell = cells[nb];
+          const isWaterNeighbor = isWater[nb];
+          const isLake = window.__state.isLake && window.__state.isLake[nb] === 1;
+          if (isWaterNeighbor && !isLake) {
+            city.onRiver = true;
+          }
+        });
+
+        // Generate name if not provided
+        if (!city.name) {
+          city.name = BURG_NAMES[city.id % BURG_NAMES.length] + 
+                     (city.id > BURG_NAMES.length - 1 ? ` ${Math.floor(city.id / BURG_NAMES.length) + 1}` : '');
+        }
+
+        cities.push(city);
+
+        // Block this cell + neighbors
+        used[s.i] = 1;
+        for (const n of c.neighbors) used[n] = 1;
+      }
+
+      console.log(`Generated ${cities.length} cities using coastal/river economic scoring`);
+      return cities;
+    }
+
+    /**
+     * Generate villages using inland/road economic approach
+     * @param {Array} cells - All cells array
+     * @param {Array} existingBurgs - Array of existing burgs (capitals + cities)
+     * @param {number} targetVillageCount - Number of villages to generate
+     * @param {Function} nameFor - Name generation function
+     * @returns {Array} Array of village burgs
+     */
+    function generateVillages(cells, existingBurgs, targetVillageCount, nameFor) {
+      const sea = +document.getElementById('seaLevelInput').value;
+      const isWater = window.__state.isWater || [];
+      
+      // Mark existing burgs + neighbors as reserved
+      const used = new Uint8Array(cells.length);
+      for (const burg of existingBurgs) {
+        used[burg.cell] = 1;
+        for (const n of cells[burg.cell].neighbors) used[n] = 1;
+      }
+
+      // Score all land cells for villages
+      const scored = [];
+      for (let i = 0; i < cells.length; i++) {
+        const c = cells[i];
+        if (isWater[i] || used[i]) continue;
+        
+        const geoScore = villageGeographicScore(c, cells, isWater);
+        const econScore = villageEconomicScore(c);
+        const base = geoScore + econScore;
+        const score = base + villageRandomJitter(base);
+        scored.push({i, score});
+      }
+
+      scored.sort((a, b) => b.score - a.score);
+
+      const villages = [];
+      for (const s of scored) {
+        if (villages.length >= targetVillageCount) break;
+        if (used[s.i]) continue;
+        const c = cells[s.i];
+        if (isWater[s.i]) continue;
+
+        // Place village (burg)
+        const village = {
+          cell: s.i,
+          x: c.cx, 
+          y: c.cy,
+          type: "village",
+          name: nameFor ? nameFor(c) : null,
+          id: existingBurgs.length + villages.length,
+          population: 500,
+          port: false,
+          onRiver: false
+        };
+        
+        // Determine if it's a port (near coast) - less likely for villages
+        let minWaterDist = Infinity;
+        for (let i = 0; i < cells.length; i++) {
+          if (isWater[i]) {
+            const dist = Math.hypot(c.cx - cells[i].cx, c.cy - cells[i].cy);
+            minWaterDist = Math.min(minWaterDist, dist);
+          }
+        }
+        village.port = minWaterDist < 10; // Only very close to water
+        
+        // Determine if it's on a river
+        c.neighbors.forEach(nb => {
+          const neighborCell = cells[nb];
+          const isWaterNeighbor = isWater[nb];
+          const isLake = window.__state.isLake && window.__state.isLake[nb] === 1;
+          if (isWaterNeighbor && !isLake) {
+            village.onRiver = true;
+          }
+        });
+
+        // Generate name if not provided
+        if (!village.name) {
+          village.name = BURG_NAMES[village.id % BURG_NAMES.length] + 
+                        (village.id > BURG_NAMES.length - 1 ? ` ${Math.floor(village.id / BURG_NAMES.length) + 1}` : '');
+        }
+
+        villages.push(village);
+
+        // Block this cell + neighbors
+        used[s.i] = 1;
+        for (const n of c.neighbors) used[n] = 1;
+      }
+
+      console.log(`Generated ${villages.length} villages using inland/road economic scoring`);
+      return villages;
+    }
+
+    /**
+     * Generate towns using Azgaar's economic approach
+     * @param {Array} cells - All cells array
+     * @param {Array} capitals - Array of capital burgs
+     * @param {number} targetTownCount - Number of towns to generate
+     * @param {Function} nameFor - Name generation function
+     * @returns {Array} Array of town burgs
+     */
+    function generateTowns(cells, capitals, targetTownCount, nameFor) {
+      const sea = +document.getElementById('seaLevelInput').value;
+      const isWater = window.__state.isWater || [];
+      
+      // Mark capitals + neighbors as reserved
+      const used = new Uint8Array(cells.length);
+      for (const cap of capitals) {
+        used[cap.cell] = 1;
+        for (const n of cells[cap.cell].neighbors) used[n] = 1;
+      }
+
+      // Score all land cells
+      const scored = [];
+      for (let i = 0; i < cells.length; i++) {
+        const c = cells[i];
+        if (isWater[i] || used[i]) continue;
+        
+        const base = (c.geoScore ?? geographicScore(c)) + economicScore(c, 0);
+        const score = base + randomJitter(base);
+        scored.push({i, score});
+      }
+
+      scored.sort((a, b) => b.score - a.score);
+
+      const towns = [];
+      for (const s of scored) {
+        if (towns.length >= targetTownCount) break;
+        if (used[s.i]) continue;
+        const c = cells[s.i];
+        if (isWater[s.i]) continue;
+
+        // Place town (burg)
+        const town = {
+          cell: s.i,
+          x: c.cx, 
+          y: c.cy,
+          type: "town",
+          name: nameFor ? nameFor(c) : null,
+          id: capitals.length + towns.length,
+          population: 1000,
+          port: false,
+          onRiver: false
+        };
+        
+        // Determine if it's a port (near coast)
+        let minWaterDist = Infinity;
+        for (let i = 0; i < cells.length; i++) {
+          if (isWater[i]) {
+            const dist = Math.hypot(c.cx - cells[i].cx, c.cy - cells[i].cy);
+            minWaterDist = Math.min(minWaterDist, dist);
+          }
+        }
+        town.port = minWaterDist < 15; // Within 15px of water
+        
+        // Determine if it's on a river
+        c.neighbors.forEach(nb => {
+          const neighborCell = cells[nb];
+          const isWaterNeighbor = isWater[nb];
+          const isLake = window.__state.isLake && window.__state.isLake[nb] === 1;
+          if (isWaterNeighbor && !isLake) {
+            town.onRiver = true;
+          }
+        });
+
+        // Generate name if not provided
+        if (!town.name) {
+          town.name = BURG_NAMES[town.id % BURG_NAMES.length] + 
+                     (town.id > BURG_NAMES.length - 1 ? ` ${Math.floor(town.id / BURG_NAMES.length) + 1}` : '');
+        }
+
+        towns.push(town);
+
+        // Block this cell + neighbors
+        used[s.i] = 1;
+        for (const n of c.neighbors) used[n] = 1;
+      }
+
+      console.log(`Generated ${towns.length} towns using economic scoring`);
+      return towns;
+    }
+
+    /**
+     * Ensure towns have spur roads to the network
+     * @param {Object} town - Town burg object
+     * @param {Function} isRouteCell - Function to check if cell is on a route
+     * @param {Function} nearestRouteCellFn - Function to find nearest route cell
+     * @param {Function} addRoadPathFn - Function to add road path
+     */
+    function ensureSpurToRoad(town, isRouteCell, nearestRouteCellFn, addRoadPathFn) {
+      const id = town.cell;
+      if (isRouteCell(id)) return;
+      
+      const toId = nearestRouteCellFn(id);
+      if (toId == null) return;
+      
+      const landGraph = window.__state.landGraph;
+      if (!landGraph) return;
+      
+      const pathCells = shortestPath(id, toId, landGraph, new Set(), new Set());
+      if (pathCells && pathCells.length) {
+        addRoadPathFn(pathCells, {kind: "spur"});
+      }
+    }
+
+    /**
+     * Check if a cell is on a route
+     * @param {number} cellId - Cell index
+     * @returns {boolean} True if cell is on a route
+     */
+    function isRouteCell(cellId) {
+      const cells = window.__state.cells;
+      if (!cells || !cells[cellId]) return false;
+      return (cells[cellId].path || 0) > 0;
+    }
+
+    /**
+     * Find nearest cell that's on a route
+     * @param {number} cellId - Starting cell index
+     * @returns {number|null} Nearest route cell index or null
+     */
+    function nearestRouteCell(cellId) {
+      const cells = window.__state.cells;
+      if (!cells || !cells[cellId]) return null;
+      
+      // Simple BFS to find nearest route cell
+      const visited = new Set();
+      const queue = [{cell: cellId, dist: 0}];
+      
+      while (queue.length > 0) {
+        const {cell, dist} = queue.shift();
+        if (visited.has(cell)) continue;
+        visited.add(cell);
+        
+        if (isRouteCell(cell)) {
+          return cell;
+        }
+        
+        // Add neighbors to queue
+        const cellObj = cells[cell];
+        if (cellObj && cellObj.neighbors) {
+          for (const neighbor of cellObj.neighbors) {
+            if (!visited.has(neighbor)) {
+              queue.push({cell: neighbor, dist: dist + 1});
+            }
+          }
+        }
+      }
+      
+      return null;
+    }
+
+    /**
+     * Add a spur road path
+     * @param {Array} pathCells - Array of cell indices forming the path
+     * @param {Object} options - Path options
+     */
+    function addSpurRoad(pathCells, options) {
+      if (!pathCells || pathCells.length < 2) return;
+      
+      const cells = window.__state.cells;
+      const points = pathCells.map(cellId => [cells[cellId].cx, cells[cellId].cy]);
+      
+      const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
+      const smoothed = smoothLine(points, 1);
+      
+      // Add to trails (spurs are local connections)
+      const trailsG = d3.select('#routes .trails');
+      trailsG.append('path')
+        .attr('d', line(smoothed))
+        .attr('fill', 'none')
+        .attr('stroke', '#9b7b3a')
+        .attr('stroke-width', '0.8px')
+        .attr('stroke-dasharray', '2 2')
+        .attr('stroke-linecap', 'round')
+        .attr('stroke-linejoin', 'round')
+        .attr('vector-effect', 'non-scaling-stroke');
+      
+      console.log(`Added spur road with ${pathCells.length} cells`);
     }
 
     // --- Routes System ---
@@ -4246,7 +4851,7 @@
      * @param {Object} landGraph - Land navigation graph
      */
     function buildBackboneRoads(burgs, landGraph) {
-      if (burgs.length < 2) return;
+      if (burgs.length < 2) return [];
       
       const roadDensity = +document.getElementById('roadDensityInput').value || 0.6;
       const hubCount = Math.max(2, Math.round(burgs.length * (0.35 + 0.5 * roadDensity)));
@@ -4254,6 +4859,9 @@
       // Create sets for tracking used edges and burg cells
       const usedEdges = new Set();
       const burgCells = new Set(burgs.map(b => b.cell));
+      
+      // Collect all route segments for road usage tracking
+      const allRouteSegments = [];
       
       // Group burgs by connected components
       const components = findConnectedComponents(burgs, landGraph);
@@ -4331,6 +4939,9 @@
           // Mark edges as used for future pathfinding
           markPathEdgesAsUsed(edge.path, usedEdges);
           
+          // Add to route segments for road usage tracking
+          allRouteSegments.push(edge.path);
+          
           const points = polylineFromPath(edge.path);
           const smoothed = smoothLine(points, 1);
           return {
@@ -4358,7 +4969,7 @@
         console.log(`Component ${componentIndex}: ${mstEdges.length} roads between ${componentHubs.length} hubs`);
       });
       
-
+      return allRouteSegments;
     }
     
     /**
@@ -4367,7 +4978,7 @@
      * @param {Object} landGraph - Land navigation graph
      */
     function buildLocalTrails(burgs, landGraph) {
-      if (burgs.length < 2) return;
+      if (burgs.length < 2) return [];
       
       const trailDensity = +document.getElementById('trailDensityInput').value || 0.5;
       const maxDistance = 160 + (trailDensity * 80); // 160-240px range
@@ -4380,6 +4991,7 @@
       const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
       const existingTrails = [];
       const trailPaths = [];
+      const allTrailSegments = [];
       
       // Group burgs by connected components
       const components = findConnectedComponents(burgs, landGraph);
@@ -4417,6 +5029,9 @@
               if (!existingTrails.includes(trailKey)) {
                 existingTrails.push(trailKey);
                 
+                // Add to trail segments for road usage tracking
+                allTrailSegments.push(path);
+                
                 // Collect trail path data instead of adding immediately
                 trailPaths.push({
                   d: line(smoothed),
@@ -4449,7 +5064,8 @@
         });
       
       console.log(`Total trails built: ${existingTrails.length}`);
-
+      
+      return allTrailSegments;
     }
     
     /**
@@ -4949,6 +5565,9 @@
       
       markPorts(burgs, cells, isWater);
       
+      // Collect route data for economic town placement
+      const routeData = { routes: [], trails: [] };
+      
       // Build primary roads (only if enabled)
       if (document.getElementById('roadsOnInput') && document.getElementById('roadsOnInput').checked) {
         ProgressManager.update(93, 'Building routes...', 'Computing primary roads...');
@@ -4960,7 +5579,7 @@
         }, 5000); // 5 second timeout
         
         try {
-          buildBackboneRoads(burgs, landGraph);
+          routeData.routes = buildBackboneRoads(burgs, landGraph);
         } finally {
           clearTimeout(roadsTimeout);
         }
@@ -4977,10 +5596,15 @@
         }, 5000); // 5 second timeout
         
         try {
-          buildLocalTrails(burgs, landGraph);
+          routeData.trails = buildLocalTrails(burgs, landGraph);
         } finally {
           clearTimeout(trailsTimeout);
         }
+      }
+      
+      // Build road usage data for economic town placement
+      if (routeData.routes.length > 0 || routeData.trails.length > 0) {
+        buildRoadUsage(routeData, cells);
       }
       
       // Build sea routes if enabled
