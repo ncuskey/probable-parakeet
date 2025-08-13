@@ -496,25 +496,25 @@
         <div id="routes-tab" class="tab-content">
           <div class="row">
             <label>Road Density (Primary):</label>
-            <input id="roadDensityInput" value="0.6" type="range" min="0" max="1" step="0.05" oninput="roadDensityOutput.value = roadDensityInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+            <input id="roadDensityInput" value="0.6" type="range" min="0" max="1" step="0.05" oninput="roadDensityOutput.value = roadDensityInput.valueAsNumber; debouncedComputeRoutes();">
             <output id="roadDensityOutput">0.6</output>
           </div>
 
           <div class="row">
             <label>Trail Density (Local):</label>
-            <input id="trailDensityInput" value="0.5" type="range" min="0" max="1" step="0.05" oninput="trailDensityOutput.value = trailDensityInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+            <input id="trailDensityInput" value="0.5" type="range" min="0" max="1" step="0.05" oninput="trailDensityOutput.value = trailDensityInput.valueAsNumber; debouncedComputeRoutes();">
             <output id="trailDensityOutput">0.5</output>
           </div>
 
           <div class="row">
             <label>Slope Penalty:</label>
-            <input id="slopePenaltyInput" value="1.2" type="range" min="0" max="3" step="0.1" oninput="slopePenaltyOutput.value = slopePenaltyInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+            <input id="slopePenaltyInput" value="1.2" type="range" min="0" max="3" step="0.1" oninput="slopePenaltyOutput.value = slopePenaltyInput.valueAsNumber; debouncedComputeRoutes();">
             <output id="slopePenaltyOutput">1.2</output>
           </div>
 
           <div class="row">
             <label>River Crossing Penalty:</label>
-            <input id="riverPenaltyInput" value="1.0" type="range" min="0" max="3" step="0.1" oninput="riverPenaltyOutput.value = riverPenaltyInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
+            <input id="riverPenaltyInput" value="1.0" type="range" min="0" max="3" step="0.1" oninput="riverPenaltyOutput.value = riverPenaltyInput.valueAsNumber; debouncedComputeRoutes();">
             <output id="riverPenaltyOutput">1.0</output>
           </div>
 
@@ -580,6 +580,17 @@
         timeout = setTimeout(() => fn(...a), delay); 
       }; 
     };
+
+    // Route computation debouncing and single-flight logic
+    let routeRunToken = 0;
+    let isRouting = false;
+    let pendingRoutes = false;
+    
+    const debouncedComputeRoutes = heavyDebounce(() => {
+      if (window.__state.computeRoutes) {
+        window.__state.computeRoutes();
+      }
+    }, 200);
 
     // Cached DOM elements for performance
     const DOM = {
@@ -810,6 +821,8 @@
       text: null,
       detail: null,
       isVisible: false,
+      lastUpdate: 0,
+      updateThrottle: 100, // Only update every 100ms
       
       init() {
         this.overlay = document.getElementById('progressOverlay');
@@ -849,6 +862,14 @@
       },
       
       update(percent, text, detail = '') {
+        // Throttle updates to reduce spam, but allow final completion updates
+        const now = Date.now();
+        const isFinalUpdate = percent >= 100;
+        if (!isFinalUpdate && now - this.lastUpdate < this.updateThrottle) {
+          return;
+        }
+        this.lastUpdate = now;
+        
         // Ensure overlay is visible before updating
         if (!this.isVisible) {
           this.show();
@@ -863,7 +884,10 @@
         if (this.detail) {
           this.detail.textContent = detail;
         }
-        console.log(`Progress update: ${percent}% - ${text}`);
+        
+        if (DEBUG) {
+          console.log(`Progress update: ${percent}% - ${text}`);
+        }
         
         // Force a repaint to ensure updates are visible
         if (this.overlay) {
@@ -1960,7 +1984,8 @@
               ProgressManager.update(90, 'Building routes...', 'Computing road and sea networks...');
               
               setTimeout(() => {
-                computeRoutes();
+                // Use debounced route computation to prevent double execution
+                debouncedComputeRoutes();
               }, 100);
             }, 100);
           }, 100);
@@ -2300,8 +2325,8 @@
         console.log(`Original rivers before export: ${originalRivers.length} paths`);
         if (originalRivers.length === 0) {
           console.log('No rivers found! Computing rivers...');
-          if (window.__state.computeRivers) {
-            window.__state.computeRivers();
+          if (window.__state.computeRoutes) {
+            window.__state.computeRoutes();
           }
         }
         
@@ -4860,25 +4885,25 @@
       }
       window.__state.shortestPathCallCount++;
       
-      if (window.__state.shortestPathCallCount <= 5) {
+      if (DEBUG && window.__state.shortestPathCallCount <= 5) {
         console.log(`shortestPath called: start=${startIndex}, end=${endIndex}, graph edges=${graph?.edges?.length || 0}`);
       }
       
       // Skip if start or end is water
       if (isWater[startIndex] || isWater[endIndex]) {
-        console.log(`shortestPath: start or end is water (start: ${isWater[startIndex]}, end: ${isWater[endIndex]})`);
+        if (DEBUG) console.log(`shortestPath: start or end is water (start: ${isWater[startIndex]}, end: ${isWater[endIndex]})`);
         return null;
       }
       
       // Check if start and end are the same
       if (startIndex === endIndex) {
-        console.log(`shortestPath: start and end are the same (${startIndex})`);
+        if (DEBUG) console.log(`shortestPath: start and end are the same (${startIndex})`);
         return [startIndex];
       }
       
       // Validate graph
       if (!graph || !graph.edges || graph.edges.length === 0) {
-        console.warn(`shortestPath: invalid or empty graph provided`);
+        if (DEBUG) console.warn(`shortestPath: invalid or empty graph provided`);
         return null;
       }
       
@@ -4889,7 +4914,7 @@
         edgeMap.set(key, edge);
       }
       
-      if (window.__state.shortestPathCallCount <= 5) {
+      if (DEBUG && window.__state.shortestPathCallCount <= 5) {
         console.log(`shortestPath: built edge map with ${edgeMap.size} edges`);
       }
       
@@ -4920,7 +4945,7 @@
         }
         
         if (current === null) {
-          console.warn(`A*: no valid node found in openSet (size: ${openSet.size})`);
+          if (DEBUG) console.warn(`A*: no valid node found in openSet (size: ${openSet.size})`);
           break;
         }
         
@@ -4931,7 +4956,7 @@
             path.unshift(current);
             current = cameFrom.get(current);
           }
-          console.log(`A* found path in ${iterations} iterations`);
+          if (DEBUG) console.log(`A* found path in ${iterations} iterations`);
           return path;
         }
         
@@ -4948,6 +4973,7 @@
         let addedNeighbors = 0;
         
         for (const neighborIndex of currentCell.neighbors) {
+          // Don't filter out neighbors - only skip truly impassable water
           if (isWater[neighborIndex]) continue; // Skip water neighbors
           validNeighbors++;
           
@@ -4957,7 +4983,7 @@
           let tentativeG = gScore.get(current) || Infinity;
           
           if (edge) {
-            // Use the precomputed edge weight
+            // Use the precomputed edge weight - don't filter, just weight
             let cost = edge.w;
             
             // Apply existing road discount if this edge was already used
@@ -4998,7 +5024,7 @@
         }
       }
       
-      console.log(`A* failed after ${iterations} iterations, falling back to BFS`);
+      if (DEBUG) console.log(`A* failed after ${iterations} iterations, falling back to BFS`);
       
       // Fallback to simple BFS if A* fails
       const visited = new Set();
@@ -5009,7 +5035,7 @@
         const [current, path] = queue.shift();
         
         if (current === endIndex) {
-          console.log(`BFS fallback found path`);
+          if (DEBUG) console.log(`BFS fallback found path`);
           return path;
         }
         
@@ -5028,7 +5054,7 @@
     }
     
     /**
-     * Admissible heuristic function for A* (straight-line distance divided by average cell step)
+     * Admissible heuristic function for A* (straight-line distance)
      * @param {number} a - Cell index
      * @param {number} b - Cell index  
      * @param {Array} cells - All cells array
@@ -5038,8 +5064,8 @@
       const dx = cells[a].cx - cells[b].cx;
       const dy = cells[a].cy - cells[b].cy;
       const d = Math.hypot(dx, dy);
-      const step = Math.max(1, 20); // Approximate average cell spacing
-      return d / step;
+      // Use Euclidean distance directly - it's admissible and non-negative
+      return Math.max(0, d);
     }
     
     /**
@@ -5611,7 +5637,7 @@
     }
     
     /**
-     * Mark ports in burgs array
+     * Mark ports in burgs array, ensuring every island has at least one port
      * @param {Array} burgs - Burgs array
      * @param {Array} cells - All cells array
      * @param {Array} isWater - Water mask array
@@ -5619,8 +5645,9 @@
     function markPorts(burgs, cells, isWater) {
       const sea = +document.getElementById('seaLevelInput').value;
       
+      // First pass: mark obvious ports
       burgs.forEach(burg => {
-        // Check if burg is near water (within 16 pixels)
+        // Check if burg is near water (within 32 pixels)
         let minWaterDist = Infinity;
         for (let i = 0; i < cells.length; i++) {
           if (isWater[i]) {
@@ -5629,9 +5656,62 @@
           }
         }
         
-        const isPort = minWaterDist < 32; // Increased from 16 to 32 for better port detection
+        const isPort = minWaterDist < 32;
         burg.isPort = isPort;
         burg.port = isPort; // keep renderers and routers in sync
+      });
+      
+      // Second pass: ensure every island has at least one port
+      const landGraph = buildLandGraph(cells, isWater);
+      const components = findConnectedComponents(burgs, landGraph);
+      
+      components.forEach((islandBurgs, islandIndex) => {
+        const hasPort = islandBurgs.some(burg => burg.isPort);
+        
+        if (!hasPort && islandBurgs.length > 0) {
+          // Find the best port candidate on this island
+          let bestPortCandidate = null;
+          let bestScore = -Infinity;
+          
+          islandBurgs.forEach(burg => {
+            // Score based on burg type and proximity to water
+            let score = 0;
+            
+            // Prefer larger settlements
+            if (burg.type === 'capital') score += 100;
+            else if (burg.type === 'city') score += 50;
+            else if (burg.type === 'town') score += 25;
+            else if (burg.type === 'hamlet') score += 10;
+            
+            // Find minimum distance to water
+            let minWaterDist = Infinity;
+            for (let i = 0; i < cells.length; i++) {
+              if (isWater[i]) {
+                const dist = Math.hypot(burg.x - cells[i].cx, burg.y - cells[i].cy);
+                minWaterDist = Math.min(minWaterDist, dist);
+              }
+            }
+            
+            // Prefer closer to water (inverse distance)
+            if (minWaterDist < Infinity) {
+              score += Math.max(0, 100 - minWaterDist);
+            }
+            
+            if (score > bestScore) {
+              bestScore = score;
+              bestPortCandidate = burg;
+            }
+          });
+          
+          if (bestPortCandidate) {
+            bestPortCandidate.port = true;
+            bestPortCandidate.isPort = true;
+            bestPortCandidate.isSignificantPort = true;
+            if (DEBUG) console.log(`Promoted ${bestPortCandidate.type} ${bestPortCandidate.id} to port on island ${islandIndex}`);
+          } else {
+            if (DEBUG) console.log(`No suitable port candidate found on island ${islandIndex}`);
+          }
+        }
       });
     }
     
@@ -6153,6 +6233,12 @@
         // Run single-source Dijkstra from hub (cached)
         const {dist, prev} = getSeaSSSP(hubSeaIndex, seaGraph, usedEdges);
         
+        // Validate that we got valid results
+        if (!dist || !prev || dist.size === 0) {
+          if (DEBUG) console.warn(`Island ${islandId}: No valid sea distances computed from hub ${hubPort.id} (seaIndex: ${hubSeaIndex})`);
+          return;
+        }
+        
         islandDistances.set(islandId, {
           hubPort,
           hubSeaIndex,
@@ -6160,7 +6246,7 @@
           predecessors: prev
         });
         
-        console.log(`Island ${islandId}: hub at port ${hubPort.id}, computed distances to ${Object.keys(distances).length} ocean nodes`);
+        if (DEBUG) console.log(`Island ${islandId}: hub at port ${hubPort.id}, computed distances to ${Object.keys(dist).length} ocean nodes`);
       });
       
       // 4) Build inter-island connections
@@ -6175,11 +6261,11 @@
       
       const largestIsland = islandDistances.get(largestIslandId);
       if (!largestIsland) {
-        console.warn('No largest island with sea access found!');
+        if (DEBUG) console.warn('No largest island with sea access found!');
         return;
       }
       
-      console.log(`Largest island: ${largestIslandId} with ${islandGroups[largestIslandId].length} ports`);
+      if (DEBUG) console.log(`Largest island: ${largestIslandId} with ${islandGroups[largestIslandId].length} ports`);
       
       // Connect each island to largest island
       islandGroups.forEach((islandPorts, islandId) => {
@@ -6187,7 +6273,7 @@
         
         const islandData = islandDistances.get(islandId);
         if (!islandData) {
-          console.warn(`Island ${islandId} has no distance data despite having sea access!`);
+          if (DEBUG) console.warn(`Island ${islandId} has no distance data despite having sea access!`);
           return;
         }
         
@@ -6199,24 +6285,25 @@
           const portWithSea = portsWithSeaIndex.find(ps => ps.id === port.id);
           if (!portWithSea) return;
           
-          const cost = islandData.distances[portWithSea.seaIndex] || Infinity;
-          if (cost < bestCost) {
-            bestCost = cost;
+          const cost = islandData.distances.get ? islandData.distances.get(portWithSea.seaIndex) : islandData.distances[portWithSea.seaIndex];
+          const finalCost = (cost !== undefined && cost !== null) ? cost : Infinity;
+          if (finalCost < bestCost) {
+            bestCost = finalCost;
             bestConnection = {
               fromIsland: islandId,
               fromPort: port,
               fromSeaIndex: portWithSea.seaIndex,
               toIsland: largestIslandId,
-              cost: cost
+              cost: finalCost
             };
           }
         });
         
         if (bestConnection && bestCost < Infinity) {
           islandConnections.push(bestConnection);
-          console.log(`Connected island ${islandId} to largest island ${largestIslandId} with cost ${bestCost.toFixed(1)}`);
+          if (DEBUG) console.log(`Connected island ${islandId} to largest island ${largestIslandId} with cost ${bestCost.toFixed(1)}`);
         } else {
-          console.warn(`Failed to connect island ${islandId} to largest island ${largestIslandId}`);
+          if (DEBUG) console.warn(`Failed to connect island ${islandId} to largest island ${largestIslandId}`);
         }
       });
       
@@ -6374,13 +6461,16 @@
      * Main routes computation function
      */
     function computeRoutes() {
-      // Prevent multiple simultaneous executions
-      if (isComputingRoutes) {
-        console.log('computeRoutes already running, skipping...');
+      // Single-flight routing: if already running, set pending flag and return
+      if (isRouting) {
+        pendingRoutes = true;
+        console.log('computeRoutes already running, setting pending flag...');
         return;
       }
       
-      isComputingRoutes = true;
+      const token = ++routeRunToken;
+      isRouting = true;
+      pendingRoutes = false;
       
       // Reset debug counters and clear caches
       window.__state.shortestPathCallCount = 0;
@@ -6419,7 +6509,7 @@
       }
       
       // Debug: Check if data is valid
-      console.log(`computeRoutes: cells=${cells?.length || 0}, isWater=${isWater?.length || 0}, burgs=${burgs?.length || 0}`);
+      if (DEBUG) console.log(`computeRoutes: cells=${cells?.length || 0}, isWater=${isWater?.length || 0}, burgs=${burgs?.length || 0}`);
       
       const landGraph = buildLandGraph(cells, isWater);
       
@@ -6506,7 +6596,7 @@
             buildSeaBackbone(portBurgs, seaGraph, landGraph);
             
             const seaRouteTime = performance.now() - seaRouteStart;
-            console.log(`Sea routes built in ${seaRouteTime.toFixed(1)}ms (cache hits: ${seaSSSPCache.size})`);
+            if (DEBUG) console.log(`Sea routes built in ${seaRouteTime.toFixed(1)}ms (cache hits: ${seaSSSPCache.size})`);
           } else {
             if (DEBUG) console.log('Not enough port burgs for sea routes (need >= 2)');
           }
@@ -6528,14 +6618,41 @@
       }
       
       // Optional: Add one-liner after rendering to confirm you drew something
-      console.log('sea:', document.querySelectorAll('#routes .searoutes path').length);
+      if (DEBUG) console.log('sea:', document.querySelectorAll('#routes .searoutes path').length);
       
       // Raise burgs above routes for crisp rendering
       d3.select('#burgs').raise();
+      
+      // Update progress to completion
+      ProgressManager.update(100, 'Routes complete!', 'All road and sea networks built successfully');
+      
       } catch (error) {
         console.error('Error in computeRoutes:', error);
+        // Update progress to show error
+        ProgressManager.update(100, 'Error in route computation', error.message);
       } finally {
-        isComputingRoutes = false;
+        // Check if this is still the current run
+        if (token !== routeRunToken) {
+          console.log('Stale computeRoutes finisher, ignoring...');
+          return;
+        }
+        
+        isRouting = false;
+        
+        // Hide progress overlay after a short delay to show completion
+        setTimeout(() => {
+          ProgressManager.hide();
+        }, 1000);
+        
+        // If there's a pending request, run once more
+        if (pendingRoutes) {
+          console.log('Pending routes detected, running one more time...');
+          setTimeout(() => {
+            if (window.__state.computeRoutes) {
+              window.__state.computeRoutes();
+            }
+          }, 50);
+        }
       }
     }
 
