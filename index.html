@@ -348,7 +348,24 @@
       <select id="worldType" onchange="generate();">
         <option value="island" selected>Single Island</option>
         <option value="continents">Continents</option>
+        <option value="archipelago">Archipelago</option>
+        <option value="inlandSea">Inland Sea</option>
+        <option value="riftworld">Rift World</option>
+        <option value="volcanic">Volcanic Chain</option>
+        <option value="plateau">Plateau & Canyons</option>
       </select>
+    </div>
+
+    <div class="row">
+      <label>World Seed:</label>
+      <input id="seedInput" value="42" type="number" min="1" max="999999" onchange="generate();">
+      <span class="hint">(for reproducible results)</span>
+    </div>
+
+    <div class="row">
+      <label>Debug Operations:</label>
+      <input id="debugOpsInput" type="checkbox" onchange="generate();">
+      <span>Show operation overlays</span>
     </div>
 
     <div class="row">
@@ -1009,8 +1026,12 @@
       const height = +svg.attr('height');
       const n = sizeInput.valueAsNumber;
 
+      // Get the world seed for reproducible generation
+      const worldSeed = +document.getElementById('seedInput').value || 42;
+      const rand = mulberry32(worldSeed);
+      
       // initial random points
-      let sites = d3.range(n).map(() => [Math.random() * width, Math.random() * height]);
+      let sites = d3.range(n).map(() => [rand() * width, rand() * height]);
 
       // One Lloyd relaxation step for nicer spacing
       ({ sites } = relaxOnce(sites, width, height));
@@ -1167,6 +1188,115 @@
       }
     };
 
+      // --- Template System ---
+      const templates = {
+        island: {
+          name: "Single Island",
+          steps: [
+            {op: "pickCell", as: "center", where: {type:"interior", marginPct: v => v.borderPct}},
+            {op: "addBump", at: "$center", kind: "island", high: 0.9, radius: 0.94, sharpness: 0.2},
+            {op: "repeat", times: v => +v.smallCount, step: 
+              {op: "addBumpAt", where:{type:"interior", marginPct: v => v.borderPct}, kind:"hill", high:0.3, radius:0.985, sharpness:0.1}
+            },
+            {op: "smooth", passes: 1}
+          ]
+        },
+
+        continents: {
+          name: "Continents",
+          steps: [
+            {op:"pickCell", as:"center", where:{type:"interior", marginPct: v => v.borderPct}},
+            {op:"addBump", at:"$center", kind:"island", high:0.8, radius:0.92, sharpness:0.2},
+            {op:"repeat", times:24, step:{op:"addBumpAt", where:{type:"interior"}, kind:"hill", high:0.4, radius:0.97, sharpness:0.15}},
+            {op:"addRange", from:{x:0.3, y:0.5, norm:true}, to:{x:1.7, y:0.5, norm:true}, max:0.7, radius:0.3},
+            {op:"addRange", from:{x:0.5, y:0.4, norm:true}, to:{x:0.5, y:1.6, norm:true}, max:0.6, radius:0.25},
+            {op:"repeat", times:3, step:{op:"addBumpAt", where:{type:"interiorEdgeBiased"}, kind:"hill", high:0.3, radius:0.98, sharpness:0.1}},
+            {op:"scaleLand", low:0.1, factor:0.7},
+            {op:"addStrait", xNorm:0.5, y1Norm:0.3, y2Norm:1.7, width:3},
+            {op:"smooth", passes:1},
+            {op:"repeat", times:5, step:{op:"addPitAt", where:{type:"interior"}, depth:0.3, radius:0.4}},
+            {op:"repeat", times:3, step:{op:"addTroughBetween", where:{type:"interiorPair"}, depth:0.2, radius:0.3}},
+            {op:"scaleLand", low:0.1, factor:0.8},
+            {op:"biasAll", add:0.02}
+          ]
+        },
+
+        archipelago: {
+          name: "Archipelago",
+          steps: [
+            {op:"repeat", times:4, step:{op:"addBumpAt", where:{type:"interior", marginPct: v => v.borderPct}, kind:"island", high:0.7, radius:0.85, sharpness:0.25}},
+            {op:"repeat", times:15, step:{op:"addBumpAt", where:{type:"interior", marginPct: v => v.borderPct}, kind:"hill", high:0.3, radius:0.95, sharpness:0.1}},
+            {op:"addStrait", xNorm:0.4, y1Norm:0.2, y2Norm:1.8, width:2},
+            {op:"addStrait", xNorm:0.6, y1Norm:0.2, y2Norm:1.8, width:2},
+            {op:"repeat", times:8, step:{op:"addPitAt", where:{type:"interior"}, depth:0.2, radius:0.3}},
+            {op:"smooth", passes:1}
+          ]
+        },
+
+        inlandSea: {
+          name: "Inland Sea",
+          steps: [
+            {op:"pickCell", as:"center", where:{type:"interior", marginPct: v => v.borderPct}},
+            {op:"addPit", at:"$center", depth:0.6, radius:0.4},
+            {op:"repeat", times:12, step:{op:"addBumpAt", where:{type:"interiorEdgeBiased"}, kind:"hill", high:0.4, radius:0.9, sharpness:0.2}},
+            {op:"addStrait", xNorm:0.8, y1Norm:0.4, y2Norm:1.6, width:1},
+            {op:"smooth", passes:2}
+          ]
+        },
+
+        riftworld: {
+          name: "Rift World",
+          steps: [
+            {op:"addTroughBetween", where:{type:"interiorPair"}, depth:0.4, radius:0.2},
+            {op:"addTroughBetween", where:{type:"interiorPair"}, depth:0.4, radius:0.2},
+            {op:"addRange", from:{x:0.3, y:0.5, norm:true}, to:{x:1.7, y:0.5, norm:true}, max:0.6, radius:0.15},
+            {op:"scaleLand", low:0.1, factor:0.6},
+            {op:"smooth", passes:2}
+          ]
+        },
+
+        volcanic: {
+          name: "Volcanic Chain",
+          steps: [
+            {op:"addRange", from:{x:0.2, y:0.5, norm:true}, to:{x:1.8, y:0.5, norm:true}, max:0.8, radius:0.1},
+            {op:"repeat", times:6, step:{op:"addBumpAt", where:{type:"interior"}, kind:"hill", high:0.5, radius:0.3, sharpness:0.3}},
+            {op:"repeat", times:4, step:{op:"addPitAt", where:{type:"interior"}, depth:0.3, radius:0.2}},
+            {op:"smooth", passes:1}
+          ]
+        },
+
+        plateau: {
+          name: "Plateau & Canyons",
+          steps: [
+            {op:"pickCell", as:"center", where:{type:"interior", marginPct: v => v.borderPct}},
+            {op:"addBump", at:"$center", kind:"hill", high:0.6, radius:0.7, sharpness:0.05},
+            {op:"repeat", times:4, step:{op:"addTroughBetween", where:{type:"interiorPair"}, depth:0.3, radius:0.2}},
+            {op:"smooth", passes:1}
+          ]
+        }
+      };
+
+      // Mulberry32 seeded random number generator
+      function mulberry32(seed) {
+        return function() {
+          seed = seed + 0x6D2B79F5 | 0;
+          let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+          t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+          return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+      }
+
+      // Simple hash function for template seeding
+      function hash(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+          const char = str.charCodeAt(i);
+          hash = ((hash << 5) - hash) + char;
+          hash = hash & hash; // Convert to 32bit integer
+        }
+        return hash;
+      }
+
       // Auto-generate: center island + N small hills
       ProgressManager.setPhase('terrain');
       autoSeed();
@@ -1201,7 +1331,7 @@
         return { sites: relaxed };
       }
 
-      function addWithOpts(start, type, opts) {
+      function addWithOpts(start, type, opts, rand = Math.random) {
         // temporarily override sliders
         const prev = {
           high: +highInput.value,
@@ -1211,113 +1341,229 @@
         if (opts && typeof opts.high === 'number') { highInput.value = opts.high; highOutput.value = opts.high; }
         if (opts && typeof opts.radius === 'number') { radiusInput.value = opts.radius; radiusOutput.value = opts.radius; }
         if (opts && typeof opts.sharpness === 'number') { sharpnessInput.value = opts.sharpness; sharpnessOutput.value = opts.sharpness; }
-        add(start, type);
+        add(start, type, rand);
         // restore sliders
         highInput.value = prev.high; highOutput.value = prev.high;
         radiusInput.value = prev.rad; radiusOutput.value = prev.rad;
         sharpnessInput.value = prev.sharp; sharpnessOutput.value = prev.sharp;
       }
 
-      function pickInteriorCell(marginPx) {
+      function pickInteriorCell(marginPx, rand = Math.random) {
         // choose a cell whose centroid is at least marginPx from any edge
         const interior = cells.filter(c => Math.min(c.cx, c.cy, width - c.cx, height - c.cy) >= marginPx);
-        if (interior.length === 0) return Math.floor(Math.random() * cells.length);
-        const idx = Math.floor(Math.random() * interior.length);
+        if (interior.length === 0) return Math.floor(rand() * cells.length);
+        const idx = Math.floor(rand() * interior.length);
         return interior[idx].index;
       }
 
-      function autoSeed() {
-        const worldType = document.getElementById('worldType').value;
-        const N = +smallCountInput.value;
-        const marginPx = Math.max(2, (+borderPctInput.value) / 100 * Math.min(width, height));
+      // --- Template Executor ---
+      function applyTemplate(templateKey, uiVals, seed) {
+        console.debug('Templates keys:', Object.keys(templates));
+        const tpl = templates[templateKey];
+        if (!tpl) {
+          console.error(`Template '${templateKey}' not found`);
+          return;
+        }
         
-        if (worldType === 'island') {
-          // Original single island generation
-          let centerIndex = delaunay.find(width / 2, height / 2);
-          if (Math.min(cells[centerIndex].cx, cells[centerIndex].cy, width - cells[centerIndex].cx, height - cells[centerIndex].cy) < marginPx) {
-            centerIndex = pickInteriorCell(marginPx);
+        const rand = mulberry32(seed ^ hash(templateKey));
+        const ctx = new Map(); // for named picks {as:"center"} → cell index
+        const debugOps = document.getElementById('debugOpsInput')?.checked || false;
+        
+        // Clear debug overlays if they exist
+        if (debugOps) {
+          d3.selectAll('.debug-op').remove();
+        }
+        
+        const resolveCell = (spec) => {
+          if (typeof spec === "string" && spec.startsWith("$")) return ctx.get(spec.slice(1));
+          if (spec?.norm) return delaunay.find(spec.x * width, spec.y * height);
+          // "where" selectors:
+          const marginPx = Math.max(2, (uiVals.borderPct/100) * Math.min(width, height));
+          if (spec?.type === "interior") return pickInteriorCell(marginPx, rand);
+          if (spec?.type === "interiorEdgeBiased") return pickInteriorCell(Math.max(2, 0.5*marginPx), rand);
+          if (spec?.type === "interiorPair") return [pickInteriorCell(marginPx, rand), pickInteriorCell(marginPx, rand)];
+          return Math.floor(rand()*cells.length);
+        };
+
+        const doStep = (step) => {
+          switch (step.op) {
+            case "pickCell": {
+              const idx = resolveCell(step.where);
+              ctx.set(step.as, idx);
+              if (debugOps) {
+                const cell = cells[idx];
+                svg.append('circle')
+                  .attr('class', 'debug-op')
+                  .attr('cx', cell.cx)
+                  .attr('cy', cell.cy)
+                  .attr('r', 3)
+                  .attr('fill', 'red')
+                  .attr('stroke', 'white')
+                  .attr('stroke-width', 1);
+              }
+              break;
+            }
+            case "addBump": {
+              const idx = resolveCell(step.at);
+              addWithOpts(idx, step.kind, {high:step.high, radius:step.radius, sharpness:step.sharpness}, rand);
+              if (debugOps) {
+                const cell = cells[idx];
+                svg.append('circle')
+                  .attr('class', 'debug-op')
+                  .attr('cx', cell.cx)
+                  .attr('cy', cell.cy)
+                  .attr('r', 5)
+                  .attr('fill', 'blue')
+                  .attr('stroke', 'white')
+                  .attr('stroke-width', 1);
+              }
+              break;
+            }
+            case "addBumpAt": {
+              const idx = resolveCell(step.where);
+              addWithOpts(idx, step.kind, {high:step.high, radius:step.radius, sharpness:step.sharpness}, rand);
+              if (debugOps) {
+                const cell = cells[idx];
+                svg.append('circle')
+                  .attr('class', 'debug-op')
+                  .attr('cx', cell.cx)
+                  .attr('cy', cell.cy)
+                  .attr('r', 4)
+                  .attr('fill', 'green')
+                  .attr('stroke', 'white')
+                  .attr('stroke-width', 1);
+              }
+              break;
+            }
+            case "addRange": {
+              const a = resolveCell(step.from);
+              const b = resolveCell(step.to);
+              addMountainRange(a, b, step.max, step.radius);
+              if (debugOps) {
+                const cellA = cells[a];
+                const cellB = cells[b];
+                svg.append('line')
+                  .attr('class', 'debug-op')
+                  .attr('x1', cellA.cx)
+                  .attr('y1', cellA.cy)
+                  .attr('x2', cellB.cx)
+                  .attr('y2', cellB.cy)
+                  .attr('stroke', 'orange')
+                  .attr('stroke-width', 2)
+                  .attr('stroke-dasharray', '5,5');
+              }
+              break;
+            }
+            case "addPit": {
+              const idx = resolveCell(step.at);
+              addPit(idx, step.depth, step.radius);
+              if (debugOps) {
+                const cell = cells[idx];
+                svg.append('circle')
+                  .attr('class', 'debug-op')
+                  .attr('cx', cell.cx)
+                  .attr('cy', cell.cy)
+                  .attr('r', 6)
+                  .attr('fill', 'purple')
+                  .attr('stroke', 'white')
+                  .attr('stroke-width', 1);
+              }
+              break;
+            }
+            case "addPitAt": {
+              const idx = resolveCell(step.where);
+              addPit(idx, step.depth, step.radius);
+              if (debugOps) {
+                const cell = cells[idx];
+                svg.append('circle')
+                  .attr('class', 'debug-op')
+                  .attr('cx', cell.cx)
+                  .attr('cy', cell.cy)
+                  .attr('r', 6)
+                  .attr('fill', 'purple')
+                  .attr('stroke', 'white')
+                  .attr('stroke-width', 1);
+              }
+              break;
+            }
+            case "addTroughBetween": {
+              const [a, b] = resolveCell(step.where);
+              addTrough(a, b, step.depth, step.radius);
+              if (debugOps) {
+                const cellA = cells[a];
+                const cellB = cells[b];
+                svg.append('line')
+                  .attr('class', 'debug-op')
+                  .attr('x1', cellA.cx)
+                  .attr('y1', cellA.cy)
+                  .attr('x2', cellB.cx)
+                  .attr('y2', cellB.cy)
+                  .attr('stroke', 'brown')
+                  .attr('stroke-width', 3)
+                  .attr('stroke-dasharray', '3,3');
+              }
+              break;
+            }
+            case "addStrait": {
+              addStrait(step.xNorm*width, step.y1Norm*height, step.y2Norm*height, step.width, rand);
+              if (debugOps) {
+                svg.append('line')
+                  .attr('class', 'debug-op')
+                  .attr('x1', step.xNorm*width)
+                  .attr('y1', step.y1Norm*height)
+                  .attr('x2', step.xNorm*width)
+                  .attr('y2', step.y2Norm*height)
+                  .attr('stroke', 'cyan')
+                  .attr('stroke-width', step.width)
+                  .attr('stroke-dasharray', '2,2');
+              }
+              break;
+            }
+            case "scaleLand": {
+              // "Multiply land cells by factor, but keep sea baseline (<= low) intact"
+              cells.forEach(c => { if (c.high > step.low) c.high = step.low + (c.high - step.low) * step.factor; });
+              break;
+            }
+            case "biasAll": {
+              cells.forEach(c => { c.high = Math.min(1, Math.max(0, c.high + step.add)); });
+              break;
+            }
+            case "smooth": {
+              for (let i=0; i<(step.passes||1); i++) smoothMap();
+              break;
+            }
+            case "repeat": {
+              const times = typeof step.times === "function" ? step.times(uiVals) : step.times;
+              for (let i=0; i<times; i++) doStep(step.step);
+              break;
+            }
           }
-          addWithOpts(centerIndex, 'island', { high: 0.9, radius: 0.94, sharpness: 0.2 });
-          // N small smooth hills at interior random cells
-          for (let i = 0; i < N; i++) {
-            const idx = pickInteriorCell(marginPx);
-            addWithOpts(idx, 'hill', { high: 0.3, radius: 0.985, sharpness: 0.1 });
-          }
-        } else if (worldType === 'continents') {
-          generateContinents(marginPx);
+        };
+
+        tpl.steps.forEach(doStep);
+      }
+
+      function autoSeed() {
+        const tplKey = document.getElementById('worldType').value;
+        const worldSeed = +document.getElementById('seedInput').value || 42;
+        const uiVals = {
+          smallCount: +smallCountInput.value,
+          borderPct: +borderPctInput.value
+        };
+        
+        // Clear the heightmap first
+        cells.forEach(c => c.high = 0);
+        
+        // Apply the selected template
+        applyTemplate(tplKey, uiVals, worldSeed);
+        
+        // Redraw everything
+        if (window.__state.recolor) {
+          window.__state.recolor();
         }
       }
       
-      function generateContinents(marginPx) {
-        // Based on Azgaar's continent template
-        const centerX = width / 2, centerY = height / 2;
-        
-        // 1. Place main mountain (central high point)
-        let centerIndex = delaunay.find(centerX, centerY);
-        if (Math.min(cells[centerIndex].cx, cells[centerIndex].cy, width - cells[centerIndex].cx, height - cells[centerIndex].cy) < marginPx) {
-          centerIndex = pickInteriorCell(marginPx);
-        }
-        addWithOpts(centerIndex, 'island', { high: 0.8, radius: 0.92, sharpness: 0.2 });
-        
-        // 2. Add 24 hills with distribution 0.25 (spread out)
-        for (let i = 0; i < 24; i++) {
-          const idx = pickInteriorCell(marginPx);
-          addWithOpts(idx, 'hill', { high: 0.4, radius: 0.97, sharpness: 0.15 });
-        }
-        
-        // 3. Add 2 mountain ranges (east-west and north-south)
-        const range1Start = delaunay.find(centerX * 0.3, centerY);
-        const range1End = delaunay.find(centerX * 1.7, centerY);
-        addMountainRange(range1Start, range1End, 0.7, 0.3);
-        
-        const range2Start = delaunay.find(centerX, centerY * 0.4);
-        const range2End = delaunay.find(centerX, centerY * 1.6);
-        addMountainRange(range2Start, range2End, 0.6, 0.25);
-        
-        // 4. Add 3 hills with distribution 0.1 (near edges)
-        for (let i = 0; i < 3; i++) {
-          const idx = pickInteriorCell(marginPx * 0.5);
-          addWithOpts(idx, 'hill', { high: 0.3, radius: 0.98, sharpness: 0.1 });
-        }
-        
-        // 5. Multiply land cells by 0.7 (reduce overall elevation)
-        cells.forEach(c => {
-          if (c.high > 0.1) {
-            c.high = 0.1 + (c.high - 0.1) * 0.7;
-          }
-        });
-        
-        // 6. Add strait (vertical depression to separate continents)
-        addStrait(centerX, centerY * 0.3, centerY * 1.7, 3);
-        
-        // 7. Smooth the map
-        smoothMap();
-        
-        // 8. Add 5 pits (inland depressions)
-        for (let i = 0; i < 5; i++) {
-          const idx = pickInteriorCell(marginPx);
-          addPit(idx, 0.3, 0.4);
-        }
-        
-        // 9. Add 3 troughs (elongated depressions)
-        for (let i = 0; i < 3; i++) {
-          const startIdx = pickInteriorCell(marginPx);
-          const endIdx = pickInteriorCell(marginPx);
-          addTrough(startIdx, endIdx, 0.2, 0.3);
-        }
-        
-        // 10. Multiply land cells by 0.8 (further reduce elevation)
-        cells.forEach(c => {
-          if (c.high > 0.1) {
-            c.high = 0.1 + (c.high - 0.1) * 0.8;
-          }
-        });
-        
-        // 11. Add 0.02 to all cells (slight elevation boost)
-        cells.forEach(c => {
-          c.high = Math.min(1.0, c.high + 0.02);
-        });
-      }
+
       
       function addMountainRange(startIdx, endIdx, maxHeight, radius) {
         const start = cells[startIdx];
@@ -1333,12 +1579,12 @@
         }
       }
       
-      function addStrait(centerX, startY, endY, width) {
+      function addStrait(centerX, startY, endY, width, rand = Math.random) {
         const steps = 20;
         for (let i = 0; i <= steps; i++) {
           const t = i / steps;
           const y = startY + (endY - startY) * t;
-          const x = centerX + (Math.random() - 0.5) * width * 20; // Add some randomness
+          const x = centerX + (rand() - 0.5) * width * 20; // Add some randomness
           const targetIdx = delaunay.find(x, y);
           if (targetIdx >= 0 && targetIdx < cells.length) {
             cells[targetIdx].high = Math.max(0.05, cells[targetIdx].high - 0.4);
@@ -1446,7 +1692,7 @@
       // Expose autoSeed to window for tests
       window.autoSeed = autoSeed;
 
-      function add(start, type) {
+      function add(start, type, rand = Math.random) {
         // get options from sliders
         let high = +highInput.value;
         const radius = +radiusInput.value;
@@ -1465,7 +1711,7 @@
           }
           cells[queue[i]].neighbors.forEach((e) => {
             if (!cells[e].used) {
-              let mod = Math.random() * sharpness + 1.1 - sharpness;
+              let mod = rand() * sharpness + 1.1 - sharpness;
               if (sharpness === 0) mod = 1;
               cells[e].high += high * mod;
               if (cells[e].high > 1) cells[e].high = 1;
@@ -4578,6 +4824,8 @@
           }
         }
       }
+      
+      console.log(`buildLandGraph: created ${nodes.length} nodes and ${edges.length} edges`);
       return { nodes, edges };
     }
     
@@ -4588,24 +4836,8 @@
      * @returns {boolean} True if path crosses a river
      */
     function crossesRiverSegment(cellA, cellB) {
-      // Simple check: if either cell has a river neighbor, consider it a crossing
-      const isWater = window.__state.isWater || [];
-      const isLake = window.__state.isLake || [];
-      
-      // Check if either cell has a river neighbor (water but not lake)
-      for (const cell of [cellA, cellB]) {
-        for (const nb of cell.neighbors) {
-          const neighborCell = window.__state.cells[nb];
-          if (neighborCell) {
-            const isWaterNeighbor = neighborCell.high < (+document.getElementById('seaLevelInput').value || 0.35);
-            const isLakeNeighbor = isLake[nb] === 1;
-            if (isWaterNeighbor && !isLakeNeighbor) {
-              return true;
-            }
-          }
-        }
-      }
-      
+      // Simplified check: just return false for now to avoid potential issues
+      // TODO: Implement proper river crossing detection
       return false;
     }
     
@@ -4622,6 +4854,16 @@
       const cells = window.__state.cells;
       const isWater = window.__state.isWater || [];
       
+      // Debug logging (only for first few calls)
+      if (window.__state.shortestPathCallCount === undefined) {
+        window.__state.shortestPathCallCount = 0;
+      }
+      window.__state.shortestPathCallCount++;
+      
+      if (window.__state.shortestPathCallCount <= 5) {
+        console.log(`shortestPath called: start=${startIndex}, end=${endIndex}, graph edges=${graph?.edges?.length || 0}`);
+      }
+      
       // Skip if start or end is water
       if (isWater[startIndex] || isWater[endIndex]) {
         console.log(`shortestPath: start or end is water (start: ${isWater[startIndex]}, end: ${isWater[endIndex]})`);
@@ -4634,11 +4876,21 @@
         return [startIndex];
       }
       
+      // Validate graph
+      if (!graph || !graph.edges || graph.edges.length === 0) {
+        console.warn(`shortestPath: invalid or empty graph provided`);
+        return null;
+      }
+      
       // Create edge lookup map for fast access
       const edgeMap = new Map();
       for (const edge of graph.edges) {
         const key = `${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`;
         edgeMap.set(key, edge);
+      }
+      
+      if (window.__state.shortestPathCallCount <= 5) {
+        console.log(`shortestPath: built edge map with ${edgeMap.size} edges`);
       }
       
       // A* implementation
@@ -4667,6 +4919,11 @@
           }
         }
         
+        if (current === null) {
+          console.warn(`A*: no valid node found in openSet (size: ${openSet.size})`);
+          break;
+        }
+        
         if (current === endIndex) {
           // Reconstruct path
           const path = [];
@@ -4680,10 +4937,19 @@
         
         openSet.delete(current);
         
+        // Debug: log current node and its neighbors (only for first few calls)
+        if (window.__state.shortestPathCallCount <= 3 && iterations <= 3) {
+          console.log(`A* iteration ${iterations}: current=${current}, neighbors=${cells[current]?.neighbors?.length || 0}`);
+        }
+        
         // Check neighbors
         const currentCell = cells[current];
+        let validNeighbors = 0;
+        let addedNeighbors = 0;
+        
         for (const neighborIndex of currentCell.neighbors) {
           if (isWater[neighborIndex]) continue; // Skip water neighbors
+          validNeighbors++;
           
           // Calculate edge cost using stored weights
           const edgeKey = `${Math.min(current, neighborIndex)}-${Math.max(current, neighborIndex)}`;
@@ -4722,7 +4988,13 @@
             
             // Always add to open set if we found a better path
             openSet.add(neighborIndex);
+            addedNeighbors++;
           }
+        }
+        
+        // Debug: log neighbor processing (only for first few calls)
+        if (window.__state.shortestPathCallCount <= 3 && iterations <= 3) {
+          console.log(`A* iteration ${iterations}: valid neighbors=${validNeighbors}, added to openSet=${addedNeighbors}`);
         }
       }
       
@@ -4921,6 +5193,70 @@
       }
       
       return distances;
+    }
+    
+    /**
+     * Find path from start to end using precomputed distances from dijkstraSea
+     * @param {number} startIndex - Starting cell index
+     * @param {number} endIndex - Ending cell index
+     * @param {Object} graph - Sea graph
+     * @param {Map} distances - Precomputed distances from dijkstraSea
+     * @returns {Array} Path as array of cell indices
+     */
+    function findPathFromDistances(startIndex, endIndex, graph, distances) {
+      const cells = window.__state.cells;
+      const isWater = window.__state.isWater || [];
+      
+      // Skip if start or end is not water
+      if (!isWater[startIndex] || !isWater[endIndex]) {
+        return null;
+      }
+      
+      // Check if start and end are the same
+      if (startIndex === endIndex) {
+        return [startIndex];
+      }
+      
+      // Check if end is reachable
+      if (distances[endIndex] === undefined) {
+        return null;
+      }
+      
+      // Reconstruct path by following decreasing distances
+      const path = [endIndex];
+      let current = endIndex;
+      
+      while (current !== startIndex) {
+        let bestNeighbor = null;
+        let bestDistance = Infinity;
+        
+        // Find neighbor with lowest distance
+        for (const edge of graph.edges) {
+          let neighbor = null;
+          if (edge.a === current) {
+            neighbor = edge.b;
+          } else if (edge.b === current) {
+            neighbor = edge.a;
+          }
+          
+          if (neighbor !== null && distances[neighbor] !== undefined && distances[neighbor] < distances[current]) {
+            if (distances[neighbor] < bestDistance) {
+              bestDistance = distances[neighbor];
+              bestNeighbor = neighbor;
+            }
+          }
+        }
+        
+        if (bestNeighbor === null) {
+          // No path found
+          return null;
+        }
+        
+        path.unshift(bestNeighbor);
+        current = bestNeighbor;
+      }
+      
+      return path;
     }
     
     /**
@@ -5700,7 +6036,8 @@
         const targetWithSea = portsWithSeaIndex.find(ps => ps.id === targetPort.id);
         if (!targetWithSea) return;
         
-        const path = shortestPathSea(connection.fromSeaIndex, targetWithSea.seaIndex, seaGraph);
+        // Use the distances from dijkstraSea to find the actual path
+        const path = findPathFromDistances(connection.fromSeaIndex, targetWithSea.seaIndex, seaGraph, distances);
         if (path) {
           const points = polylineFromPath(path);
           const smoothed = smoothLine(points, 1);
@@ -5821,7 +6158,7 @@
        
        // Render gap patches
        gapPatches.forEach(patch => {
-         const path = shortestPathSea(patch.fromSeaIndex, patch.toSeaIndex, seaGraph);
+         const path = findPathFromDistances(patch.fromSeaIndex, patch.toSeaIndex, seaGraph, distances);
          if (path) {
            const points = polylineFromPath(path);
            const smoothed = smoothLine(points, 1);
@@ -5857,6 +6194,9 @@
       
       isComputingRoutes = true;
       
+      // Reset debug counters
+      window.__state.shortestPathCallCount = 0;
+      
       try {
         // Guard against calling before water mask exists
         if (!window.__state.isWater) {
@@ -5888,6 +6228,9 @@
       if (!cells || !isWater || burgs.length < 2) {
         return;
       }
+      
+      // Debug: Check if data is valid
+      console.log(`computeRoutes: cells=${cells?.length || 0}, isWater=${isWater?.length || 0}, burgs=${burgs?.length || 0}`);
       
       const landGraph = buildLandGraph(cells, isWater);
       
