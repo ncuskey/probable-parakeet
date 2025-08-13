@@ -1001,6 +1001,9 @@
       const roadsG = routesG.append('g').attr('class', 'roads');
       const trailsG = routesG.append('g').attr('class', 'trails');
       const seaG = routesG.append('g').attr('class', 'searoutes');
+      
+      // Create defs for clip paths
+      const defs = svg.append('defs');
 
       const width = +svg.attr('width');
       const height = +svg.attr('height');
@@ -1032,13 +1035,13 @@
       // Palette (kept for future tweaks)
       const interp = { water: (t) => d3.interpolateBlues(t) };
 
-      // Land color ramp: green lowlands → tan → white peaks
+      // Land color ramp: dark green lowlands → light green → tan → white peaks
       function landColor(t) {
         // t in [0,1], already normalized above sea level
         t = Math.max(0, Math.min(1, t));
         if (t < 0.35) {
           const u = t / 0.35; // 0..1
-          return d3.interpolateYlGn(0.3 + 0.7 * u); // brighter coastal greens
+          return d3.interpolateYlGn(1.0 - 0.7 * u); // darker coastal greens (reversed)
         } else if (t < 0.7) {
           const u = (t - 0.35) / 0.35; // 0..1
           return d3.interpolateYlOrBr(0.25 + 0.75 * u); // foothills to tan
@@ -1634,46 +1637,56 @@
           TerrainCanvas.markClean();
         } else if (!useCanvas) {
           // SVG-based rendering for smaller maps
-        mapCells.selectAll('path.mapCell')
-          .attr('fill', d => {
-            if (isWater[d.index]) {
-              return 'none';
-            } else {
-              let baseColor;
-              if (renderMode === 'biomes' || renderMode === 'hybrid') {
-                baseColor = getBiomeColor(d.biome, d.high, sea);
-              } else {
-                const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
-                const tt = Math.max(0, Math.min(1, tl));
-                baseColor = landColor(tt);
-              }
-              
-              if (shadingMode === 'shaded' && shades) {
-                return shadeColor(baseColor, shades[d.index]);
-              } else {
-                return baseColor;
-              }
-            }
-          })
-          .style('fill', d => {
-            if (isWater[d.index]) {
-              return 'none';
-            } else {
-              let baseColor;
-              if (renderMode === 'biomes' || renderMode === 'hybrid') {
-                baseColor = getBiomeColor(d.biome, d.high, sea);
-              } else {
-                const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
-                const tt = Math.max(0, Math.min(1, tl));
-                baseColor = landColor(tt);
-              }
-              
-              if (shadingMode === 'shaded' && shades) {
-                return shadeColor(baseColor, shades[d.index]);
-              } else {
-                return baseColor;
-              }
-            }
+          // Only render individual cells if we don't have unified land paths
+          if (!window.__state.landPaths || window.__state.landPaths.length === 0) {
+            mapCells.selectAll('path.mapCell')
+              .attr('fill', d => {
+                if (isWater[d.index]) {
+                  return 'none';
+                } else {
+                  let baseColor;
+                  if (renderMode === 'biomes' || renderMode === 'hybrid') {
+                    baseColor = getBiomeColor(d.biome, d.high, sea);
+                  } else {
+                    const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
+                    const tt = Math.max(0, Math.min(1, tl));
+                    baseColor = landColor(tt);
+                  }
+                  
+                  if (shadingMode === 'shaded' && shades) {
+                    return shadeColor(baseColor, shades[d.index]);
+                  } else {
+                    return baseColor;
+                  }
+                }
+              })
+              .style('fill', d => {
+                if (isWater[d.index]) {
+                  return 'none';
+                } else {
+                  let baseColor;
+                  if (renderMode === 'biomes' || renderMode === 'hybrid') {
+                    baseColor = getBiomeColor(d.biome, d.high, sea);
+                  } else {
+                    const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
+                    const tt = Math.max(0, Math.min(1, tl));
+                    baseColor = landColor(tt);
+                  }
+                  
+                  if (shadingMode === 'shaded' && shades) {
+                    return shadeColor(baseColor, shades[d.index]);
+                  } else {
+                    return baseColor;
+                  }
+                }
+              });
+          }
+        }
+
+        // Update unified land paths if they exist
+        if (window.__state.landPaths && window.__state.landPaths.length > 0) {
+          window.__state.landPaths.forEach(lp => {
+            lp.path.attr('fill', 'none'); // don't paint over the heightmap
           });
         }
         
@@ -2894,9 +2907,86 @@
         }
       }
 
+      // --- Chaikin Smoothing (Safe, Inside Original) ---
+      function chaikin(points, iters = 2) {
+        let pts = points.slice();
+        for (let k = 0; k < iters; k++) {
+          const out = [];
+          for (let i = 0; i < pts.length; i++) {
+            const a = pts[i], b = pts[(i+1)%pts.length];
+            const Q = [0.75*a[0] + 0.25*b[0], 0.75*a[1] + 0.25*b[1]];
+            const R = [0.25*a[0] + 0.75*b[0], 0.25*a[1] + 0.75*b[1]];
+            out.push(Q, R);
+          }
+          pts = out;
+        }
+        return pts;
+      }
+
+      // --- Path Data Helpers ---
+      function ringToPathD(ring) {
+        return "M" + ring.map(p => p.join(",")).join("L") + "Z";
+      }
+
+      function islandToPathD(outer, holes=[]) {
+        // outer then holes; evenodd fill will subtract the holes
+        return ringToPathD(outer) + holes.map(ringToPathD).join("");
+      }
+
+      // Compute average color for an island based on its cells
+      function computeIslandColor(loop, renderMode, sea, cells) {
+        if (renderMode === 'biomes' || renderMode === 'hybrid') {
+          return '#90EE90'; // Light green for biomes
+        }
+        
+        // For height map, compute average elevation of cells within the island
+        // Find cells that are within this island's boundary
+        const islandCells = [];
+        
+        // Simple approach: find cells whose center is within the island polygon
+        cells.forEach(cell => {
+          if (cell.high >= sea) { // Only consider land cells
+            // Check if cell center is inside the island polygon
+            if (pointInPolygon([cell.cx, cell.cy], loop)) {
+              islandCells.push(cell);
+            }
+          }
+        });
+        
+        if (islandCells.length === 0) {
+          // Fallback: use a representative lowland color
+          return landColor(0.2);
+        }
+        
+        // Compute average elevation of island cells
+        const avgElevation = islandCells.reduce((sum, cell) => sum + cell.high, 0) / islandCells.length;
+        const normalizedElevation = (avgElevation - sea) / Math.max(1 - sea, 0.0001);
+        const clampedElevation = Math.max(0, Math.min(1, normalizedElevation));
+        
+        return landColor(clampedElevation);
+      }
+      
+      // Point-in-polygon test using ray casting algorithm
+      function pointInPolygon(point, polygon) {
+        const [x, y] = point;
+        let inside = false;
+        
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+          const [xi, yi] = polygon[i];
+          const [xj, yj] = polygon[j];
+          
+          if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+            inside = !inside;
+          }
+        }
+        
+        return inside;
+      }
+
       // --- Coastline builder (Azgaar-style: boundary between land and water) --- (Azgaar-style: boundary between land and water) --- (Azgaar-style: boundary between land and water) ---
       function drawCoastlines() {
         coastG.selectAll('path.coast').remove();
+        mapCells.selectAll('path.land-fill').remove();
         const sea = +document.getElementById('seaLevelInput').value;
         const isWaterArr = (window.__state.isWater) || cells.map(c => c.high < sea);
         const isLand = cells.map((c,i) => !isWaterArr[i]);
@@ -2999,27 +3089,92 @@
           chains.push(chain);
         });
 
-        // Draw chains with path simplification
-        const lineOpen = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
-        const lineClosed = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasisClosed);
+        // Separate closed loops (islands) from open chains (peninsulas)
+        const closedLoops = [];
+        const openChains = [];
+        
+        chains.forEach((chain) => {
+          const isClosed = (keyOfPoint(chain[0]) === keyOfPoint(chain[chain.length - 1]));
+          if (isClosed && chain.length > 3) {
+            closedLoops.push(chain);
+          } else {
+            openChains.push(chain);
+          }
+        });
 
-        console.log(`Created ${chains.length} coastline chains`);
-        chains.forEach((pts) => {
-          const closed = (keyOfPoint(pts[0]) === keyOfPoint(pts[pts.length - 1]));
+        console.log(`Found ${closedLoops.length} closed loops (islands) and ${openChains.length} open chains`);
+
+        // Create unified land paths for each island
+        closedLoops.forEach((loop, islandIndex) => {
+          // Smooth the loop with Chaikin
+          const smoothedLoop = chaikin(loop, 2);
           
-          // Simplify path based on map size (tolerance proportional to map scale)
+          // Create the path data for this island
+          const pathD = islandToPathD(smoothedLoop);
+          
+          // Create the land fill path in mapCells group (behind everything)
+          const landPath = mapCells.insert('path', ':first-child')
+            .attr('class', 'land-fill')
+            .attr('d', pathD)
+            .attr('fill', 'none')          // was '#f0f0f0'
+            .attr('stroke', 'none')
+            .attr('fill-rule', 'evenodd');
+          
+          // Create the coastline stroke in coastG group (on top)
+          const coastPath = coastG.append('path')
+            .attr('class', 'coast')
+            .attr('d', pathD)
+            .attr('fill', 'none')
+            .attr('stroke', '#111')
+            .attr('stroke-width', '0.6px')
+            .attr('stroke-linejoin', 'round');
+          
+          // Store reference for recolor function with island data
+          if (!window.__state.landPaths) window.__state.landPaths = [];
+          window.__state.landPaths.push({
+            path: landPath,
+            coast: coastPath,
+            islandIndex: islandIndex,
+            loop: loop // Store the original loop for color computation
+          });
+        });
+
+        // Handle open chains (peninsulas) as simple strokes
+        openChains.forEach((chain) => {
+          // Simplify path based on map size
           const tolerance = Math.max(0.15, Math.min(0.3, cells.length / 50000));
-          const simplifiedPts = simplifyPath(pts, tolerance);
+          const simplifiedPts = simplifyPath(chain, tolerance);
+          
+          const lineOpen = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
           
           coastG.append('path')
             .attr('class', 'coast')
-            .attr('d', closed ? lineClosed(simplifiedPts) : lineOpen(simplifiedPts))
+            .attr('d', lineOpen(simplifiedPts))
             .attr('fill', 'none')
             .attr('stroke', '#111')
             .attr('stroke-width', '0.6px')
             .attr('stroke-linejoin', 'round');
         });
-        console.log(`Drew ${chains.length} coastline paths (simplified)`);
+
+        console.log(`Created ${closedLoops.length} unified land paths with coastlines`);
+        
+        // Land paths are now non-filled to preserve height map visibility
+        // Coastline strokes remain in coastG group for smooth edges
+        
+        // Optional: Create clip path for crisper edges
+        if (closedLoops.length > 0) {
+          const cp = defs.select('#landClip').empty()
+            ? defs.append('clipPath').attr('id', 'landClip')
+            : defs.select('#landClip');
+
+          cp.selectAll('path').remove();
+          closedLoops.forEach(loop => {
+            const d = islandToPathD(chaikin(loop, 2));
+            cp.append('path').attr('d', d);
+          });
+
+          mapCells.select('image').attr('clip-path', 'url(#landClip)');
+        }
       }
     }
 
