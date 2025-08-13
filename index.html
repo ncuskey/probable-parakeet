@@ -18,10 +18,10 @@
     .pass { color: #0a0; }
     .fail { color: #b00; }
     .row { margin: 6px 0; }
-    /* Coastline styling */
-    .coast { fill: none; stroke: #111; stroke-width: 0.6px; stroke-linejoin: round; }
-    .rivers { fill: none; stroke: #4D83AE; stroke-linecap: round; stroke-linejoin: round; }
-    .riversShade { fill: none; stroke: rgba(0,0,0,0.35); stroke-linecap: round; stroke-linejoin: round; }
+          /* Coastline styling */
+      .coast { fill: none; stroke: #111; stroke-width: 0.6px; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+    .rivers { fill: none; stroke: #4D83AE; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+    .riversShade { fill: none; stroke: rgba(0,0,0,0.35); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
     
     /* Route styling */
     #routes .roads { stroke: #6b4e16; stroke-width: 1.4px; fill: none; stroke-linecap: round; }
@@ -29,6 +29,82 @@
     #routes .searoutes { stroke: #cfe9ff; stroke-width: 1.2px; fill: none; stroke-dasharray: 6 4; mix-blend-mode: overlay; }
     /* ensure export-friendly */
     #routes path { vector-effect: non-scaling-stroke; }
+
+    /* Progress overlay styling */
+    .progress-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      backdrop-filter: blur(2px);
+    }
+
+    .progress-content {
+      background: rgba(255, 255, 255, 0.95);
+      padding: 40px 50px;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      text-align: center;
+      min-width: 400px;
+      border: 2px solid #4CAF50;
+    }
+
+    .progress-title {
+      font-size: 20px;
+      font-weight: bold;
+      margin-bottom: 25px;
+      color: #333;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 12px;
+      background: #e0e0e0;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 20px;
+      border: 1px solid #ccc;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4CAF50, #45a049);
+      width: 0%;
+      transition: width 0.5s ease;
+      border-radius: 6px;
+      box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+    }
+
+    .progress-text {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 10px;
+    }
+
+    .progress-detail {
+      font-size: 12px;
+      color: #999;
+      font-style: italic;
+    }
+
+    /* Add pulsing animation to make progress more visible */
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.7; }
+      100% { opacity: 1; }
+    }
+
+    .progress-overlay {
+      animation: pulse 2s ease-in-out infinite;
+    }
 
     /* Modal styles */
     .modal {
@@ -158,8 +234,20 @@
 </head>
 <body>
   <div style="display: flex; gap: 20px; align-items: flex-start;">
-    <div style="flex: 1; min-width: 0;">
+    <div id="mapContainer" style="flex: 1; min-width: 0; position: relative;">
       <svg id="map" width="1280" height="560" viewBox="0 0 1280 560" role="img" aria-label="Voronoi heightmap canvas" style="width: 100%; height: auto; max-width: none;"></svg>
+      
+      <!-- Progress Overlay -->
+      <div id="progressOverlay" class="progress-overlay">
+        <div class="progress-content">
+          <div class="progress-title">Generating Map...</div>
+          <div class="progress-bar">
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+          <div id="progressText" class="progress-text">Initializing...</div>
+          <div id="progressDetail" class="progress-detail"></div>
+        </div>
+      </div>
     </div>
     
     <div id="biomeLegend" style="display: none; min-width: 200px; background: rgba(255,255,255,0.9); padding: 10px; border-radius: 8px; border: 1px solid #ccc;">
@@ -232,7 +320,7 @@
 
           <div class="row">
             <label>Sea Level:</label>
-            <input id="seaLevelInput" value="0.35" type="range" min="0" max="1" step="0.01" oninput="seaLevelOutput.value = seaLevelInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <input id="seaLevelInput" value="0.35" type="range" min="0" max="1" step="0.01" oninput="seaLevelOutput.value = seaLevelInput.valueAsNumber;">
             <output id="seaLevelOutput">0.35</output>
           </div>
 
@@ -313,7 +401,7 @@
 
           <div class="row">
             <label>River Density:</label>
-            <input id="riverDensityInput" value="0.90" type="range" min="0.70" max="0.99" step="0.01" oninput="riverDensityOutput.value = riverDensityInput.valueAsNumber; __state.recolor && __state.recolor();">
+            <input id="riverDensityInput" value="0.90" type="range" min="0.70" max="0.99" step="0.01" oninput="riverDensityOutput.value = riverDensityInput.valueAsNumber;">
             <output id="riverDensityOutput">0.90</output>
           </div>
 
@@ -454,6 +542,15 @@
       }; 
     };
 
+    // Heavy debounced recolor for expensive operations
+    const heavyDebounce = (fn, delay = 150) => {
+      let timeout = 0; 
+      return (...a) => { 
+        clearTimeout(timeout); 
+        timeout = setTimeout(() => fn(...a), delay); 
+      }; 
+    };
+
     // Cached DOM elements for performance
     const DOM = {
       seaLevelInput: document.getElementById('seaLevelInput'),
@@ -498,6 +595,31 @@
       }
     });
 
+    // Set up debounced recolor for heavy sliders
+    const heavySliders = ['seaLevelInput', 'riverDensityInput', 'riverWidthInput', 'minLakeSizeInput', 'minLakeDepthInput'];
+    heavySliders.forEach(id => {
+      const element = document.getElementById(id);
+      if (element) {
+        element.addEventListener('input', heavyDebounce(() => {
+          RegenerationFlags.setNeedsRecolor();
+          if (window.__state && window.__state.recolor) {
+            window.__state.recolor();
+          }
+        }, 200));
+      }
+    });
+
+    // Set up regeneration flags for seed-only changes
+    const seedOnlySliders = ['highInput', 'radiusInput', 'sharpnessInput', 'smallCountInput'];
+    seedOnlySliders.forEach(id => {
+      const element = document.getElementById(id);
+      if (element) {
+        element.addEventListener('input', () => {
+          RegenerationFlags.setNeedsRegenerate();
+        });
+      }
+    });
+
     // Centralized route layer management
     const RouteLayers = (() => {
       const svg = d3.select('svg');
@@ -531,6 +653,71 @@
       return d;
     }
 
+    // SVG Path simplification using Ramer-Douglas-Peucker algorithm
+    function simplifyPath(points, tolerance = 0.2) {
+      if (points.length <= 2) return points;
+      
+      function perpendicularDistance(point, lineStart, lineEnd) {
+        const [x, y] = point;
+        const [x1, y1] = lineStart;
+        const [x2, y2] = lineEnd;
+        
+        const A = x - x1;
+        const B = y - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+        
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        let param = -1;
+        
+        if (lenSq !== 0) param = dot / lenSq;
+        
+        let xx, yy;
+        if (param < 0) {
+          xx = x1;
+          yy = y1;
+        } else if (param > 1) {
+          xx = x2;
+          yy = y2;
+        } else {
+          xx = x1 + param * C;
+          yy = y1 + param * D;
+        }
+        
+        const dx = x - xx;
+        const dy = y - yy;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+      
+      function douglasPeucker(points, start, end, tolerance, result) {
+        if (end <= start + 1) return;
+        
+        let maxDistance = 0;
+        let index = start;
+        
+        for (let i = start + 1; i < end; i++) {
+          const distance = perpendicularDistance(points[i], points[start], points[end]);
+          if (distance > maxDistance) {
+            index = i;
+            maxDistance = distance;
+          }
+        }
+        
+        if (maxDistance > tolerance) {
+          douglasPeucker(points, start, index, tolerance, result);
+          result.push(points[index]);
+          douglasPeucker(points, index, end, tolerance, result);
+        }
+      }
+      
+      const result = [points[0]];
+      douglasPeucker(points, 0, points.length - 1, tolerance, result);
+      result.push(points[points.length - 1]);
+      
+      return result;
+    }
+
     // Dirty flags for incremental updates
     const RouteDirty = {
       burgs: true,
@@ -538,10 +725,130 @@
       sea: true
     };
 
-  (function () {
-    'use strict';
+    // Regeneration flags for seed-only changes
+    const RegenerationFlags = {
+      needsRegenerate: false,
+      needsRecolor: false,
+      
+      setNeedsRegenerate() {
+        this.needsRegenerate = true;
+        this.needsRecolor = true;
+      },
+      
+      setNeedsRecolor() {
+        this.needsRecolor = true;
+      },
+      
+      clear() {
+        this.needsRegenerate = false;
+        this.needsRecolor = false;
+      }
+    };
 
-    // Define constants up-front so they're available when generate() first runs
+    // Progress management system
+    const ProgressManager = {
+      overlay: null,
+      fill: null,
+      text: null,
+      detail: null,
+      isVisible: false,
+      
+      init() {
+        this.overlay = document.getElementById('progressOverlay');
+        this.fill = document.getElementById('progressFill');
+        this.text = document.getElementById('progressText');
+        this.detail = document.getElementById('progressDetail');
+        
+        // Debug logging
+        console.log('ProgressManager.init() called');
+        console.log('overlay:', this.overlay);
+        console.log('fill:', this.fill);
+        console.log('text:', this.text);
+        console.log('detail:', this.detail);
+      },
+      
+      show() {
+        console.log('ProgressManager.show() called');
+        if (this.overlay) {
+          this.overlay.style.display = 'flex';
+          this.isVisible = true;
+          console.log('Progress overlay shown');
+          
+          // Force a repaint to ensure visibility
+          this.overlay.offsetHeight;
+        } else {
+          console.log('Progress overlay not found!');
+        }
+      },
+      
+      hide() {
+        console.log('ProgressManager.hide() called');
+        if (this.overlay) {
+          this.overlay.style.display = 'none';
+          this.isVisible = false;
+          console.log('Progress overlay hidden');
+        }
+      },
+      
+      update(percent, text, detail = '') {
+        // Ensure overlay is visible before updating
+        if (!this.isVisible) {
+          this.show();
+        }
+        
+        if (this.fill) {
+          this.fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+        }
+        if (this.text) {
+          this.text.textContent = text;
+        }
+        if (this.detail) {
+          this.detail.textContent = detail;
+        }
+        console.log(`Progress update: ${percent}% - ${text}`);
+        
+        // Force a repaint to ensure updates are visible
+        if (this.overlay) {
+          this.overlay.offsetHeight;
+        }
+      },
+      
+      setPhase(phase, percent) {
+        const phases = {
+          'init': { text: 'Initializing map generation...', percent: 5 },
+          'voronoi': { text: 'Building Voronoi diagram...', percent: 15 },
+          'terrain': { text: 'Generating terrain...', percent: 30 },
+          'erosion': { text: 'Applying erosion...', percent: 45 },
+          'rivers': { text: 'Computing rivers...', percent: 60 },
+          'coastlines': { text: 'Drawing coastlines...', percent: 70 },
+          'burgs': { text: 'Placing settlements...', percent: 80 },
+          'routes': { text: 'Building routes...', percent: 90 },
+          'final': { text: 'Finalizing...', percent: 95 }
+        };
+        
+        const phaseInfo = phases[phase] || { text: phase, percent: percent || 50 };
+        this.update(phaseInfo.percent, phaseInfo.text);
+      }
+    };
+
+      (function () {
+      'use strict';
+
+      // Initialize progress manager after DOM is ready
+      document.addEventListener('DOMContentLoaded', () => {
+        ProgressManager.init();
+      });
+      
+      // Also try to init immediately in case DOM is already loaded
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+          ProgressManager.init();
+        });
+      } else {
+        ProgressManager.init();
+      }
+
+      // Define constants up-front so they're available when generate() first runs
     const WATER_COLOR = d3.interpolateBlues(0.55); // single water color (less busy)
 
     // Expose generate() globally for the button
@@ -601,6 +908,15 @@
     generate();
 
     function generate() {
+      // Ensure progress manager is initialized
+      if (!ProgressManager.overlay) {
+        ProgressManager.init();
+      }
+      
+      // Show progress overlay
+      ProgressManager.show();
+      ProgressManager.setPhase('init');
+      
       d3.select('.mapCells').remove();
       d3.select('.coastline').remove();
       d3.select('#burgs').remove();
@@ -640,6 +956,7 @@
       ({ sites } = relaxOnce(sites, width, height));
 
       // Build Delaunay + Voronoi structures
+      ProgressManager.setPhase('voronoi');
       const delaunay = d3.Delaunay.from(sites);
       const voronoi = delaunay.voronoi([0, 0, width, height]);
 
@@ -734,19 +1051,70 @@
       window.__state.renderBurgs = renderBurgs;
       window.__state.computeRoutes = computeRoutes;
 
-      // Initialize reusable typed arrays for performance
-      window.__state.tmp = {
-        dist: new Int32Array(cells.length),
-        down: new Int32Array(cells.length),
-        flux: new Float32Array(cells.length),
-      };
+          // Initialize reusable typed arrays for performance
+    window.__state.tmp = {
+      dist: new Int32Array(cells.length),
+      down: new Int32Array(cells.length),
+      flux: new Float32Array(cells.length),
+    };
+
+    // Typed array pool for reuse across runs
+    const ArrayPool = {
+      float32: [],
+      int32: [],
+      uint32: [],
+      
+      getFloat32(size) {
+        const pool = this.float32.filter(arr => arr.length >= size);
+        if (pool.length > 0) {
+          const arr = pool.pop();
+          arr.fill(0);
+          return arr;
+        }
+        return new Float32Array(size);
+      },
+      
+      getInt32(size) {
+        const pool = this.int32.filter(arr => arr.length >= size);
+        if (pool.length > 0) {
+          const arr = pool.pop();
+          arr.fill(0);
+          return arr;
+        }
+        return new Int32Array(size);
+      },
+      
+      getUint32(size) {
+        const pool = this.uint32.filter(arr => arr.length >= size);
+        if (pool.length > 0) {
+          const arr = pool.pop();
+          arr.fill(0);
+          return arr;
+        }
+        return new Uint32Array(size);
+      },
+      
+      returnFloat32(arr) {
+        this.float32.push(arr);
+      },
+      
+      returnInt32(arr) {
+        this.int32.push(arr);
+      },
+      
+      returnUint32(arr) {
+        this.uint32.push(arr);
+      }
+    };
 
       // Auto-generate: center island + N small hills
+      ProgressManager.setPhase('terrain');
       autoSeed();
       // Apply the water-border mask (keeps edges water)
       applyBorderMask();
       
       // Erosion passes: smooth jaggy ridges and improve drainage
+      ProgressManager.setPhase('erosion');
       const talus = +document.getElementById('talusInput').value || 0.02;
       const thermalStrength = +document.getElementById('thermalStrengthInput').value || 0.5;
       const smoothAlpha = +document.getElementById('smoothAlphaInput').value || 0.2;
@@ -757,7 +1125,14 @@
       TerrainCanvas.setDirty();
       
       // initial recolor according to current UI (also draws coastlines)
+      ProgressManager.setPhase('rivers');
       recolor();
+      
+      // Hide progress overlay when complete
+      ProgressManager.setPhase('final');
+      setTimeout(() => {
+        ProgressManager.hide();
+      }, 1000); // Increased delay to 1 second so you can see the completion
 
       function relaxOnce(pts, w, h) {
         const dly = d3.Delaunay.from(pts);
@@ -1244,10 +1619,36 @@
               }
             });
         }
-        computeRivers();
-        drawCoastlines();
-        generateBurgs();
-        computeRoutes();
+        
+        // Update progress for each phase with detailed progress
+        ProgressManager.setPhase('rivers');
+        ProgressManager.update(60, 'Computing rivers...', 'Building river network...');
+        
+        // Small delay to ensure progress is visible
+        setTimeout(() => {
+          computeRivers();
+          
+          ProgressManager.setPhase('coastlines');
+          ProgressManager.update(70, 'Drawing coastlines...', 'Processing coastline edges...');
+          
+          setTimeout(() => {
+            drawCoastlines();
+            
+            ProgressManager.setPhase('burgs');
+            ProgressManager.update(80, 'Placing settlements...', 'Scoring and placing burgs...');
+            
+            setTimeout(() => {
+              generateBurgs();
+              
+              ProgressManager.setPhase('routes');
+              ProgressManager.update(90, 'Building routes...', 'Computing road and sea networks...');
+              
+              setTimeout(() => {
+                computeRoutes();
+              }, 100);
+            }, 100);
+          }, 100);
+        }, 100);
         
         // Update the biome legend
         updateBiomeLegend();
@@ -2105,6 +2506,9 @@
         for (let i = 0; i < cells.length; i++) if (cells[i].high >= sea) landIdxs.push(i);
         if (!landIdxs.length) { window.__state.riverStats = { majors:0, confluences:0, majorsDrawn:0, majorsReachedSea:0, avgMainLength:0 }; return; }
 
+        // Update progress during river computation
+        ProgressManager.update(62, 'Computing rivers...', 'Building distance field...');
+
         // Use cached typed arrays
         const {dist, down, flux} = window.__state.tmp;
         dist.fill(1e9); down.fill(-1); flux.fill(0);
@@ -2439,6 +2843,9 @@
         const isLand = cells.map((c,i) => !isWaterArr[i]);
         
         console.log(`Drawing coastlines - Sea level: ${sea}, Land cells: ${isLand.filter(l => l).length}, Water cells: ${isWaterArr.filter(w => w).length}`);
+        
+        // Update progress during coastline computation
+        ProgressManager.update(72, 'Drawing coastlines...', 'Finding coastline edges...');
 
         // Build undirected edge map from Voronoi cell polygons
         const edgeMap = new Map(); // key -> {a,b,cells:Set}
@@ -2533,22 +2940,27 @@
           chains.push(chain);
         });
 
-        // Draw chains
+        // Draw chains with path simplification
         const lineOpen = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
         const lineClosed = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasisClosed);
 
         console.log(`Created ${chains.length} coastline chains`);
         chains.forEach((pts) => {
           const closed = (keyOfPoint(pts[0]) === keyOfPoint(pts[pts.length - 1]));
+          
+          // Simplify path based on map size (tolerance proportional to map scale)
+          const tolerance = Math.max(0.15, Math.min(0.3, cells.length / 50000));
+          const simplifiedPts = simplifyPath(pts, tolerance);
+          
           coastG.append('path')
             .attr('class', 'coast')
-            .attr('d', closed ? lineClosed(pts) : lineOpen(pts))
+            .attr('d', closed ? lineClosed(simplifiedPts) : lineOpen(simplifiedPts))
             .attr('fill', 'none')
             .attr('stroke', '#111')
             .attr('stroke-width', '0.6px')
             .attr('stroke-linejoin', 'round');
         });
-        console.log(`Drew ${chains.length} coastline paths`);
+        console.log(`Drew ${chains.length} coastline paths (simplified)`);
       }
     }
 
@@ -2739,6 +3151,9 @@
       const cells = window.__state.cells;
       
       console.log(`Generating ${count} burgs with spacing ${radiusPx}px`);
+      
+      // Update progress during burg generation
+      ProgressManager.update(82, 'Placing settlements...', 'Scoring land cells...');
 
       // Get land cells (use same logic as water detection)
       const isWater = window.__state.isWater || [];
@@ -3298,23 +3713,35 @@
           }
         }
         
-        // Render MST edges as roads
+        // Render MST edges as roads - batch DOM writes
         const roadsG = d3.select('#routes .roads');
         const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
         
-        mstEdges.forEach(edge => {
+        // Collect all road paths first
+        const roadPaths = mstEdges.map(edge => {
           const points = polylineFromPath(edge.path);
           const smoothed = smoothLine(points, 1);
-          
-          roadsG.append('path')
-            .attr('d', line(smoothed))
-            .attr('fill', 'none')
-            .attr('stroke', '#6b4e16')
-            .attr('stroke-width', '1.5px')
-            .attr('stroke-linecap', 'round')
-            .attr('stroke-linejoin', 'round')
-            .attr('vector-effect', 'non-scaling-stroke');
+          return {
+            d: line(smoothed),
+            fill: 'none',
+            stroke: '#6b4e16',
+            'stroke-width': '1.5px',
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+            'vector-effect': 'non-scaling-stroke'
+          };
         });
+        
+        // Batch add all paths at once
+        roadsG.selectAll('path')
+          .data(roadPaths)
+          .enter()
+          .append('path')
+          .each(function(d) {
+            Object.entries(d).forEach(([attr, value]) => {
+              d3.select(this).attr(attr, value);
+            });
+          });
         
         console.log(`Component ${componentIndex}: ${mstEdges.length} roads between ${componentHubs.length} hubs`);
       });
@@ -3338,6 +3765,7 @@
       
       const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
       const existingTrails = [];
+      const trailPaths = [];
       
       // Group burgs by connected components
       const components = findConnectedComponents(burgs, landGraph);
@@ -3350,20 +3778,20 @@
           return;
         }
         
-                  componentBurgs.forEach(burg => {
-            // Find nearby burgs within max distance (only within same component)
-            const nearby = componentBurgs
-              .filter(other => other !== burg)
-              .map(other => ({
-                burg: other,
-                dist: Math.hypot(burg.x - other.x, burg.y - other.y)
-              }))
-              .filter(item => item.dist <= maxDistance)
-              .sort((a, b) => a.dist - b.dist)
-              .slice(0, maxConnections);
-            
-            console.log(`Burg ${burg.id} (cell ${burg.cell}): found ${nearby.length} nearby burgs within ${maxDistance}px`);
+        componentBurgs.forEach(burg => {
+          // Find nearby burgs within max distance (only within same component)
+          const nearby = componentBurgs
+            .filter(other => other !== burg)
+            .map(other => ({
+              burg: other,
+              dist: Math.hypot(burg.x - other.x, burg.y - other.y)
+            }))
+            .filter(item => item.dist <= maxDistance)
+            .sort((a, b) => a.dist - b.dist)
+            .slice(0, maxConnections);
           
+          console.log(`Burg ${burg.id} (cell ${burg.cell}): found ${nearby.length} nearby burgs within ${maxDistance}px`);
+        
           nearby.forEach(item => {
             const path = shortestPath(burg.cell, item.burg.cell, landGraph);
             if (path) {
@@ -3375,16 +3803,17 @@
               if (!existingTrails.includes(trailKey)) {
                 existingTrails.push(trailKey);
                 
-                const trailsG = d3.select('#routes .trails');
-                trailsG.append('path')
-                  .attr('d', line(smoothed))
-                  .attr('fill', 'none')
-                  .attr('stroke', '#9b7b3a')
-                  .attr('stroke-width', '1px')
-                  .attr('stroke-dasharray', '3 3')
-                  .attr('stroke-linecap', 'round')
-                  .attr('stroke-linejoin', 'round')
-                  .attr('vector-effect', 'non-scaling-stroke');
+                // Collect trail path data instead of adding immediately
+                trailPaths.push({
+                  d: line(smoothed),
+                  fill: 'none',
+                  stroke: '#9b7b3a',
+                  'stroke-width': '1px',
+                  'stroke-dasharray': '3 3',
+                  'stroke-linecap': 'round',
+                  'stroke-linejoin': 'round',
+                  'vector-effect': 'non-scaling-stroke'
+                });
               }
             }
           });
@@ -3392,6 +3821,18 @@
         
         console.log(`Component ${componentIndex}: ${existingTrails.length} trails built`);
       });
+      
+      // Batch add all trail paths at once
+      const trailsG = d3.select('#routes .trails');
+      trailsG.selectAll('path')
+        .data(trailPaths)
+        .enter()
+        .append('path')
+        .each(function(d) {
+          Object.entries(d).forEach(([attr, value]) => {
+            d3.select(this).attr(attr, value);
+          });
+        });
       
       console.log(`Total trails built: ${existingTrails.length}`);
 
@@ -3630,6 +4071,9 @@
         computeLakes(sea);
       }
       
+      // Update progress during route computation
+      ProgressManager.update(92, 'Building routes...', 'Computing land networks...');
+      
       // Use centralized route layers
       const roadsG = RouteLayers.roads;
       const trailsG = RouteLayers.trails;
@@ -3663,13 +4107,16 @@
       markPorts(burgs, cells, isWater);
       
       // Build primary roads
+      ProgressManager.update(93, 'Building routes...', 'Computing primary roads...');
       buildBackboneRoads(burgs, landGraph);
       
       // Build local trails
+      ProgressManager.update(94, 'Building routes...', 'Computing local trails...');
       buildLocalTrails(burgs, landGraph);
       
       // Build sea routes if enabled
       if (DOM.seaRoutesOnInput.checked) {
+        ProgressManager.update(95, 'Building routes...', 'Computing sea networks...');
         if (DEBUG) console.log('Sea routes enabled, building sea graph...');
         const seaGraph = buildSeaGraph(cells, isWater);
         if (DEBUG) console.log(`Sea graph: ${seaGraph.nodes.length} nodes, ${seaGraph.edges.length} edges`);
