@@ -4893,7 +4893,7 @@
         console.log(`shortestPath: built edge map with ${edgeMap.size} edges`);
       }
       
-      // A* implementation
+      // A* implementation with proper priority queue
       const openSet = new Set([startIndex]);
       const cameFrom = new Map();
       const gScore = new Map();
@@ -4908,7 +4908,7 @@
       while (openSet.size > 0 && iterations < maxIterations) {
         iterations++;
         
-        // Find node with lowest fScore
+        // Find node with lowest fScore (simple priority queue)
         let current = null;
         let lowestF = Infinity;
         for (const node of openSet) {
@@ -5028,14 +5028,18 @@
     }
     
     /**
-     * Heuristic function for A* (Euclidean distance)
+     * Admissible heuristic function for A* (straight-line distance divided by average cell step)
      * @param {number} a - Cell index
      * @param {number} b - Cell index  
      * @param {Array} cells - All cells array
      * @returns {number} Heuristic value
      */
     function heuristic(a, b, cells) {
-      return Math.hypot(cells[a].cx - cells[b].cx, cells[a].cy - cells[b].cy);
+      const dx = cells[a].cx - cells[b].cx;
+      const dy = cells[a].cy - cells[b].cy;
+      const d = Math.hypot(dx, dy);
+      const step = Math.max(1, 20); // Approximate average cell spacing
+      return d / step;
     }
     
     /**
@@ -5124,12 +5128,47 @@
       return totalCost;
     }
     
+    // --- caching single-source shortest paths for sea graph ---
+    const seaSSSPCache = new Map(); // key: sourceNodeId -> {dist: Map, prev: Map}
+    
+    /**
+     * Get cached single-source shortest path results for sea graph
+     * @param {number} sourceNodeId - Starting water node
+     * @param {Object} graph - Sea navigation graph
+     * @param {Set} usedEdges - Set of already-used edges for reuse penalty
+     * @returns {Object} {dist: Map, prev: Map} distances and predecessors
+     */
+    function getSeaSSSP(sourceNodeId, graph, usedEdges = new Set()) {
+      const cacheKey = `${sourceNodeId}-${usedEdges.size}`; // Include usedEdges in cache key
+      if (seaSSSPCache.has(cacheKey)) {
+        return seaSSSPCache.get(cacheKey);
+      }
+      
+      const {dist, prev} = dijkstraSea(sourceNodeId, graph, usedEdges);
+      seaSSSPCache.set(cacheKey, {dist, prev});
+      return {dist, prev};
+    }
+    
+    /**
+     * Reconstruct path from predecessors map
+     * @param {Map} prev - Predecessors map
+     * @param {number} targetNodeId - Target node
+     * @returns {Array} Path as array of node indices
+     */
+    function reconstructSeaPath(prev, targetNodeId) {
+      const path = [];
+      for (let v = targetNodeId; v !== -1 && v !== undefined; v = prev.get(v)) {
+        path.push(v);
+      }
+      return path.reverse();
+    }
+    
     /**
      * Optimized Dijkstra for sea navigation with edge reuse penalty
      * @param {number} startIndex - Starting cell index
      * @param {Object} graph - Sea graph
      * @param {Set} usedEdges - Set of already-used edges for penalty
-     * @returns {Object} Map of node index to distance
+     * @returns {Object} {dist: Map, prev: Map} distances and predecessors
      */
     function dijkstraSea(startIndex, graph, usedEdges = new Set()) {
       const cells = window.__state.cells;
@@ -5137,7 +5176,7 @@
       
       if (!isWater[startIndex]) {
         console.log(`dijkstraSea: start is not water (start: ${isWater[startIndex]})`);
-        return {};
+        return {dist: new Map(), prev: new Map()};
       }
       
       // Create edge lookup map for fast access
@@ -5147,11 +5186,13 @@
         edgeMap.set(key, edge);
       }
       
-      const distances = {};
+      const dist = new Map();
+      const prev = new Map();
       const visited = new Set();
       const queue = [{ node: startIndex, cost: 0 }];
       
-      distances[startIndex] = 0;
+      dist.set(startIndex, 0);
+      prev.set(startIndex, -1);
       
       while (queue.length > 0) {
         // Sort by cost (could use priority queue for better performance)
@@ -5185,14 +5226,15 @@
           
           const newCost = currentCost + edgeCost;
           
-          if (distances[nextIndex] === undefined || newCost < distances[nextIndex]) {
-            distances[nextIndex] = newCost;
+          if (!dist.has(nextIndex) || newCost < dist.get(nextIndex)) {
+            dist.set(nextIndex, newCost);
+            prev.set(nextIndex, current);
             queue.push({ node: nextIndex, cost: newCost });
           }
         }
       }
       
-      return distances;
+      return {dist, prev};
     }
     
     /**
@@ -5257,6 +5299,197 @@
       }
       
       return path;
+    }
+    
+    /**
+     * Build a compressed port graph for efficient gap detection
+     * @param {Array} portsWithSeaIndex - Array of ports with their sea indices
+     * @param {Object} seaGraph - Sea navigation graph
+     * @returns {Object} Port graph with nodes and edges
+     */
+    function buildPortGraph(portsWithSeaIndex, seaGraph) {
+      const nodes = portsWithSeaIndex.map(p => ({
+        id: p.id,
+        x: p.x,
+        y: p.y,
+        seaIndex: p.seaIndex
+      }));
+      
+      const edges = [];
+      
+      // Create edges between ports using cached SSSP distances
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const source = nodes[i];
+          const target = nodes[j];
+          
+          // Get cached SSSP from source
+          const {dist} = getSeaSSSP(source.seaIndex, seaGraph, new Set());
+          
+          // Edge weight is the sea distance between ports
+          const weight = dist.get(target.seaIndex) || Infinity;
+          
+          if (weight < Infinity) {
+            edges.push({
+              a: i,
+              b: j,
+              weight: weight,
+              sourceId: source.id,
+              targetId: target.id
+            });
+          }
+        }
+      }
+      
+      return { nodes, edges };
+    }
+    
+    /**
+     * Optimized gap patching using port graph
+     * @param {Object} portGraph - Port graph
+     * @param {Array} islandGroups - Island groups
+     * @param {Map} islandDistances - Island distance data
+     * @param {number} largestIslandId - Largest island ID
+     * @returns {Array} Gap patches
+     */
+    function patchGapsOptimized(portGraph, islandGroups, islandDistances, largestIslandId) {
+      const gapPatches = [];
+      const maxPatchesPerIsland = 6; // Cap gap patches per island
+      const detourRatio = 5.0; // Stricter detour ratio
+      
+      islandGroups.forEach((islandPorts, islandId) => {
+        if (islandPorts.length < 2) return;
+        
+        const islandData = islandDistances.get(islandId);
+        if (!islandData) return;
+        
+        // Find ports for this island in the port graph
+        const islandPortIndices = [];
+        islandPorts.forEach(port => {
+          const portIndex = portGraph.nodes.findIndex(n => n.id === port.id);
+          if (portIndex >= 0) {
+            islandPortIndices.push(portIndex);
+          }
+        });
+        
+        if (islandPortIndices.length < 2) return;
+        
+        // Build MST for this island's ports
+        const islandEdges = portGraph.edges.filter(edge => 
+          islandPortIndices.includes(edge.a) && islandPortIndices.includes(edge.b)
+        );
+        
+        // Sort by weight for Kruskal's algorithm
+        islandEdges.sort((a, b) => a.weight - b.weight);
+        
+        // Simple MST using union-find
+        const parent = new Array(portGraph.nodes.length).fill(0).map((_, i) => i);
+        
+        function find(x) {
+          if (parent[x] !== x) {
+            parent[x] = find(parent[x]);
+          }
+          return parent[x];
+        }
+        
+        function union(x, y) {
+          parent[find(x)] = find(y);
+        }
+        
+        const mstEdges = new Set();
+        for (const edge of islandEdges) {
+          if (find(edge.a) !== find(edge.b)) {
+            union(edge.a, edge.b);
+            mstEdges.add(`${edge.a}-${edge.b}`);
+            mstEdges.add(`${edge.b}-${edge.a}`);
+          }
+        }
+        
+        // Check for gaps: compare graph path vs direct edge
+        let patchesAdded = 0;
+        for (let i = 0; i < islandPortIndices.length && patchesAdded < maxPatchesPerIsland; i++) {
+          for (let j = i + 1; j < islandPortIndices.length && patchesAdded < maxPatchesPerIsland; j++) {
+            const portA = islandPortIndices[i];
+            const portB = islandPortIndices[j];
+            
+            // Skip if already connected in MST
+            if (mstEdges.has(`${portA}-${portB}`)) continue;
+            
+            // Find shortest path via existing edges
+            const graphPathCost = findShortestPathInPortGraph(portA, portB, portGraph, mstEdges);
+            const directCost = portGraph.edges.find(e => 
+              (e.a === portA && e.b === portB) || (e.a === portB && e.b === portA)
+            )?.weight || Infinity;
+            
+            if (graphPathCost >= detourRatio * directCost && directCost < Infinity) {
+              // Add gap patch
+              const portAId = portGraph.nodes[portA].id;
+              const portBId = portGraph.nodes[portB].id;
+              
+              gapPatches.push({
+                islandId: islandId,
+                fromPort: { id: portAId, x: portGraph.nodes[portA].x, y: portGraph.nodes[portA].y },
+                fromSeaIndex: portGraph.nodes[portA].seaIndex,
+                toPort: { id: portBId, x: portGraph.nodes[portB].x, y: portGraph.nodes[portB].y },
+                toSeaIndex: portGraph.nodes[portB].seaIndex,
+                cost: directCost
+              });
+              
+              patchesAdded++;
+              
+              // Throttle gap patch logging to avoid console spam
+              if (gapPatches.length <= 10) {
+                console.log(`Added gap patch on island ${islandId}: ${portAId} to ${portBId} (detour ${graphPathCost.toFixed(1)} vs direct ${directCost.toFixed(1)})`);
+              } else if (gapPatches.length === 11) {
+                console.log(`... and ${gapPatches.length - 10} more gap patches (logging throttled)`);
+              }
+            }
+          }
+        }
+      });
+      
+      return gapPatches;
+    }
+    
+    /**
+     * Find shortest path in port graph using existing edges
+     * @param {number} start - Start port index
+     * @param {number} end - End port index
+     * @param {Object} portGraph - Port graph
+     * @param {Set} existingEdges - Set of existing edges
+     * @returns {number} Path cost or Infinity if no path
+     */
+    function findShortestPathInPortGraph(start, end, portGraph, existingEdges) {
+      const visited = new Set();
+      const queue = [{ node: start, cost: 0 }];
+      
+      while (queue.length > 0) {
+        queue.sort((a, b) => a.cost - b.cost);
+        const { node: current, cost } = queue.shift();
+        
+        if (current === end) {
+          return cost;
+        }
+        
+        if (visited.has(current)) continue;
+        visited.add(current);
+        
+        // Find neighbors via existing edges
+        for (const edge of portGraph.edges) {
+          let neighbor = null;
+          if (edge.a === current && existingEdges.has(`${edge.a}-${edge.b}`)) {
+            neighbor = edge.b;
+          } else if (edge.b === current && existingEdges.has(`${edge.b}-${edge.a}`)) {
+            neighbor = edge.a;
+          }
+          
+          if (neighbor !== null && !visited.has(neighbor)) {
+            queue.push({ node: neighbor, cost: cost + edge.weight });
+          }
+        }
+      }
+      
+      return Infinity; // No path found
     }
     
     /**
@@ -5917,13 +6150,14 @@
         
         const hubSeaIndex = portsWithSeaIndex.find(ps => ps.id === hubPort.id).seaIndex;
         
-        // Run single-source Dijkstra from hub
-        const distances = dijkstraSea(hubSeaIndex, seaGraph, usedEdges);
+        // Run single-source Dijkstra from hub (cached)
+        const {dist, prev} = getSeaSSSP(hubSeaIndex, seaGraph, usedEdges);
         
         islandDistances.set(islandId, {
           hubPort,
           hubSeaIndex,
-          distances
+          distances: dist,
+          predecessors: prev
         });
         
         console.log(`Island ${islandId}: hub at port ${hubPort.id}, computed distances to ${Object.keys(distances).length} ocean nodes`);
@@ -6040,8 +6274,8 @@
         const sourceIslandData = islandDistances.get(connection.fromIsland);
         if (!sourceIslandData) return;
         
-        // Use the distances from dijkstraSea to find the actual path
-        const path = findPathFromDistances(connection.fromSeaIndex, targetWithSea.seaIndex, seaGraph, sourceIslandData.distances);
+        // Use the predecessors from cached SSSP to find the actual path
+        const path = reconstructSeaPath(sourceIslandData.predecessors, targetWithSea.seaIndex);
         if (path) {
           const points = polylineFromPath(path);
           const smoothed = smoothLine(points, 1);
@@ -6059,64 +6293,9 @@
         }
       });
       
-             // 7) Gap patcher: add direct routes for islands with poor connectivity
-       const gapPatches = [];
-       
-       islandGroups.forEach((islandPorts, islandId) => {
-         if (islandPorts.length < 2 || !islandsWithSeaAccess.has(islandId)) return;
-         
-         const islandData = islandDistances.get(islandId);
-         if (!islandData) return;
-         
-         // Find the farthest port on this island
-         let farthestPort = null;
-         let maxDistance = 0;
-         
-         islandPorts.forEach(port => {
-           const portWithSea = portsWithSeaIndex.find(ps => ps.id === port.id);
-           if (!portWithSea) return;
-           
-           const distance = islandData.distances[portWithSea.seaIndex] || 0;
-           if (distance > maxDistance) {
-             maxDistance = distance;
-             farthestPort = port;
-           }
-         });
-         
-         if (!farthestPort) return;
-         
-         // Check if the farthest port has poor connectivity via existing routes
-         const farthestWithSea = portsWithSeaIndex.find(ps => ps.id === farthestPort.id);
-         if (!farthestWithSea) return;
-         
-         // Find the cost to reach other ports via existing routes vs direct
-         islandPorts.forEach(otherPort => {
-           if (otherPort.id === farthestPort.id) return;
-           
-           const otherWithSea = portsWithSeaIndex.find(ps => ps.id === otherPort.id);
-           if (!otherWithSea) return;
-           
-           const viaExistingCost = islandData.distances[farthestWithSea.seaIndex] + 
-                                 islandData.distances[otherWithSea.seaIndex];
-           const directCost = Math.hypot(
-             farthestPort.x - otherPort.x,
-             farthestPort.y - otherPort.y
-           );
-           
-           // More aggressive gap patching: add if detour is ≥3× direct route (was 4×)
-           if (viaExistingCost >= 3 * directCost) {
-             gapPatches.push({
-               islandId: islandId, // Track which island this gap patch belongs to
-               fromPort: farthestPort,
-               fromSeaIndex: farthestWithSea.seaIndex,
-               toPort: otherPort,
-               toSeaIndex: otherWithSea.seaIndex,
-               cost: directCost
-             });
-             console.log(`Added gap patch on island ${islandId}: ${farthestPort.id} to ${otherPort.id} (detour ${viaExistingCost.toFixed(1)} vs direct ${directCost.toFixed(1)})`);
-           }
-         });
-       });
+             // 7) Build port graph and optimize gap patching
+      const portGraph = buildPortGraph(portsWithSeaIndex, seaGraph);
+      const gapPatches = patchGapsOptimized(portGraph, islandGroups, islandDistances, largestIslandId);
        
        // 8) Ensure all islands with sea access are connected (fallback)
        const connectedIslands = new Set([largestIslandId]);
@@ -6167,7 +6346,7 @@
          const islandData = islandDistances.get(patch.islandId);
          if (!islandData) return;
          
-         const path = findPathFromDistances(patch.fromSeaIndex, patch.toSeaIndex, seaGraph, islandData.distances);
+         const path = reconstructSeaPath(islandData.predecessors, patch.toSeaIndex);
          if (path) {
            const points = polylineFromPath(path);
            const smoothed = smoothLine(points, 1);
@@ -6203,8 +6382,9 @@
       
       isComputingRoutes = true;
       
-      // Reset debug counters
+      // Reset debug counters and clear caches
       window.__state.shortestPathCallCount = 0;
+      seaSSSPCache.clear(); // Clear sea route cache
       
       try {
         // Guard against calling before water mask exists
@@ -6326,7 +6506,7 @@
             buildSeaBackbone(portBurgs, seaGraph, landGraph);
             
             const seaRouteTime = performance.now() - seaRouteStart;
-            console.log(`Sea routes built in ${seaRouteTime.toFixed(1)}ms`);
+            console.log(`Sea routes built in ${seaRouteTime.toFixed(1)}ms (cache hits: ${seaSSSPCache.size})`);
           } else {
             if (DEBUG) console.log('Not enough port burgs for sea routes (need >= 2)');
           }
