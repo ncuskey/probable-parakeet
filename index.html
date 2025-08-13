@@ -18,7 +18,7 @@
     .pass { color: #0a0; }
     .fail { color: #b00; }
     .row { margin: 6px 0; }
-          /* Coastline styling */
+    /* Coastline styling */
       .coast { fill: none; stroke: #111; stroke-width: 0.6px; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
     .rivers { fill: none; stroke: #4D83AE; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
     .riversShade { fill: none; stroke: rgba(0,0,0,0.35); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
@@ -286,101 +286,101 @@
 
         <!-- Terrain Tab -->
         <div id="terrain-tab" class="tab-content active">
-          <div class="row">
-            <label>Graph Size:</label>
-                    <input id="sizeInput" value="20000" type="range" min="100" max="25000" step="500" oninput="sizeOutput.value = sizeInput.valueAsNumber">
-              <output id="sizeOutput">20000</output>
-          </div>
+    <div class="row">
+      <label>Graph Size:</label>
+                    <input id="sizeInput" value="10000" type="range" min="100" max="25000" step="500" oninput="sizeOutput.value = sizeInput.valueAsNumber">
+      <output id="sizeOutput">10000</output>
+    </div>
 
-          <div class="row">
-            <label>Max High:</label>
-            <input id="highInput" value="0.9" type="range" min="0.1" max="1" step="0.01" oninput="highOutput.value = highInput.valueAsNumber">
-            <output id="highOutput">0.9</output>
-          </div>
+    <div class="row">
+      <label>Max High:</label>
+      <input id="highInput" value="0.9" type="range" min="0.1" max="1" step="0.01" oninput="highOutput.value = highInput.valueAsNumber">
+      <output id="highOutput">0.9</output>
+    </div>
 
-          <div class="row">
-            <label>Radius:</label>
-            <input id="radiusInput" value="0.9" type="range" min="0.5" max="0.999" step="0.001" oninput="radiusOutput.value = radiusInput.valueAsNumber">
+    <div class="row">
+      <label>Radius:</label>
+      <input id="radiusInput" value="0.9" type="range" min="0.5" max="0.999" step="0.001" oninput="radiusOutput.value = radiusInput.valueAsNumber">
             <output id="radiusOutput">0.9</output>
             <span class="hint">(change gently!)</span>
-          </div>
+    </div>
 
-          <div class="row">
-            <label>Sharpness:</label>
-            <input id="sharpnessInput" value="0.2" type="range" min="0" max="0.5" step="0.1" oninput="sharpnessOutput.value = sharpnessInput.valueAsNumber">
-            <output id="sharpnessOutput">0.2</output>
-          </div>
+    <div class="row">
+      <label>Sharpness:</label>
+      <input id="sharpnessInput" value="0.2" type="range" min="0" max="0.5" step="0.1" oninput="sharpnessOutput.value = sharpnessInput.valueAsNumber">
+      <output id="sharpnessOutput">0.2</output>
+    </div>
 
-          <div class="row">
+    <div class="row">
             <label># Small Hills:</label>
-            <input id="smallCountInput" value="20" type="range" min="0" max="60" step="1" oninput="smallCountOutput.value = smallCountInput.valueAsNumber">
-            <output id="smallCountOutput">20</output>
+      <input id="smallCountInput" value="20" type="range" min="0" max="60" step="1" oninput="smallCountOutput.value = smallCountInput.valueAsNumber">
+      <output id="smallCountOutput">20</output>
             <span class="hint">(auto‑seeded)</span>
-          </div>
+    </div>
 
-          <div class="row">
+    <div class="row">
             <label>Sea Level:</label>
             <input id="seaLevelInput" value="0.35" type="range" min="0" max="1" step="0.01" oninput="seaLevelOutput.value = seaLevelInput.valueAsNumber;">
-            <output id="seaLevelOutput">0.35</output>
-          </div>
+      <output id="seaLevelOutput">0.35</output>
+    </div>
 
-          <div class="row">
+    <div class="row">
             <label>Water Border (%):</label>
             <input id="borderPctInput" value="8" type="range" min="2" max="20" step="1" oninput="borderPctOutput.value = borderPctInput.valueAsNumber; __state.applyBorder && __state.applyBorder(); __state.recolor && __state.recolor();">
-            <output id="borderPctOutput">8</output>
-          </div>
+      <output id="borderPctOutput">8</output>
+    </div>
 
-          <div class="row">
+    <div class="row">
             <label>Min Lake Size:</label>
-            <input id="minLakeSizeInput" value="3" type="range" min="1" max="10" step="1" oninput="minLakeSizeOutput.value = minLakeSizeInput.valueAsNumber; __state.recolor && __state.recolor();">
-            <output id="minLakeSizeOutput">3</output>
-          </div>
+      <input id="minLakeSizeInput" value="3" type="range" min="1" max="10" step="1" oninput="minLakeSizeOutput.value = minLakeSizeInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="minLakeSizeOutput">3</output>
+    </div>
 
-          <div class="row">
+    <div class="row">
             <label>Min Lake Depth:</label>
-            <input id="minLakeDepthInput" value="0.05" type="range" min="0.01" max="0.15" step="0.01" oninput="minLakeDepthOutput.value = minLakeDepthInput.valueAsNumber; __state.recolor && __state.recolor();">
-            <output id="minLakeDepthOutput">0.05</output>
-          </div>
+      <input id="minLakeDepthInput" value="0.05" type="range" min="0.01" max="0.15" step="0.01" oninput="minLakeDepthOutput.value = minLakeDepthInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="minLakeDepthOutput">0.05</output>
+    </div>
 
-          <div class="row">
-            <label>World Type:</label>
-            <select id="worldType" onchange="generate();">
-              <option value="island" selected>Single Island</option>
-              <option value="continents">Continents</option>
-            </select>
-          </div>
+    <div class="row">
+      <label>World Type:</label>
+      <select id="worldType" onchange="generate();">
+        <option value="island" selected>Single Island</option>
+        <option value="continents">Continents</option>
+      </select>
+    </div>
 
-          <div class="row">
-            <label>Thermal Erosion (Talus):</label>
-            <input id="talusInput" value="0.02" type="range" min="0.01" max="0.05" step="0.005" oninput="talusOutput.value = talusInput.valueAsNumber; __state.recolor && __state.recolor();">
-            <output id="talusOutput">0.02</output>
-          </div>
+    <div class="row">
+      <label>Thermal Erosion (Talus):</label>
+      <input id="talusInput" value="0.02" type="range" min="0.01" max="0.05" step="0.005" oninput="talusOutput.value = talusInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="talusOutput">0.02</output>
+    </div>
 
-          <div class="row">
-            <label>Thermal Erosion (Strength):</label>
-            <input id="thermalStrengthInput" value="0.5" type="range" min="0.1" max="1.0" step="0.1" oninput="thermalStrengthOutput.value = thermalStrengthInput.valueAsNumber; __state.recolor && __state.recolor();">
-            <output id="thermalStrengthOutput">0.5</output>
-          </div>
+    <div class="row">
+      <label>Thermal Erosion (Strength):</label>
+      <input id="thermalStrengthInput" value="0.5" type="range" min="0.1" max="1.0" step="0.1" oninput="thermalStrengthOutput.value = thermalStrengthInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="thermalStrengthOutput">0.5</output>
+    </div>
 
-          <div class="row">
-            <label>Land Smoothing (Alpha):</label>
-            <input id="smoothAlphaInput" value="0.2" type="range" min="0.05" max="0.5" step="0.05" oninput="smoothAlphaOutput.value = smoothAlphaInput.valueAsNumber; __state.recolor && __state.recolor();">
-            <output id="smoothAlphaOutput">0.2</output>
-          </div>
+    <div class="row">
+      <label>Land Smoothing (Alpha):</label>
+      <input id="smoothAlphaInput" value="0.2" type="range" min="0.05" max="0.5" step="0.05" oninput="smoothAlphaOutput.value = smoothAlphaInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="smoothAlphaOutput">0.2</output>
+    </div>
 
-          <div class="row">
-            <label>River Style:</label>
-            <select id="riverStyle" onchange="__state.recolor && __state.recolor();">
-              <option value="lines">Lines</option>
-              <option value="polygons" selected>Polygonal</option>
-            </select>
-          </div>
+    <div class="row">
+      <label>River Style:</label>
+      <select id="riverStyle" onchange="__state.recolor && __state.recolor();">
+        <option value="lines">Lines</option>
+        <option value="polygons" selected>Polygonal</option>
+      </select>
+    </div>
 
-          <div class="row">
-            <label>River Width:</label>
-            <input id="riverWidthInput" value="200" type="range" min="50" max="400" step="10" oninput="riverWidthOutput.value = riverWidthInput.valueAsNumber; __state.recolor && __state.recolor();">
-            <output id="riverWidthOutput">200</output>
-          </div>
+    <div class="row">
+      <label>River Width:</label>
+      <input id="riverWidthInput" value="200" type="range" min="50" max="400" step="10" oninput="riverWidthOutput.value = riverWidthInput.valueAsNumber; __state.recolor && __state.recolor();">
+      <output id="riverWidthOutput">200</output>
+    </div>
         </div>
 
         <!-- Climate Tab -->
@@ -417,23 +417,23 @@
             <output id="precipScaleOutput">1.1</output>
           </div>
 
-          <div class="row">
-            <label>Render Mode:</label>
-            <select id="renderMode" onchange="__state.recolor && __state.recolor();">
-              <option value="heightmap" selected>Heightmap</option>
-              <option value="biomes">Biomes</option>
-              <option value="hybrid">Hybrid</option>
-            </select>
-          </div>
+    <div class="row">
+      <label>Render Mode:</label>
+      <select id="renderMode" onchange="__state.recolor && __state.recolor();">
+        <option value="heightmap" selected>Heightmap</option>
+        <option value="biomes">Biomes</option>
+        <option value="hybrid">Hybrid</option>
+      </select>
+    </div>
 
-          <div class="row">
-            <label>Shaded Relief:</label>
-            <select id="shadingMode" onchange="__state.recolor && __state.recolor();">
-              <option value="none" selected>None</option>
-              <option value="shaded">Shaded</option>
-            </select>
+    <div class="row">
+      <label>Shaded Relief:</label>
+      <select id="shadingMode" onchange="__state.recolor && __state.recolor();">
+        <option value="none" selected>None</option>
+        <option value="shaded">Shaded</option>
+      </select>
           </div>
-        </div>
+    </div>
 
         <!-- Settlements Tab -->
         <div id="settlements-tab" class="tab-content">
@@ -443,7 +443,7 @@
             <output id="burgsCountOutput">15</output>
           </div>
 
-          <div class="row">
+    <div class="row">
             <label>Burg Spacing (px):</label>
             <input id="burgSpacingInput" value="12" type="range" min="8" max="20" step="1" oninput="burgSpacingOutput.value = burgSpacingInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
             <output id="burgSpacingOutput">12</output>
@@ -498,6 +498,18 @@
             <label>River Crossing Penalty:</label>
             <input id="riverPenaltyInput" value="1.0" type="range" min="0" max="3" step="0.1" oninput="riverPenaltyOutput.value = riverPenaltyInput.valueAsNumber; __state.computeRoutes && __state.computeRoutes();">
             <output id="riverPenaltyOutput">1.0</output>
+          </div>
+
+          <div class="row">
+            <label>Roads:</label>
+            <input id="roadsOnInput" type="checkbox" checked onchange="__state.computeRoutes && __state.computeRoutes();">
+            <span style="margin-left: 8px;">Enable primary roads</span>
+          </div>
+
+          <div class="row">
+            <label>Trails:</label>
+            <input id="trailsOnInput" type="checkbox" checked onchange="__state.computeRoutes && __state.computeRoutes();">
+            <span style="margin-left: 8px;">Enable local trails</span>
           </div>
 
           <div class="row">
@@ -831,8 +843,8 @@
       }
     };
 
-      (function () {
-      'use strict';
+  (function () {
+    'use strict';
 
       // Initialize progress manager after DOM is ready
       document.addEventListener('DOMContentLoaded', () => {
@@ -848,7 +860,7 @@
         ProgressManager.init();
       }
 
-      // Define constants up-front so they're available when generate() first runs
+    // Define constants up-front so they're available when generate() first runs
     const WATER_COLOR = d3.interpolateBlues(0.55); // single water color (less busy)
 
     // Expose generate() globally for the button
@@ -1025,15 +1037,15 @@
           .attr('y', 0);
       } else {
         // SVG-based rendering for smaller maps
-        mapCells.selectAll('path.mapCell')
-          .data(cells)
-          .enter()
-          .append('path')
-          .attr('class', 'mapCell')
-          .attr('id', d => d.index)
-          .attr('d', d => 'M' + d.poly.map(p => p.join(',')).join('L') + 'Z')
-          .attr('fill', '#000')
-          .attr('fill-rule', 'nonzero');
+      mapCells.selectAll('path.mapCell')
+        .data(cells)
+        .enter()
+        .append('path')
+        .attr('class', 'mapCell')
+        .attr('id', d => d.index)
+        .attr('d', d => 'M' + d.poly.map(p => p.join(',')).join('L') + 'Z')
+        .attr('fill', '#000')
+        .attr('fill-rule', 'nonzero');
       }
 
       // Keep shared state for tests and other functions
@@ -1577,47 +1589,47 @@
           TerrainCanvas.markClean();
         } else if (!useCanvas) {
           // SVG-based rendering for smaller maps
-          mapCells.selectAll('path.mapCell')
-            .attr('fill', d => {
-              if (isWater[d.index]) {
-                return 'none';
+        mapCells.selectAll('path.mapCell')
+          .attr('fill', d => {
+            if (isWater[d.index]) {
+              return 'none';
+            } else {
+              let baseColor;
+              if (renderMode === 'biomes' || renderMode === 'hybrid') {
+                baseColor = getBiomeColor(d.biome, d.high, sea);
               } else {
-                let baseColor;
-                if (renderMode === 'biomes' || renderMode === 'hybrid') {
-                  baseColor = getBiomeColor(d.biome, d.high, sea);
-                } else {
-                  const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
-                  const tt = Math.max(0, Math.min(1, tl));
-                  baseColor = landColor(tt);
-                }
-                
-                if (shadingMode === 'shaded' && shades) {
-                  return shadeColor(baseColor, shades[d.index]);
-                } else {
-                  return baseColor;
-                }
+                const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
+                const tt = Math.max(0, Math.min(1, tl));
+                baseColor = landColor(tt);
               }
-            })
-            .style('fill', d => {
-              if (isWater[d.index]) {
-                return 'none';
+              
+              if (shadingMode === 'shaded' && shades) {
+                return shadeColor(baseColor, shades[d.index]);
               } else {
-                let baseColor;
-                if (renderMode === 'biomes' || renderMode === 'hybrid') {
-                  baseColor = getBiomeColor(d.biome, d.high, sea);
-                } else {
-                  const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
-                  const tt = Math.max(0, Math.min(1, tl));
-                  baseColor = landColor(tt);
-                }
-                
-                if (shadingMode === 'shaded' && shades) {
-                  return shadeColor(baseColor, shades[d.index]);
-                } else {
-                  return baseColor;
-                }
+                return baseColor;
               }
-            });
+            }
+          })
+          .style('fill', d => {
+            if (isWater[d.index]) {
+              return 'none';
+            } else {
+              let baseColor;
+              if (renderMode === 'biomes' || renderMode === 'hybrid') {
+                baseColor = getBiomeColor(d.biome, d.high, sea);
+              } else {
+                const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
+                const tt = Math.max(0, Math.min(1, tl));
+                baseColor = landColor(tt);
+              }
+              
+              if (shadingMode === 'shaded' && shades) {
+                return shadeColor(baseColor, shades[d.index]);
+              } else {
+                return baseColor;
+              }
+            }
+          });
         }
         
         // Update progress for each phase with detailed progress
@@ -1626,13 +1638,13 @@
         
         // Small delay to ensure progress is visible
         setTimeout(() => {
-          computeRivers();
+        computeRivers();
           
           ProgressManager.setPhase('coastlines');
           ProgressManager.update(70, 'Drawing coastlines...', 'Processing coastline edges...');
           
           setTimeout(() => {
-            drawCoastlines();
+        drawCoastlines();
             
             ProgressManager.setPhase('burgs');
             ProgressManager.update(80, 'Placing settlements...', 'Scoring and placing burgs...');
@@ -2967,13 +2979,13 @@
     // --- Burgs (Settlements) System ---
 
     /**
-     * Score a cell for settlement placement based on various factors
+     * Score a cell for capital placement (strategic locations)
      * @param {Object} cell - The cell to score
      * @param {Array} cells - All cells array
      * @param {number} sea - Sea level
      * @returns {number} Score between 0 and 1
      */
-    function scoreCellForSettlement(cell, cells, sea) {
+    function scoreCellForCapital(cell, cells, sea) {
       const riverWeight = +document.getElementById('riverWeightInput').value || 0.4;
       const coastWeight = +document.getElementById('coastWeightInput').value || 0.3;
       const flatnessWeight = +document.getElementById('flatnessWeightInput').value || 0.2;
@@ -2989,13 +3001,12 @@
       let coastProximity = 0;
       let flatness = 0;
       let fertility = 1; // Default fertility
+      let harborQuality = 0;
 
       // Calculate river proximity (check neighbors for rivers)
-      // Look for cells that are water but not lakes (i.e., rivers)
       let riverNeighbors = 0;
       cell.neighbors.forEach(nb => {
         const neighborCell = cells[nb];
-        // Check if neighbor is water but not a lake
         const isWater = neighborCell.high < sea;
         const isLake = window.__state.isLake && window.__state.isLake[nb] === 1;
         if (isWater && !isLake) {
@@ -3004,15 +3015,33 @@
       });
       riverProximity = Math.min(1, riverNeighbors / cell.neighbors.length * 3);
 
-      // Calculate coast proximity (distance to water)
+      // Calculate river proximity
+      riverProximity = Math.min(1, riverNeighbors / cell.neighbors.length * 3);
+
+      // Calculate coast proximity with harbor quality check
       let minWaterDist = Infinity;
+      let waterNeighbors = 0;
       for (let i = 0; i < cells.length; i++) {
         if (cells[i].high < sea) {
           const dist = Math.hypot(cell.cx - cells[i].cx, cell.cy - cells[i].cy);
           minWaterDist = Math.min(minWaterDist, dist);
+          
+          // Count water neighbors for harbor quality
+          if (dist < 30) {
+            waterNeighbors++;
+          }
         }
       }
       coastProximity = Math.max(0, 1 - minWaterDist / 100); // Prefer cells within 100px of coast
+      
+      // Harbor quality: prefer sheltered locations (exactly one ocean neighbor)
+      if (waterNeighbors === 1) {
+        harborQuality = 1.0; // Perfect harbor (cove/estuary)
+      } else if (waterNeighbors === 2) {
+        harborQuality = 0.7; // Good harbor
+      } else if (waterNeighbors > 2) {
+        harborQuality = 0.3; // Exposed coast
+      }
 
       // Calculate flatness (inverse of slope)
       let maxSlope = 0;
@@ -3027,15 +3056,105 @@
         fertility = Math.min(1, window.__state.precipArray[cell.index] || 0.5);
       }
 
-      // Combine scores with weights
+      // Combine scores with weights (capitals emphasize strategic locations)
       const score = riverWeight * riverProximity + 
-                   coastWeight * coastProximity + 
+                   coastWeight * (coastProximity * 0.6 + harborQuality * 0.4) + 
                    flatnessWeight * flatness + 
                    fertilityWeight * fertility;
 
       // Debug: Log some sample scores
       if (Math.random() < 0.01) { // Log 1% of cells for debugging
-        console.log(`Cell ${cell.index} scores - River: ${riverProximity.toFixed(2)}, Coast: ${coastProximity.toFixed(2)}, Flat: ${flatness.toFixed(2)}, Fert: ${fertility.toFixed(2)}, Total: ${score.toFixed(2)}`);
+        console.log(`Cell ${cell.index} CAPITAL scores - River: ${riverProximity.toFixed(2)}, Coast: ${coastProximity.toFixed(2)}, Harbor: ${harborQuality.toFixed(2)}, Flat: ${flatness.toFixed(2)}, Fert: ${fertility.toFixed(2)}, Total: ${score.toFixed(2)}`);
+      }
+
+      return Math.max(0, Math.min(1, score));
+    }
+
+    /**
+     * Score a cell for town placement (including road access bonus)
+     * @param {Object} cell - The cell to score
+     * @param {Array} cells - All cells array
+     * @param {number} sea - Sea level
+     * @param {Array} capitals - Array of capital burgs
+     * @returns {number} Score between 0 and 1
+     */
+    function scoreCellForTown(cell, cells, sea, capitals) {
+      const riverWeight = +document.getElementById('riverWeightInput').value || 0.4;
+      const coastWeight = +document.getElementById('coastWeightInput').value || 0.3;
+      const flatnessWeight = +document.getElementById('flatnessWeightInput').value || 0.2;
+      const fertilityWeight = +document.getElementById('fertilityWeightInput').value || 0.1;
+      const roadWeight = 0.3; // Bonus for road access
+
+      // Skip water cells
+      if (cell.high < sea) return 0;
+      
+      // Skip very high peaks (too steep for settlements)
+      if (cell.high > 0.8) return 0;
+
+      let riverProximity = 0;
+      let coastProximity = 0;
+      let flatness = 0;
+      let fertility = 1; // Default fertility
+      let roadAccess = 0;
+
+      // Calculate river proximity (same as capitals)
+      let riverNeighbors = 0;
+      cell.neighbors.forEach(nb => {
+        const neighborCell = cells[nb];
+        const isWater = neighborCell.high < sea;
+        const isLake = window.__state.isLake && window.__state.isLake[nb] === 1;
+        if (isWater && !isLake) {
+          riverNeighbors++;
+        }
+      });
+      riverProximity = Math.min(1, riverNeighbors / cell.neighbors.length * 3);
+
+      // Calculate coast proximity (simpler than capitals)
+      let minWaterDist = Infinity;
+      for (let i = 0; i < cells.length; i++) {
+        if (cells[i].high < sea) {
+          const dist = Math.hypot(cell.cx - cells[i].cx, cell.cy - cells[i].cy);
+          minWaterDist = Math.min(minWaterDist, dist);
+        }
+      }
+      coastProximity = Math.max(0, 1 - minWaterDist / 100);
+
+      // Calculate flatness (same as capitals)
+      let maxSlope = 0;
+      cell.neighbors.forEach(nb => {
+        const slope = Math.abs(cell.high - cells[nb].high);
+        maxSlope = Math.max(maxSlope, slope);
+      });
+      flatness = Math.max(0, 1 - maxSlope * 5);
+
+      // Calculate fertility (same as capitals)
+      if (window.__state.precipArray) {
+        fertility = Math.min(1, window.__state.precipArray[cell.index] || 0.5);
+      }
+
+      // Calculate road access bonus (distance to nearest capital road)
+      let minRoadDist = Infinity;
+      if (window.__state.capitalRoads && window.__state.capitalRoads.length > 0) {
+        for (const road of window.__state.capitalRoads) {
+          // Simple distance to road segment (could be improved with actual path distance)
+          const dist = Math.hypot(cell.cx - road.x, cell.cy - road.y);
+          minRoadDist = Math.min(minRoadDist, dist);
+        }
+        roadAccess = Math.max(0, 1 - minRoadDist / 200); // Bonus within 200px of roads
+      }
+
+      // Combine scores with weights (towns emphasize road access)
+      const baseScore = riverWeight * riverProximity + 
+                       coastWeight * coastProximity + 
+                       flatnessWeight * flatness + 
+                       fertilityWeight * fertility;
+      
+      const roadBonus = roadWeight * roadAccess;
+      const score = baseScore + roadBonus;
+
+      // Debug: Log some sample scores
+      if (Math.random() < 0.01) { // Log 1% of cells for debugging
+        console.log(`Cell ${cell.index} TOWN scores - River: ${riverProximity.toFixed(2)}, Coast: ${coastProximity.toFixed(2)}, Flat: ${flatness.toFixed(2)}, Fert: ${fertility.toFixed(2)}, Road: ${roadAccess.toFixed(2)}, Total: ${score.toFixed(2)}`);
       }
 
       return Math.max(0, Math.min(1, score));
@@ -3080,13 +3199,76 @@
     }
 
     /**
+     * Build roads between capitals (MST approach)
+     * @param {Array} capitals - Array of capital burgs
+     */
+    function buildCapitalRoads(capitals) {
+      if (capitals.length < 2) return;
+      
+      console.log(`Building capital road network for ${capitals.length} capitals`);
+      
+      // Create edges between all capital pairs
+      const edges = [];
+      for (let i = 0; i < capitals.length; i++) {
+        for (let j = i + 1; j < capitals.length; j++) {
+          const dist = Math.hypot(
+            capitals[i].x - capitals[j].x,
+            capitals[i].y - capitals[j].y
+          );
+          edges.push({
+            a: i,
+            b: j,
+            cost: dist
+          });
+        }
+      }
+      
+      // Sort edges by cost for Kruskal's algorithm
+      edges.sort((a, b) => a.cost - b.cost);
+      
+      // Kruskal's algorithm for MST
+      const parent = new Array(capitals.length).fill(0).map((_, i) => i);
+      
+      function find(x) {
+        if (parent[x] !== x) {
+          parent[x] = find(parent[x]);
+        }
+        return parent[x];
+      }
+      
+      function union(x, y) {
+        parent[find(x)] = find(y);
+      }
+      
+      const mstEdges = [];
+      for (const edge of edges) {
+        if (find(edge.a) !== find(edge.b)) {
+          union(edge.a, edge.b);
+          mstEdges.push(edge);
+        }
+      }
+      
+      // Store capital roads for town scoring
+      window.__state.capitalRoads = mstEdges.map(edge => ({
+        x: (capitals[edge.a].x + capitals[edge.b].x) / 2,
+        y: (capitals[edge.a].y + capitals[edge.b].y) / 2,
+        a: edge.a,
+        b: edge.b
+      }));
+      
+      console.log(`Built ${mstEdges.length} capital roads`);
+    }
+
+    /**
      * Create a burg object from a cell
      * @param {Object} cell - The cell to place the burg on
      * @param {Array} cells - All cells array
      * @param {number} sea - Sea level
+     * @param {number} index - Burg index
+     * @param {string} type - Burg type ('capital', 'town', 'port')
      * @returns {Object} Burg object
      */
-    function placeBurg(cell, cells, sea, index) {
+    function placeBurg(cell, cells, sea, index, type = 'town') {
       const id = index;
       
       // Determine if it's a port (near coast)
@@ -3098,7 +3280,12 @@
           minWaterDist = Math.min(minWaterDist, dist);
         }
       }
-      isPort = minWaterDist < 30; // Within 30px of water
+      isPort = minWaterDist < 15; // Within 15px of water (more selective)
+      
+      // Debug: Log port detection for some burgs
+      if (Math.random() < 0.1) { // Log 10% of burgs
+        console.log(`Burg ${id} port detection: minWaterDist=${minWaterDist.toFixed(1)}px, isPort=${isPort}, type=${type}`);
+      }
 
       // Determine if it's on a river
       let onRiver = false;
@@ -3112,15 +3299,15 @@
         }
       });
 
-      // Determine type and population
-      let type = 'town';
+      // Determine population based on type and features
       let population = 1000;
       
-      if (isPort) {
-        type = 'port';
-        population = 2000;
+      if (type === 'capital') {
+        population = 5000; // Capitals are larger
+      } else if (isPort) {
+        population = 2000; // Ports are prosperous
       } else if (onRiver) {
-        population = 1500;
+        population = 1500; // River towns are moderately prosperous
       }
 
       // Generate name
@@ -3145,15 +3332,18 @@
      * Generate burgs based on current settings
      */
     function generateBurgs() {
-      const count = +document.getElementById('burgsCountInput').value || 15;
-      const radiusPx = +document.getElementById('burgSpacingInput').value || 12;
+      const totalCount = +document.getElementById('burgsCountInput').value || 15;
+      const capitalCount = Math.max(2, Math.floor(totalCount * 0.3)); // 30% capitals
+      const townCount = totalCount - capitalCount;
+      const capitalSpacing = +document.getElementById('burgSpacingInput').value * 2 || 24; // Larger spacing for capitals
+      const townSpacing = +document.getElementById('burgSpacingInput').value || 12;
       const sea = +document.getElementById('seaLevelInput').value;
       const cells = window.__state.cells;
       
-      console.log(`Generating ${count} burgs with spacing ${radiusPx}px`);
+      console.log(`Generating ${capitalCount} capitals + ${townCount} towns with spacing ${capitalSpacing}px/${townSpacing}px`);
       
       // Update progress during burg generation
-      ProgressManager.update(82, 'Placing settlements...', 'Scoring land cells...');
+      ProgressManager.update(82, 'Placing settlements...', 'Scoring land cells for capitals...');
 
       // Get land cells (use same logic as water detection)
       const isWater = window.__state.isWater || [];
@@ -3167,35 +3357,89 @@
         return;
       }
 
-      // Score all land cells
-      const candidates = landCells.map(cell => ({
+      // === PHASE 1: Place Capitals ===
+      ProgressManager.update(83, 'Placing settlements...', 'Placing capital cities...');
+      
+      // Score all land cells for capitals (emphasize strategic locations)
+      const capitalCandidates = landCells.map(cell => ({
         cell: cell,
-        score: scoreCellForSettlement(cell, cells, sea)
+        score: scoreCellForCapital(cell, cells, sea)
       }));
 
       // Filter out low-scoring cells
-      const goodCandidates = candidates.filter(c => c.score > 0.1);
-      console.log(`Found ${goodCandidates.length} cells with good scores (>0.1)`);
+      const goodCapitalCandidates = capitalCandidates.filter(c => c.score > 0.15);
+      console.log(`Found ${goodCapitalCandidates.length} cells with good capital scores (>0.15)`);
       
-      if (goodCandidates.length === 0) {
-        console.log('No suitable cells found for burgs');
+      if (goodCapitalCandidates.length === 0) {
+        console.log('No suitable cells found for capitals');
         window.__state.burgs = [];
         renderBurgs();
         return;
       }
 
-      // Apply Poisson disk sampling
-      const spaced = poissonSample(goodCandidates, radiusPx);
-      console.log(`After spacing, ${spaced.length} candidates remain`);
+      // Apply Poisson disk sampling for capitals
+      const spacedCapitals = poissonSample(goodCapitalCandidates, capitalSpacing);
+      console.log(`After capital spacing, ${spacedCapitals.length} candidates remain`);
       
-      // Take top N by score
-      const picked = spaced.slice(0, count);
-      console.log(`Selected ${picked.length} burgs from candidates`);
+      // Take top N capitals by score
+      const pickedCapitals = spacedCapitals.slice(0, capitalCount);
+      console.log(`Selected ${pickedCapitals.length} capitals from candidates`);
       
-      // Create burg objects
-      window.__state.burgs = picked.map((p, index) => placeBurg(p.cell, cells, sea, index));
+      // Create capital burg objects
+      const capitals = pickedCapitals.map((p, index) => placeBurg(p.cell, cells, sea, index, 'capital'));
       
-      console.log(`Generated ${window.__state.burgs.length} burgs`);
+      // === PHASE 2: Build Capital Road Network ===
+      ProgressManager.update(84, 'Placing settlements...', 'Building capital road network...');
+      
+      // Build roads between capitals (this will be used for town scoring)
+      buildCapitalRoads(capitals);
+      
+      // === PHASE 3: Place Towns with Road-Aware Scoring ===
+      ProgressManager.update(85, 'Placing settlements...', 'Placing towns with road access...');
+      
+      // Re-score all land cells for towns (including road access bonus)
+      const townCandidates = landCells.map(cell => ({
+        cell: cell,
+        score: scoreCellForTown(cell, cells, sea, capitals)
+      }));
+
+      // Filter out low-scoring cells and existing capital locations
+      const capitalCells = new Set(capitals.map(c => c.cell));
+      const goodTownCandidates = townCandidates.filter(c => 
+        c.score > 0.1 && !capitalCells.has(c.cell)
+      );
+      console.log(`Found ${goodTownCandidates.length} cells with good town scores (>0.1)`);
+      
+      if (goodTownCandidates.length === 0) {
+        console.log('No suitable cells found for towns');
+        window.__state.burgs = capitals;
+        renderBurgs();
+        return;
+      }
+
+      // Apply Poisson disk sampling for towns
+      const spacedTowns = poissonSample(goodTownCandidates, townSpacing);
+      console.log(`After town spacing, ${spacedTowns.length} candidates remain`);
+      
+      // Take top N towns by score
+      const pickedTowns = spacedTowns.slice(0, townCount);
+      console.log(`Selected ${pickedTowns.length} towns from candidates`);
+      
+      // Create town burg objects
+      const towns = pickedTowns.map((p, index) => placeBurg(p.cell, cells, sea, capitals.length + index, 'town'));
+      
+      // Combine capitals and towns
+      window.__state.burgs = [...capitals, ...towns];
+      
+      console.log(`Generated ${capitals.length} capitals + ${towns.length} towns = ${window.__state.burgs.length} total burgs`);
+      
+      // Debug: Log sample burgs
+      if (capitals.length > 0) {
+        console.log('Sample capital:', capitals[0]);
+      }
+      if (towns.length > 0) {
+        console.log('Sample town:', towns[0]);
+      }
       
       // Render the burgs
       renderBurgs();
@@ -3224,31 +3468,84 @@
         .attr('class', 'burg')
         .attr('data-burg-id', d => d.id);
 
-      // Add circles for burg symbols
+      // Add circles for burg symbols with different styles per type
       burgs.append('circle')
         .attr('cx', d => d.x)
         .attr('cy', d => d.y)
-        .attr('r', d => BURG_TYPES[d.type] ? BURG_TYPES[d.type].radius : 2.5)
-        .attr('fill', '#ff0000')
+        .attr('r', d => {
+          if (d.type === 'capital') return 4; // Capitals are larger
+          if (d.port) return 3; // Ports are medium
+          return 2.5; // Towns are smallest
+        })
+        .each(function(d) {
+          // Debug: Log each burg's properties
+          console.log(`Burg ${d.id}: type=${d.type}, port=${d.port}, x=${d.x}, y=${d.y}`);
+          
+          let color;
+          if (d.type === 'capital') {
+            color = '#ff0000'; // Red for capitals
+          } else if (d.port) {
+            color = '#0066cc'; // Lighter blue for ports
+          } else {
+            color = '#ff6600'; // Orange for towns
+          }
+          
+          console.log(`Burg ${d.id} assigned color: ${color}`);
+          
+          // Apply color directly
+          d3.select(this)
+            .style('fill', color)
+            .attr('fill', color);
+        })
         .attr('stroke', '#fff')
-        .attr('stroke-width', '0.6')
+        .attr('stroke-width', d => d.type === 'capital' ? '1.0' : '0.6')
         .attr('paint-order', 'stroke fill')
         .attr('vector-effect', 'non-scaling-stroke');
 
-      // Add port symbols for ports
-      burgs.filter(d => d.isPort)
-        .append('rect')
-        .attr('x', d => d.x - 1.5)
-        .attr('y', d => d.y - 1.5)
-        .attr('width', 3)
-        .attr('height', 3)
-        .attr('fill', '#4D83AE')
-        .attr('stroke', '#fff')
+      // Add special symbols for capitals (star)
+      burgs.filter(d => d.type === 'capital')
+        .append('text')
+        .attr('x', d => d.x)
+        .attr('y', d => d.y + 1)
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .attr('font-size', '6px')
+        .attr('fill', '#fff')
+        .attr('stroke', '#000')
+        .attr('stroke-width', '0.5')
+        .attr('paint-order', 'stroke fill')
+        .attr('vector-effect', 'non-scaling-stroke')
+        .text('★');
+
+      // Add port symbols for ports (anchor)
+      burgs.filter(d => d.port && d.type !== 'capital')
+        .append('text')
+        .attr('x', d => d.x)
+        .attr('y', d => d.y + 1)
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .attr('font-size', '4px')
+        .attr('fill', '#fff')
+        .attr('stroke', '#000')
         .attr('stroke-width', '0.3')
         .attr('paint-order', 'stroke fill')
-        .attr('vector-effect', 'non-scaling-stroke');
+        .attr('vector-effect', 'non-scaling-stroke')
+        .text('⚓');
 
       console.log(`Rendered ${window.__state.burgs.length} burgs`);
+      
+      // Debug: Log burg types and colors
+      if (window.__state.burgs && window.__state.burgs.length > 0) {
+        console.log('Burg types:', window.__state.burgs.map(b => ({ id: b.id, type: b.type, port: b.port, isPort: b.isPort, x: b.x, y: b.y })));
+        console.log('First few burgs:', window.__state.burgs.slice(0, 3));
+        
+        // Debug: Check what colors are actually applied to DOM elements
+        const burgCircles = document.querySelectorAll('#burgs circle');
+        console.log('Burg circles found:', burgCircles.length);
+        if (burgCircles.length > 0) {
+          console.log('First circle fill:', burgCircles[0].getAttribute('fill'), burgCircles[0].style.fill);
+        }
+      }
     }
 
     // --- Routes System ---
@@ -3330,13 +3627,15 @@
     }
     
     /**
-     * A* pathfinding algorithm for land navigation
+     * A* pathfinding algorithm for land navigation using edge weights
      * @param {number} startIndex - Starting cell index
      * @param {number} endIndex - Ending cell index
      * @param {Object} graph - Land graph
+     * @param {Set} usedEdges - Set of already-used edges for road reuse discount
+     * @param {Set} burgCells - Set of burg cell indices for pass-through bonus
      * @returns {Array} Path as array of cell indices
      */
-    function shortestPath(startIndex, endIndex, graph) {
+    function shortestPath(startIndex, endIndex, graph, usedEdges = new Set(), burgCells = new Set()) {
       const cells = window.__state.cells;
       const isWater = window.__state.isWater || [];
       
@@ -3352,7 +3651,101 @@
         return [startIndex];
       }
       
-      // Simple BFS to find a path
+      // Create edge lookup map for fast access
+      const edgeMap = new Map();
+      for (const edge of graph.edges) {
+        const key = `${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`;
+        edgeMap.set(key, edge);
+      }
+      
+      // A* implementation
+      const openSet = new Set([startIndex]);
+      const cameFrom = new Map();
+      const gScore = new Map();
+      const fScore = new Map();
+      
+      gScore.set(startIndex, 0);
+      fScore.set(startIndex, heuristic(startIndex, endIndex, cells));
+      
+      let iterations = 0;
+      const maxIterations = 10000; // Prevent infinite loops
+      
+      while (openSet.size > 0 && iterations < maxIterations) {
+        iterations++;
+        
+        // Find node with lowest fScore
+        let current = null;
+        let lowestF = Infinity;
+        for (const node of openSet) {
+          const f = fScore.get(node) || Infinity;
+          if (f < lowestF) {
+            lowestF = f;
+            current = node;
+          }
+        }
+        
+        if (current === endIndex) {
+          // Reconstruct path
+          const path = [];
+          while (current !== undefined) {
+            path.unshift(current);
+            current = cameFrom.get(current);
+          }
+          console.log(`A* found path in ${iterations} iterations`);
+          return path;
+        }
+        
+        openSet.delete(current);
+        
+        // Check neighbors
+        const currentCell = cells[current];
+        for (const neighborIndex of currentCell.neighbors) {
+          if (isWater[neighborIndex]) continue; // Skip water neighbors
+          
+          // Calculate edge cost using stored weights
+          const edgeKey = `${Math.min(current, neighborIndex)}-${Math.max(current, neighborIndex)}`;
+          const edge = edgeMap.get(edgeKey);
+          let tentativeG = gScore.get(current) || Infinity;
+          
+          if (edge) {
+            // Use the precomputed edge weight
+            let cost = edge.w;
+            
+            // Apply existing road discount if this edge was already used
+            if (usedEdges.has(edgeKey)) {
+              cost *= 0.15; // Azgaar's existing road discount
+            }
+            
+            // Apply burg pass-through bonus
+            if (burgCells.has(neighborIndex)) {
+              cost *= 0.85; // 15% discount for passing through burgs
+            }
+            
+            tentativeG += cost;
+          } else {
+            // Fallback to Euclidean distance if edge not found
+            const dist = Math.hypot(
+              currentCell.cx - cells[neighborIndex].cx,
+              currentCell.cy - cells[neighborIndex].cy
+            );
+            tentativeG += dist;
+          }
+          
+          const neighborG = gScore.get(neighborIndex) || Infinity;
+          if (tentativeG < neighborG) {
+            cameFrom.set(neighborIndex, current);
+            gScore.set(neighborIndex, tentativeG);
+            fScore.set(neighborIndex, tentativeG + heuristic(neighborIndex, endIndex, cells));
+            
+            // Always add to open set if we found a better path
+            openSet.add(neighborIndex);
+          }
+        }
+      }
+      
+      console.log(`A* failed after ${iterations} iterations, falling back to BFS`);
+      
+      // Fallback to simple BFS if A* fails
       const visited = new Set();
       const queue = [[startIndex, [startIndex]]];
       visited.add(startIndex);
@@ -3361,6 +3754,7 @@
         const [current, path] = queue.shift();
         
         if (current === endIndex) {
+          console.log(`BFS fallback found path`);
           return path;
         }
         
@@ -3376,6 +3770,103 @@
       }
       
       return null; // No path found
+    }
+    
+    /**
+     * Heuristic function for A* (Euclidean distance)
+     * @param {number} a - Cell index
+     * @param {number} b - Cell index  
+     * @param {Array} cells - All cells array
+     * @returns {number} Heuristic value
+     */
+    function heuristic(a, b, cells) {
+      return Math.hypot(cells[a].cx - cells[b].cx, cells[a].cy - cells[b].cy);
+    }
+    
+    /**
+     * Calculate the total cost of a path using edge weights from land graph
+     * @param {Array} path - Array of cell indices
+     * @param {Object} landGraph - Land graph with edges
+     * @returns {number} Total path cost
+     */
+    function calculatePathCost(path, landGraph) {
+      if (path.length < 2) return 0;
+      
+      // Create edge lookup map
+      const edgeMap = new Map();
+      for (const edge of landGraph.edges) {
+        const key = `${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`;
+        edgeMap.set(key, edge);
+      }
+      
+      let totalCost = 0;
+      for (let i = 1; i < path.length; i++) {
+        const prev = path[i - 1];
+        const curr = path[i];
+        const edgeKey = `${Math.min(prev, curr)}-${Math.max(prev, curr)}`;
+        const edge = edgeMap.get(edgeKey);
+        
+        if (edge) {
+          totalCost += edge.w; // Use precomputed edge weight
+        } else {
+          // Fallback to Euclidean distance
+          const prevCell = window.__state.cells[prev];
+          const currCell = window.__state.cells[curr];
+          totalCost += Math.hypot(prevCell.cx - currCell.cx, prevCell.cy - currCell.cy);
+        }
+      }
+      
+      return totalCost;
+    }
+    
+    /**
+     * Mark all edges in a path as used for road reuse discount
+     * @param {Array} path - Array of cell indices
+     * @param {Set} usedEdges - Set to track used edges
+     */
+    function markPathEdgesAsUsed(path, usedEdges) {
+      for (let i = 1; i < path.length; i++) {
+        const prev = path[i - 1];
+        const curr = path[i];
+        const edgeKey = `${Math.min(prev, curr)}-${Math.max(prev, curr)}`;
+        usedEdges.add(edgeKey);
+      }
+    }
+    
+    /**
+     * Calculate the total cost of a sea path using edge weights from sea graph
+     * @param {Array} path - Array of cell indices
+     * @param {Object} seaGraph - Sea graph with edges
+     * @returns {number} Total path cost
+     */
+    function calculateSeaPathCost(path, seaGraph) {
+      if (path.length < 2) return 0;
+      
+      // Create edge lookup map
+      const edgeMap = new Map();
+      for (const edge of seaGraph.edges) {
+        const key = `${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`;
+        edgeMap.set(key, edge);
+      }
+      
+      let totalCost = 0;
+      for (let i = 1; i < path.length; i++) {
+        const prev = path[i - 1];
+        const curr = path[i];
+        const edgeKey = `${Math.min(prev, curr)}-${Math.max(prev, curr)}`;
+        const edge = edgeMap.get(edgeKey);
+        
+        if (edge) {
+          totalCost += edge.w; // Use precomputed edge weight with offshore bias
+        } else {
+          // Fallback to Euclidean distance
+          const prevCell = window.__state.cells[prev];
+          const currCell = window.__state.cells[curr];
+          totalCost += Math.hypot(prevCell.cx - currCell.cx, prevCell.cy - currCell.cy);
+        }
+      }
+      
+      return totalCost;
     }
     
     /**
@@ -3515,7 +4006,9 @@
           }
         }
         
-        burg.isPort = minWaterDist < 32; // Increased from 16 to 32 for better port detection
+        const isPort = minWaterDist < 32; // Increased from 16 to 32 for better port detection
+        burg.isPort = isPort;
+        burg.port = isPort; // keep renderers and routers in sync
       });
     }
     
@@ -3643,6 +4136,10 @@
       const roadDensity = +document.getElementById('roadDensityInput').value || 0.6;
       const hubCount = Math.max(2, Math.round(burgs.length * (0.35 + 0.5 * roadDensity)));
       
+      // Create sets for tracking used edges and burg cells
+      const usedEdges = new Set();
+      const burgCells = new Set(burgs.map(b => b.cell));
+      
       // Group burgs by connected components
       const components = findConnectedComponents(burgs, landGraph);
       console.log(`Found ${components.length} connected land components`);
@@ -3670,15 +4167,12 @@
         for (let i = 0; i < componentHubs.length; i++) {
           for (let j = i + 1; j < componentHubs.length; j++) {
             console.log(`Trying path from hub ${i} (cell ${componentHubs[i].cell}) to hub ${j} (cell ${componentHubs[j].cell})`);
-            const path = shortestPath(componentHubs[i].cell, componentHubs[j].cell, landGraph);
+            const path = shortestPath(componentHubs[i].cell, componentHubs[j].cell, landGraph, usedEdges, burgCells);
             if (path) {
               console.log(`Found path: ${path.length} cells`);
-              const cost = path.reduce((total, index, i) => {
-                if (i === 0) return 0;
-                const prev = window.__state.cells[path[i - 1]];
-                const curr = window.__state.cells[index];
-                return total + Math.hypot(prev.cx - curr.cx, prev.cy - curr.cy);
-              }, 0);
+              
+              // Calculate weighted cost using edge weights from land graph
+              const cost = calculatePathCost(path, landGraph);
               hubEdges.push({ a: i, b: j, cost: cost, path: path });
             } else {
               console.log(`Component ${componentIndex}: no path between hubs ${i} and ${j} (cells ${componentHubs[i].cell} and ${componentHubs[j].cell})`);
@@ -3713,12 +4207,15 @@
           }
         }
         
-        // Render MST edges as roads - batch DOM writes
+        // Render MST edges as roads and mark used edges
         const roadsG = d3.select('#routes .roads');
         const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
         
-        // Collect all road paths first
+        // Collect all road paths first and mark used edges
         const roadPaths = mstEdges.map(edge => {
+          // Mark edges as used for future pathfinding
+          markPathEdgesAsUsed(edge.path, usedEdges);
+          
           const points = polylineFromPath(edge.path);
           const smoothed = smoothLine(points, 1);
           return {
@@ -3761,7 +4258,9 @@
       const maxDistance = 160 + (trailDensity * 80); // 160-240px range
       const maxConnections = Math.max(1, Math.round(1 + trailDensity * 2)); // 1-3 connections
       
-
+      // Create sets for tracking used edges and burg cells
+      const usedEdges = new Set();
+      const burgCells = new Set(burgs.map(b => b.cell));
       
       const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
       const existingTrails = [];
@@ -3793,7 +4292,7 @@
           console.log(`Burg ${burg.id} (cell ${burg.cell}): found ${nearby.length} nearby burgs within ${maxDistance}px`);
         
           nearby.forEach(item => {
-            const path = shortestPath(burg.cell, item.burg.cell, landGraph);
+            const path = shortestPath(burg.cell, item.burg.cell, landGraph, usedEdges, burgCells);
             if (path) {
               const points = polylineFromPath(path);
               const smoothed = smoothLine(points, 1);
@@ -4002,12 +4501,7 @@
           const path = shortestPathSea(topPorts[i].seaIndex, topPorts[j].seaIndex, seaGraph);
           if (path) {
             console.log(`Found sea path: ${path.length} cells`);
-            const cost = path.reduce((total, index, i) => {
-              if (i === 0) return 0;
-              const prev = window.__state.cells[path[i - 1]];
-              const curr = window.__state.cells[index];
-              return total + Math.hypot(prev.cx - curr.cx, prev.cy - curr.cy);
-            }, 0);
+            const cost = calculateSeaPathCost(path, seaGraph);
             portEdges.push({ a: i, b: j, cost: cost, path: path });
           } else {
             console.log(`No sea path found between ports ${i} and ${j}`);
@@ -4061,15 +4555,27 @@
       });
     }
     
+    // Guard against multiple simultaneous executions
+    let isComputingRoutes = false;
+    
     /**
      * Main routes computation function
      */
     function computeRoutes() {
-      // Guard against calling before water mask exists
-      if (!window.__state.isWater) {
-        const sea = +DOM.seaLevelInput.value;
-        computeLakes(sea);
+      // Prevent multiple simultaneous executions
+      if (isComputingRoutes) {
+        console.log('computeRoutes already running, skipping...');
+        return;
       }
+      
+      isComputingRoutes = true;
+      
+      try {
+        // Guard against calling before water mask exists
+        if (!window.__state.isWater) {
+          const sea = +DOM.seaLevelInput.value;
+          computeLakes(sea);
+        }
       
       // Update progress during route computation
       ProgressManager.update(92, 'Building routes...', 'Computing land networks...');
@@ -4106,37 +4612,74 @@
       
       markPorts(burgs, cells, isWater);
       
-      // Build primary roads
-      ProgressManager.update(93, 'Building routes...', 'Computing primary roads...');
-      buildBackboneRoads(burgs, landGraph);
+      // Build primary roads (only if enabled)
+      if (document.getElementById('roadsOnInput') && document.getElementById('roadsOnInput').checked) {
+        ProgressManager.update(93, 'Building routes...', 'Computing primary roads...');
+        
+        // Add timeout to prevent hanging on roads computation
+        const roadsTimeout = setTimeout(() => {
+          console.warn('Roads computation taking too long, skipping...');
+          return;
+        }, 5000); // 5 second timeout
+        
+        try {
+          buildBackboneRoads(burgs, landGraph);
+        } finally {
+          clearTimeout(roadsTimeout);
+        }
+      }
       
-      // Build local trails
-      ProgressManager.update(94, 'Building routes...', 'Computing local trails...');
-      buildLocalTrails(burgs, landGraph);
+      // Build local trails (only if enabled)
+      if (document.getElementById('trailsOnInput') && document.getElementById('trailsOnInput').checked) {
+        ProgressManager.update(94, 'Building routes...', 'Computing local trails...');
+        
+        // Add timeout to prevent hanging on trails computation
+        const trailsTimeout = setTimeout(() => {
+          console.warn('Trails computation taking too long, skipping...');
+          return;
+        }, 5000); // 5 second timeout
+        
+        try {
+          buildLocalTrails(burgs, landGraph);
+        } finally {
+          clearTimeout(trailsTimeout);
+        }
+      }
       
       // Build sea routes if enabled
       if (DOM.seaRoutesOnInput.checked) {
         ProgressManager.update(95, 'Building routes...', 'Computing sea networks...');
         if (DEBUG) console.log('Sea routes enabled, building sea graph...');
-        const seaGraph = buildSeaGraph(cells, isWater);
-        if (DEBUG) console.log(`Sea graph: ${seaGraph.nodes.length} nodes, ${seaGraph.edges.length} edges`);
         
-        const portBurgs = burgs.filter(b => b.isPort);
-        if (DEBUG) console.log(`Found ${portBurgs.length} port burgs:`, portBurgs.map(p => ({ id: p.id, cell: p.cell, name: p.name })));
+        // Add timeout to prevent hanging
+        const seaRouteTimeout = setTimeout(() => {
+          console.warn('Sea route computation taking too long, skipping...');
+          return;
+        }, 10000); // 10 second timeout
         
-        if (portBurgs.length >= 2) {
-          // Group ports by landmass component for better sea route planning
-          const components = findConnectedComponents(burgs, landGraph);
-          const portComponents = components.map(component => 
-            component.filter(burg => burg.isPort)
-          ).filter(ports => ports.length > 0);
+        try {
+          const seaGraph = buildSeaGraph(cells, isWater);
+          if (DEBUG) console.log(`Sea graph: ${seaGraph.nodes.length} nodes, ${seaGraph.edges.length} edges`);
           
-          if (DEBUG) console.log(`Port components:`, portComponents.map(ports => ports.length));
+          const portBurgs = burgs.filter(b => b.isPort || b.port);
+          if (DEBUG) console.log(`Found ${portBurgs.length} port burgs:`, portBurgs.map(p => ({ id: p.id, cell: p.cell, name: p.name })));
           
-          // Build sea routes between different landmasses
-          buildSeaBackbone(portBurgs, seaGraph, landGraph);
-        } else {
-          if (DEBUG) console.log('Not enough port burgs for sea routes (need >= 2)');
+          if (portBurgs.length >= 2) {
+            // Group ports by landmass component for better sea route planning
+            const components = findConnectedComponents(burgs, landGraph);
+            const portComponents = components.map(component => 
+              component.filter(burg => burg.isPort || burg.port)
+            ).filter(ports => ports.length > 0);
+            
+            if (DEBUG) console.log(`Port components:`, portComponents.map(ports => ports.length));
+            
+            // Build sea routes between different landmasses
+            buildSeaBackbone(portBurgs, seaGraph, landGraph);
+          } else {
+            if (DEBUG) console.log('Not enough port burgs for sea routes (need >= 2)');
+          }
+        } finally {
+          clearTimeout(seaRouteTimeout);
         }
       } else {
         if (DEBUG) console.log('Sea routes disabled');
@@ -4150,6 +4693,14 @@
         console.log('roads:', document.querySelectorAll('#routes .roads path').length);
         console.log('trails:', document.querySelectorAll('#routes .trails path').length);
         console.log('sea:', document.querySelectorAll('#routes .searoutes path').length);
+      }
+      
+      // Optional: Add one-liner after rendering to confirm you drew something
+      console.log('sea:', document.querySelectorAll('#routes .searoutes path').length);
+      } catch (error) {
+        console.error('Error in computeRoutes:', error);
+      } finally {
+        isComputingRoutes = false;
       }
     }
 
