@@ -1004,6 +1004,10 @@
     generate();
 
     function generate() {
+      // Always generate a new random seed when button is pressed
+      // Only use input value if user has explicitly set it (not auto-generated)
+      document.getElementById('seedInput').value = '';
+      
       // Ensure progress manager is initialized
       if (!ProgressManager.overlay) {
         ProgressManager.init();
@@ -1050,11 +1054,15 @@
 
       // Get the world seed for reproducible generation
       const seedInput = document.getElementById('seedInput').value;
+      console.log('Seed input value:', seedInput, 'type:', typeof seedInput);
+      // Always generate a new random seed unless user has explicitly set one
       const worldSeed = seedInput ? +seedInput : Math.floor(Math.random() * 999999) + 1;
+      console.log('Generated world seed:', worldSeed);
       
       // Update the seed input to show the current seed (if it was random)
       if (!seedInput) {
         document.getElementById('seedInput').value = worldSeed;
+        console.log('Updated seed input to:', worldSeed);
       }
       const rand = mulberry32(worldSeed);
       
