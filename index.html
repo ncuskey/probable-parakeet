@@ -1315,7 +1315,7 @@
 
       // Auto-generate: center island + N small hills
       ProgressManager.setPhase('terrain');
-      autoSeed();
+      autoSeed(worldSeed);
       // Apply the water-border mask (keeps edges water)
       applyBorderMask();
       
@@ -1610,13 +1610,14 @@
         tpl.steps.forEach(doStep);
       }
 
-      function autoSeed() {
+      function autoSeed(providedSeed = null) {
         const tplKey = document.getElementById('worldType').value;
         const seedInput = document.getElementById('seedInput').value;
-        const worldSeed = seedInput ? +seedInput : Math.floor(Math.random() * 999999) + 1;
+        // Use provided seed if available, otherwise use input or generate random
+        const worldSeed = providedSeed || (seedInput ? +seedInput : Math.floor(Math.random() * 999999) + 1);
         
         // Update the seed input to show the current seed (if it was random)
-        if (!seedInput) {
+        if (!seedInput && !providedSeed) {
           document.getElementById('seedInput').value = worldSeed;
         }
         const uiVals = {
