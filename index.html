@@ -1004,6 +1004,11 @@
     generate();
 
     function generate() {
+      // hard-reset transient classification from previous run
+      window.__state.isWater = null;
+      window.__state.isLake = null;
+      window.__state.landPaths = [];
+      
       // Always generate a new random seed when button is pressed
       // Only use input value if user has explicitly set it (not auto-generated)
       document.getElementById('seedInput').value = '';
@@ -3317,7 +3322,8 @@
         coastG.selectAll('path.coast').remove();
         mapCells.selectAll('path.land-fill').remove();
         const sea = +document.getElementById('seaLevelInput').value;
-        const isWaterArr = (window.__state.isWater) || cells.map(c => c.high < sea);
+        const isWaterArr = cells.map(c => c.high < sea);
+        window.__state.isWater = isWaterArr; // keep state in sync for later steps
         const isLand = cells.map((c,i) => !isWaterArr[i]);
         
         console.log(`Drawing coastlines - Sea level: ${sea}, Land cells: ${isLand.filter(l => l).length}, Water cells: ${isWaterArr.filter(w => w).length}`);
