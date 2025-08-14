@@ -3449,6 +3449,13 @@
             .attr('stroke-width', '0.6px')
             .attr('stroke-linejoin', 'round');
           
+          // Debug: ensure both paths use identical geometry
+          console.log('Island', islandIndex, 'path data:', {
+            landPathD: landPath.attr('d'),
+            coastPathD: coastPath.attr('d'),
+            match: landPath.attr('d') === coastPath.attr('d')
+          });
+          
           // Store reference for recolor function with island data
           if (!window.__state.landPaths) window.__state.landPaths = [];
           window.__state.landPaths.push({
@@ -3493,8 +3500,16 @@
             cp.append('path').attr('d', d);
           });
 
+          // Apply clipping to both render modes
           mapCells.select('image').attr('clip-path', 'url(#landClip)');         // canvas/raster mode
           mapCells.selectAll('path.mapCell').attr('clip-path', 'url(#landClip)'); // SVG cell mode
+          
+          // Debug: log what we're clipping
+          console.log('Applied clip path to:', {
+            imageCount: mapCells.select('image').size(),
+            cellPathCount: mapCells.selectAll('path.mapCell').size(),
+            clipPathD: cp.select('path').attr('d')
+          });
         }
       }
     }
