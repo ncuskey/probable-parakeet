@@ -641,8 +641,10 @@
       if (element) {
         element.addEventListener('input', heavyDebounce(() => {
           RegenerationFlags.setNeedsRecolor();
-          if (window.__state && window.__state.recolor) {
-            window.__state.recolor();
+          if (window.__state) {
+            // ensure the water mask + coastlines match the new sea level
+            if (typeof window.drawCoastlines === 'function') window.drawCoastlines();
+            if (typeof window.__state.recolor === 'function') window.__state.recolor();
           }
         }, 200));
       }
@@ -1003,11 +1005,31 @@
 
     generate();
 
+    function resetForNewRun() {
+      const svg = d3.select('svg');
+      // remove visual layers that will be rebuilt
+      svg.select('.mapCells').remove();
+      svg.select('.coastline').remove();
+      svg.select('.rivers').remove();
+      svg.select('#routes').remove();
+      svg.select('#burgs').remove();
+      svg.select('rect.ocean').remove();
+      svg.select('defs #landClip').remove();
+
+      // invalidate all per-run caches that can poison the next run
+      if (window.__state) {
+        delete window.__state.isWater;
+        delete window.__state.landPaths;
+        delete window.__state.unifiedLandPaths;
+        delete window.__state.riverPolys;
+        delete window.__state.ports;
+        delete window.__state.roadUsage;
+        delete window.__state.isLake;
+      }
+    }
+
     function generate() {
-      // hard-reset transient classification from previous run
-      window.__state.isWater = null;
-      window.__state.isLake = null;
-      window.__state.landPaths = [];
+      resetForNewRun();
       
       // Always generate a new random seed when button is pressed
       // Only use input value if user has explicitly set it (not auto-generated)
@@ -3321,9 +3343,22 @@
       function drawCoastlines() {
         coastG.selectAll('path.coast').remove();
         mapCells.selectAll('path.land-fill').remove();
+        
+        // ✨ always recompute based on the *current* cells & sea level
         const sea = +document.getElementById('seaLevelInput').value;
+        const cells = window.__state.cells;
+        
+        // if you have a computeLakes() that also marks lakes, call it here;
+        // otherwise this simple mask is fine:
         const isWaterArr = cells.map(c => c.high < sea);
-        window.__state.isWater = isWaterArr; // keep state in sync for later steps
+        
+        // update cache for other systems (rivers, burg scoring, routes)
+        window.__state.isWater = isWaterArr;
+        
+        // ❌ invalidate any previously unified paths so recolor can't reuse them
+        window.__state.unifiedLandPaths = null;
+        window.__state.landPaths = null;
+        
         const isLand = cells.map((c,i) => !isWaterArr[i]);
         
         console.log(`Drawing coastlines - Sea level: ${sea}, Land cells: ${isLand.filter(l => l).length}, Water cells: ${isWaterArr.filter(w => w).length}`);
