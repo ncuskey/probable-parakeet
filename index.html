@@ -1385,6 +1385,10 @@
         const ctx = new Map(); // for named picks {as:"center"} → cell index
         const debugOps = document.getElementById('debugOpsInput')?.checked || false;
         
+        // Calculate margin pixels for template operations
+        const pct = (uiVals.borderPct || 8) / 100;
+        const marginPx = Math.max(2, pct * Math.min(width, height));
+        
         // Clear debug overlays if they exist
         if (debugOps) {
           d3.selectAll('.debug-op').remove();
