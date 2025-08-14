@@ -3484,8 +3484,8 @@
         // Optional: Create clip path for crisper edges
         if (closedLoops.length > 0) {
           const cp = defs.select('#landClip').empty()
-            ? defs.append('clipPath').attr('id', 'landClip')
-            : defs.select('#landClip');
+            ? defs.append('clipPath').attr('id', 'landClip').attr('clipPathUnits', 'userSpaceOnUse')
+            : defs.select('#landClip').attr('clipPathUnits', 'userSpaceOnUse');
 
           cp.selectAll('path').remove();
           closedLoops.forEach(loop => {
@@ -3493,7 +3493,8 @@
             cp.append('path').attr('d', d);
           });
 
-          mapCells.select('image').attr('clip-path', 'url(#landClip)');
+          mapCells.select('image').attr('clip-path', 'url(#landClip)');         // canvas/raster mode
+          mapCells.selectAll('path.mapCell').attr('clip-path', 'url(#landClip)'); // SVG cell mode
         }
       }
     }
