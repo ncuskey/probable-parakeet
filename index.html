@@ -358,8 +358,8 @@
 
     <div class="row">
       <label>World Seed:</label>
-      <input id="seedInput" value="42" type="number" min="1" max="999999" onchange="generate();">
-      <span class="hint">(for reproducible results)</span>
+      <input id="seedInput" value="" type="number" min="1" max="999999" onchange="generate();">
+      <span class="hint">(leave empty for random, or set for reproducible results)</span>
     </div>
 
     <div class="row">
@@ -1051,7 +1051,13 @@
       const n = sizeInput.valueAsNumber;
 
       // Get the world seed for reproducible generation
-      const worldSeed = +document.getElementById('seedInput').value || 42;
+      const seedInput = document.getElementById('seedInput').value;
+      const worldSeed = seedInput ? +seedInput : Math.floor(Math.random() * 999999) + 1;
+      
+      // Update the seed input to show the current seed (if it was random)
+      if (!seedInput) {
+        document.getElementById('seedInput').value = worldSeed;
+      }
       const rand = mulberry32(worldSeed);
       
       // initial random points
@@ -1569,7 +1575,13 @@
 
       function autoSeed() {
         const tplKey = document.getElementById('worldType').value;
-        const worldSeed = +document.getElementById('seedInput').value || 42;
+        const seedInput = document.getElementById('seedInput').value;
+        const worldSeed = seedInput ? +seedInput : Math.floor(Math.random() * 999999) + 1;
+        
+        // Update the seed input to show the current seed (if it was random)
+        if (!seedInput) {
+          document.getElementById('seedInput').value = worldSeed;
+        }
         const uiVals = {
           smallCount: +smallCountInput.value,
           borderPct: +borderPctInput.value
