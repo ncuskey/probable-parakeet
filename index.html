@@ -346,13 +346,11 @@
     <div class="row">
       <label>World Type:</label>
       <select id="worldType" onchange="generate();">
-        <option value="island" selected>Single Island</option>
+        <option value="volcanicIsland" selected>Volcanic Island</option>
+        <option value="highIsland">High Island</option>
+        <option value="lowIsland">Low Island</option>
         <option value="continents">Continents</option>
         <option value="archipelago">Archipelago</option>
-        <option value="inlandSea">Inland Sea</option>
-        <option value="riftworld">Rift World</option>
-        <option value="volcanic">Volcanic Chain</option>
-        <option value="plateau">Plateau & Canyons</option>
       </select>
     </div>
 
@@ -1220,88 +1218,76 @@
 
       // --- Template System ---
       const templates = {
-        island: {
-          name: "Single Island",
+        volcanicIsland: {
+          name: "Volcanic Island",
+          description: "Big conically elevated island",
           steps: [
-            {op: "pickCell", as: "center", where: {type:"interior", marginPct: v => v.borderPct}},
-            {op: "addBump", at: "$center", kind: "island", high: 0.9, radius: 0.94, sharpness: 0.2},
-            {op: "repeat", times: v => +v.smallCount, step: 
-              {op: "addBumpAt", where:{type:"interior", marginPct: v => v.borderPct}, kind:"hill", high:0.3, radius:0.985, sharpness:0.1}
-            },
-            {op: "smooth", passes: 1}
+            {op: "mountain", at: "center", high: 0.9, radius: 0.4, sharpness: 0.3},
+            {op: "add", value: 0.07},
+            {op: "multiply", factor: 1.1},
+            {op: "hills", count: 5, distribution: 0.4, high: 0.3, radius: 0.3, sharpness: 0.2},
+            {op: "hills", count: 2, distribution: 0.15, high: 0.2, radius: 0.25, sharpness: 0.15}
+          ]
+        },
+
+        highIsland: {
+          name: "High Island",
+          description: "Big and high island with complicated heightmap and landform",
+          steps: [
+            {op: "mountain", at: "center", high: 0.9, radius: 0.4, sharpness: 0.3},
+            {op: "add", value: 0.08},
+            {op: "multiply", factor: 0.9},
+            {op: "ranges", count: 4, high: 0.6, radius: 0.2, sharpness: 0.25},
+            {op: "hills", count: 12, distribution: 0.25, high: 0.3, radius: 0.3, sharpness: 0.2},
+            {op: "troughs", count: 3, depth: 0.2, radius: 0.3},
+            {op: "multiplyLand", factor: 0.75},
+            {op: "hills", count: 3, distribution: 0.15, high: 0.2, radius: 0.25, sharpness: 0.15}
+          ]
+        },
+
+        lowIsland: {
+          name: "Low Island",
+          description: "As above, but not elevated",
+          steps: [
+            {op: "mountain", at: "center", high: 0.9, radius: 0.4, sharpness: 0.3},
+            {op: "add", value: 0.05},
+            {op: "smooth", passes: 1},
+            {op: "hills", count: 4, distribution: 0.4, high: 0.3, radius: 0.3, sharpness: 0.2},
+            {op: "hills", count: 12, distribution: 0.2, high: 0.25, radius: 0.25, sharpness: 0.15},
+            {op: "troughs", count: 3, depth: 0.2, radius: 0.3},
+            {op: "multiplyLand", factor: 0.3}
           ]
         },
 
         continents: {
           name: "Continents",
+          description: "Two or more islands separated by strait",
           steps: [
-            {op:"pickCell", as:"center", where:{type:"interior", marginPct: v => v.borderPct}},
-            {op:"addBump", at:"$center", kind:"island", high:0.8, radius:0.92, sharpness:0.2},
-            {op:"repeat", times:24, step:{op:"addBumpAt", where:{type:"interior"}, kind:"hill", high:0.4, radius:0.97, sharpness:0.15}},
-            {op:"addRange", from:{x:0.3, y:0.5, norm:true}, to:{x:1.7, y:0.5, norm:true}, max:0.7, radius:0.3},
-            {op:"addRange", from:{x:0.5, y:0.4, norm:true}, to:{x:0.5, y:1.6, norm:true}, max:0.6, radius:0.25},
-            {op:"repeat", times:3, step:{op:"addBumpAt", where:{type:"interiorEdgeBiased"}, kind:"hill", high:0.3, radius:0.98, sharpness:0.1}},
-            {op:"scaleLand", low:0.1, factor:0.7},
-            {op:"addStrait", xNorm:0.5, y1Norm:0.3, y2Norm:1.7, width:3},
-            {op:"smooth", passes:1},
-            {op:"repeat", times:5, step:{op:"addPitAt", where:{type:"interior"}, depth:0.3, radius:0.4}},
-            {op:"repeat", times:3, step:{op:"addTroughBetween", where:{type:"interiorPair"}, depth:0.2, radius:0.3}},
-            {op:"scaleLand", low:0.1, factor:0.8},
-            {op:"biasAll", add:0.02}
+            {op: "mountain", at: "center", high: 0.9, radius: 0.4, sharpness: 0.3},
+            {op: "hills", count: 24, distribution: 0.25, high: 0.3, radius: 0.3, sharpness: 0.2},
+            {op: "ranges", count: 2, high: 0.6, radius: 0.2, sharpness: 0.25},
+            {op: "hills", count: 3, distribution: 0.1, high: 0.2, radius: 0.25, sharpness: 0.15},
+            {op: "multiplyLand", factor: 0.7},
+            {op: "strait", width: 5, xNorm: 0.5, y1Norm: 0.2, y2Norm: 1.8},
+            {op: "smooth", passes: 1},
+            {op: "pits", count: 5, depth: 0.3, radius: 0.4},
+            {op: "troughs", count: 3, depth: 0.2, radius: 0.3},
+            {op: "multiplyLand", factor: 0.8},
+            {op: "add", value: 0.02}
           ]
         },
 
         archipelago: {
           name: "Archipelago",
+          description: "A lot of small islands",
           steps: [
-            {op:"repeat", times:4, step:{op:"addBumpAt", where:{type:"interior", marginPct: v => v.borderPct}, kind:"island", high:0.7, radius:0.85, sharpness:0.25}},
-            {op:"repeat", times:15, step:{op:"addBumpAt", where:{type:"interior", marginPct: v => v.borderPct}, kind:"hill", high:0.3, radius:0.95, sharpness:0.1}},
-            {op:"addStrait", xNorm:0.4, y1Norm:0.2, y2Norm:1.8, width:2},
-            {op:"addStrait", xNorm:0.6, y1Norm:0.2, y2Norm:1.8, width:2},
-            {op:"repeat", times:8, step:{op:"addPitAt", where:{type:"interior"}, depth:0.2, radius:0.3}},
-            {op:"smooth", passes:1}
-          ]
-        },
-
-        inlandSea: {
-          name: "Inland Sea",
-          steps: [
-            {op:"pickCell", as:"center", where:{type:"interior", marginPct: v => v.borderPct}},
-            {op:"addPit", at:"$center", depth:0.6, radius:0.4},
-            {op:"repeat", times:12, step:{op:"addBumpAt", where:{type:"interiorEdgeBiased"}, kind:"hill", high:0.4, radius:0.9, sharpness:0.2}},
-            {op:"addStrait", xNorm:0.8, y1Norm:0.4, y2Norm:1.6, width:1},
-            {op:"smooth", passes:2}
-          ]
-        },
-
-        riftworld: {
-          name: "Rift World",
-          steps: [
-            {op:"addTroughBetween", where:{type:"interiorPair"}, depth:0.4, radius:0.2},
-            {op:"addTroughBetween", where:{type:"interiorPair"}, depth:0.4, radius:0.2},
-            {op:"addRange", from:{x:0.3, y:0.5, norm:true}, to:{x:1.7, y:0.5, norm:true}, max:0.6, radius:0.15},
-            {op:"scaleLand", low:0.1, factor:0.6},
-            {op:"smooth", passes:2}
-          ]
-        },
-
-        volcanic: {
-          name: "Volcanic Chain",
-          steps: [
-            {op:"addRange", from:{x:0.2, y:0.5, norm:true}, to:{x:1.8, y:0.5, norm:true}, max:0.8, radius:0.1},
-            {op:"repeat", times:6, step:{op:"addBumpAt", where:{type:"interior"}, kind:"hill", high:0.5, radius:0.3, sharpness:0.3}},
-            {op:"repeat", times:4, step:{op:"addPitAt", where:{type:"interior"}, depth:0.3, radius:0.2}},
-            {op:"smooth", passes:1}
-          ]
-        },
-
-        plateau: {
-          name: "Plateau & Canyons",
-          steps: [
-            {op:"pickCell", as:"center", where:{type:"interior", marginPct: v => v.borderPct}},
-            {op:"addBump", at:"$center", kind:"hill", high:0.6, radius:0.7, sharpness:0.05},
-            {op:"repeat", times:4, step:{op:"addTroughBetween", where:{type:"interiorPair"}, depth:0.3, radius:0.2}},
-            {op:"smooth", passes:1}
+            {op: "mountain", at: "center", high: 0.9, radius: 0.4, sharpness: 0.3},
+            {op: "addLand", value: -0.02},
+            {op: "hills", count: 15, distribution: 0.15, high: 0.3, radius: 0.3, sharpness: 0.2},
+            {op: "troughs", count: 2, depth: 0.2, radius: 0.3},
+            {op: "pits", count: 8, depth: 0.3, radius: 0.4},
+            {op: "addLand", value: -0.05},
+            {op: "multiplyLand", factor: 0.9}
           ]
         }
       };
@@ -1417,124 +1403,101 @@
 
         const doStep = (step) => {
           switch (step.op) {
-            case "pickCell": {
-              const idx = resolveCell(step.where);
-              ctx.set(step.as, idx);
+            case "mountain": {
+              const idx = pickInteriorCell(marginPx, rand);
+              addWithOpts(idx, 'island', {high: step.high, radius: step.radius, sharpness: step.sharpness}, rand);
               if (debugOps) {
                 const cell = cells[idx];
                 svg.append('circle')
                   .attr('class', 'debug-op')
                   .attr('cx', cell.cx)
                   .attr('cy', cell.cy)
-                  .attr('r', 3)
+                  .attr('r', 8)
                   .attr('fill', 'red')
                   .attr('stroke', 'white')
-                  .attr('stroke-width', 1);
+                  .attr('stroke-width', 2);
               }
               break;
             }
-            case "addBump": {
-              const idx = resolveCell(step.at);
-              addWithOpts(idx, step.kind, {high:step.high, radius:step.radius, sharpness:step.sharpness}, rand);
-              if (debugOps) {
-                const cell = cells[idx];
-                svg.append('circle')
-                  .attr('class', 'debug-op')
-                  .attr('cx', cell.cx)
-                  .attr('cy', cell.cy)
-                  .attr('r', 5)
-                  .attr('fill', 'blue')
-                  .attr('stroke', 'white')
-                  .attr('stroke-width', 1);
+            case "hills": {
+              for (let i = 0; i < step.count; i++) {
+                const idx = pickInteriorCell(marginPx * step.distribution, rand);
+                addWithOpts(idx, 'hill', {high: step.high, radius: step.radius, sharpness: step.sharpness}, rand);
+                if (debugOps) {
+                  const cell = cells[idx];
+                  svg.append('circle')
+                    .attr('class', 'debug-op')
+                    .attr('cx', cell.cx)
+                    .attr('cy', cell.cy)
+                    .attr('r', 4)
+                    .attr('fill', 'green')
+                    .attr('stroke', 'white')
+                    .attr('stroke-width', 1);
+                }
               }
               break;
             }
-            case "addBumpAt": {
-              const idx = resolveCell(step.where);
-              addWithOpts(idx, step.kind, {high:step.high, radius:step.radius, sharpness:step.sharpness}, rand);
-              if (debugOps) {
-                const cell = cells[idx];
-                svg.append('circle')
-                  .attr('class', 'debug-op')
-                  .attr('cx', cell.cx)
-                  .attr('cy', cell.cy)
-                  .attr('r', 4)
-                  .attr('fill', 'green')
-                  .attr('stroke', 'white')
-                  .attr('stroke-width', 1);
+            case "ranges": {
+              for (let i = 0; i < step.count; i++) {
+                const a = pickInteriorCell(marginPx, rand);
+                const b = pickInteriorCell(marginPx, rand);
+                addMountainRange(a, b, step.high, step.radius);
+                if (debugOps) {
+                  const cellA = cells[a];
+                  const cellB = cells[b];
+                  svg.append('line')
+                    .attr('class', 'debug-op')
+                    .attr('x1', cellA.cx)
+                    .attr('y1', cellA.cy)
+                    .attr('x2', cellB.cx)
+                    .attr('y2', cellB.cy)
+                    .attr('stroke', 'orange')
+                    .attr('stroke-width', 2)
+                    .attr('stroke-dasharray', '5,5');
+                }
               }
               break;
             }
-            case "addRange": {
-              const a = resolveCell(step.from);
-              const b = resolveCell(step.to);
-              addMountainRange(a, b, step.max, step.radius);
-              if (debugOps) {
-                const cellA = cells[a];
-                const cellB = cells[b];
-                svg.append('line')
-                  .attr('class', 'debug-op')
-                  .attr('x1', cellA.cx)
-                  .attr('y1', cellA.cy)
-                  .attr('x2', cellB.cx)
-                  .attr('y2', cellB.cy)
-                  .attr('stroke', 'orange')
-                  .attr('stroke-width', 2)
-                  .attr('stroke-dasharray', '5,5');
+            case "pits": {
+              for (let i = 0; i < step.count; i++) {
+                const idx = pickInteriorCell(marginPx, rand);
+                addPit(idx, step.depth, step.radius);
+                if (debugOps) {
+                  const cell = cells[idx];
+                  svg.append('circle')
+                    .attr('class', 'debug-op')
+                    .attr('cx', cell.cx)
+                    .attr('cy', cell.cy)
+                    .attr('r', 6)
+                    .attr('fill', 'purple')
+                    .attr('stroke', 'white')
+                    .attr('stroke-width', 1);
+                }
               }
               break;
             }
-            case "addPit": {
-              const idx = resolveCell(step.at);
-              addPit(idx, step.depth, step.radius);
-              if (debugOps) {
-                const cell = cells[idx];
-                svg.append('circle')
-                  .attr('class', 'debug-op')
-                  .attr('cx', cell.cx)
-                  .attr('cy', cell.cy)
-                  .attr('r', 6)
-                  .attr('fill', 'purple')
-                  .attr('stroke', 'white')
-                  .attr('stroke-width', 1);
+            case "troughs": {
+              for (let i = 0; i < step.count; i++) {
+                const a = pickInteriorCell(marginPx, rand);
+                const b = pickInteriorCell(marginPx, rand);
+                addTrough(a, b, step.depth, step.radius);
+                if (debugOps) {
+                  const cellA = cells[a];
+                  const cellB = cells[b];
+                  svg.append('line')
+                    .attr('class', 'debug-op')
+                    .attr('x1', cellA.cx)
+                    .attr('y1', cellA.cy)
+                    .attr('x2', cellB.cx)
+                    .attr('y2', cellB.cy)
+                    .attr('stroke', 'brown')
+                    .attr('stroke-width', 3)
+                    .attr('stroke-dasharray', '3,3');
+                }
               }
               break;
             }
-            case "addPitAt": {
-              const idx = resolveCell(step.where);
-              addPit(idx, step.depth, step.radius);
-              if (debugOps) {
-                const cell = cells[idx];
-                svg.append('circle')
-                  .attr('class', 'debug-op')
-                  .attr('cx', cell.cx)
-                  .attr('cy', cell.cy)
-                  .attr('r', 6)
-                  .attr('fill', 'purple')
-                  .attr('stroke', 'white')
-                  .attr('stroke-width', 1);
-              }
-              break;
-            }
-            case "addTroughBetween": {
-              const [a, b] = resolveCell(step.where);
-              addTrough(a, b, step.depth, step.radius);
-              if (debugOps) {
-                const cellA = cells[a];
-                const cellB = cells[b];
-                svg.append('line')
-                  .attr('class', 'debug-op')
-                  .attr('x1', cellA.cx)
-                  .attr('y1', cellA.cy)
-                  .attr('x2', cellB.cx)
-                  .attr('y2', cellB.cy)
-                  .attr('stroke', 'brown')
-                  .attr('stroke-width', 3)
-                  .attr('stroke-dasharray', '3,3');
-              }
-              break;
-            }
-            case "addStrait": {
+            case "strait": {
               addStrait(step.xNorm*width, step.y1Norm*height, step.y2Norm*height, step.width, rand);
               if (debugOps) {
                 svg.append('line')
@@ -1549,17 +1512,87 @@
               }
               break;
             }
+            case "add": {
+              // Add value to all cells
+              cells.forEach(c => { c.high = Math.min(1, Math.max(0, c.high + step.value)); });
+              break;
+            }
+            case "addLand": {
+              // Add value only to land cells (above sea level)
+              const sea = +document.getElementById('seaLevelInput').value;
+              cells.forEach(c => { 
+                if (c.high > sea) {
+                  c.high = Math.min(1, Math.max(0, c.high + step.value)); 
+                }
+              });
+              break;
+            }
+            case "multiply": {
+              // Multiply all cells by factor
+              cells.forEach(c => { c.high = Math.min(1, Math.max(0, c.high * step.factor)); });
+              break;
+            }
+            case "multiplyLand": {
+              // Multiply only land cells by factor
+              const sea = +document.getElementById('seaLevelInput').value;
+              cells.forEach(c => { 
+                if (c.high > sea) {
+                  c.high = Math.min(1, Math.max(0, c.high * step.factor)); 
+                }
+              });
+              break;
+            }
+            case "smooth": {
+              for (let i=0; i<(step.passes||1); i++) smoothMap();
+              break;
+            }
+            // Legacy operations for backward compatibility
+            case "pickCell": {
+              const idx = resolveCell(step.where);
+              ctx.set(step.as, idx);
+              break;
+            }
+            case "addBump": {
+              const idx = resolveCell(step.at);
+              addWithOpts(idx, step.kind, {high:step.high, radius:step.radius, sharpness:step.sharpness}, rand);
+              break;
+            }
+            case "addBumpAt": {
+              const idx = resolveCell(step.where);
+              addWithOpts(idx, step.kind, {high:step.high, radius:step.radius, sharpness:step.sharpness}, rand);
+              break;
+            }
+            case "addRange": {
+              const a = resolveCell(step.from);
+              const b = resolveCell(step.to);
+              addMountainRange(a, b, step.max, step.radius);
+              break;
+            }
+            case "addPit": {
+              const idx = resolveCell(step.at);
+              addPit(idx, step.depth, step.radius);
+              break;
+            }
+            case "addPitAt": {
+              const idx = resolveCell(step.where);
+              addPit(idx, step.depth, step.radius);
+              break;
+            }
+            case "addTroughBetween": {
+              const [a, b] = resolveCell(step.where);
+              addTrough(a, b, step.depth, step.radius);
+              break;
+            }
+            case "addStrait": {
+              addStrait(step.xNorm*width, step.y1Norm*height, step.y2Norm*height, step.width, rand);
+              break;
+            }
             case "scaleLand": {
-              // "Multiply land cells by factor, but keep sea baseline (<= low) intact"
               cells.forEach(c => { if (c.high > step.low) c.high = step.low + (c.high - step.low) * step.factor; });
               break;
             }
             case "biasAll": {
               cells.forEach(c => { c.high = Math.min(1, Math.max(0, c.high + step.add)); });
-              break;
-            }
-            case "smooth": {
-              for (let i=0; i<(step.passes||1); i++) smoothMap();
               break;
             }
             case "repeat": {
