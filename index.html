@@ -1395,7 +1395,7 @@
       const burgsG = svg.append('g').attr('id', 'burgs');
       const roadsG = routesG.append('g').attr('class', 'roads');
       const trailsG = routesG.append('g').attr('class', 'trails');
-      const seaG = routesG.append('g').attr('class', 'searoutes');
+      const seaG = routesG.append('g').attr('class', 'searoutes').attr('mask', 'url(#oceanMask)');
       
       // Create defs for clip paths
       const defs = svg.append('defs');
@@ -2448,11 +2448,12 @@
         }
 
         // Update unified land paths if they exist
-        if (window.__state.landPaths && window.__state.landPaths.length > 0) {
-          window.__state.landPaths.forEach(lp => {
-            lp.path.attr('fill', 'none'); // don't paint over the heightmap
-          });
-        }
+        // Commented out to preserve individual cell colors including snow caps
+        // if (window.__state.landPaths && window.__state.landPaths.length > 0) {
+        //   window.__state.landPaths.forEach(lp => {
+        //     lp.path.attr('fill', 'none'); // don't paint over the heightmap
+        //   });
+        // }
         
         // Update progress for each phase with detailed progress
         ProgressManager.setPhase('rivers');
@@ -3753,30 +3754,32 @@
           .attr('fill', 'white');
 
         // --- Land underlay (fills hairline gaps inland) ---
-        zoomRoot.select('rect.land-underlay').remove();
-        zoomRoot.insert('rect', '.mapCells') // under polygons, above ocean
-          .attr('class', 'land-underlay')
-          .attr('x', 0).attr('y', 0)
-          .attr('width', width).attr('height', height)
-          .attr('fill', typeof landColor === 'function' ? landColor(0.0) : '#8fbf7a')
-          .attr('mask', 'url(#landMask)');
+        // Commented out to preserve individual cell colors including snow caps
+        // zoomRoot.select('rect.land-underlay').remove();
+        // zoomRoot.insert('rect', '.mapCells') // under polygons, above ocean
+        //   .attr('class', 'land-underlay')
+        //   .attr('x', 0).attr('y', 0)
+        //   .attr('width', width).attr('height', height)
+        //   .attr('fill', typeof landColor === 'function' ? landColor(0.0) : '#8fbf7a')
+        //   .attr('mask', 'url(#landMask)');
 
         // --- Optional: land-side coastline seam stroke (clips stroke to land only) ---
         defs.select('#landClip').remove();
         defs.append('clipPath').attr('id', 'landClip')
           .append('path').attr('d', landD);
 
-        if (window.__state.coastD) {
-          zoomRoot.select('path.coast-seam').remove();
-          zoomRoot.append('path')
-            .attr('class', 'coast-seam')
-            .attr('d', window.__state.coastD)
-            .attr('clip-path', 'url(#landClip)')
-            .attr('stroke', typeof landColor === 'function' ? landColor(0.0) : '#8fbf7a')
-            .attr('stroke-width', 1.2)
-            .attr('fill', 'none')
-            .attr('vector-effect', 'non-scaling-stroke');
-        }
+        // Commented out coastline seam stroke to preserve individual cell colors
+        // if (window.__state.coastD) {
+        //   zoomRoot.select('path.coast-seam').remove();
+        //   zoomRoot.append('path')
+        //     .attr('class', 'coast-seam')
+        //     .attr('d', window.__state.coastD)
+        //     .attr('clip-path', 'url(#landClip)')
+        //     .attr('stroke', typeof landColor === 'function' ? landColor(0.0) : '#8fbf7a')
+        //     .attr('stroke-width', 1.2)
+        //     .attr('fill', 'none')
+        //     .attr('vector-effect', 'non-scaling-stroke');
+        // }
       }
 
       // Compute average color for an island based on its cells
@@ -6565,6 +6568,9 @@
           // Add to route segments for road usage tracking
           allRouteSegments.push(edge.path);
           
+          // Accumulate land edges for merging
+          accumulateLandEdges(edge.path, 'road');
+          
           const points = polylineFromPath(edge.path);
           const smoothed = smoothLine(points, 1);
           return {
@@ -6578,24 +6584,26 @@
           };
         });
         
-        // Batch add all paths at once using optimized drawing
-        const roadSegments = roadPaths.map(p => {
-          // Extract points from the SVG path data
-          const pathData = p.d;
-          // For now, use the original D3 approach since the data structure is complex
-          return p;
-        });
-        
-        // Use original D3 approach for now since path data is already in SVG format
-        roadsG.selectAll('path')
-          .data(roadSegments)
-          .enter()
-          .append('path')
-          .each(function(d) {
-            Object.entries(d).forEach(([attr, value]) => {
-              d3.select(this).attr(attr, value);
-            });
+        if (!MERGE_LAND_ROUTES) {
+          // Batch add all paths at once using optimized drawing
+          const roadSegments = roadPaths.map(p => {
+            // Extract points from the SVG path data
+            const pathData = p.d;
+            // For now, use the original D3 approach since the data structure is complex
+            return p;
           });
+          
+          // Use original D3 approach for now since path data is already in SVG format
+          roadsG.selectAll('path')
+            .data(roadSegments)
+            .enter()
+            .append('path')
+            .each(function(d) {
+              Object.entries(d).forEach(([attr, value]) => {
+                d3.select(this).attr(attr, value);
+              });
+            });
+        }
         
         if (DEBUG) console.log(`Component ${componentIndex}: ${mstEdges.length} roads between ${componentHubs.length} hubs`);
       });
@@ -6663,6 +6671,9 @@
                 // Add to trail segments for road usage tracking
                 allTrailSegments.push(path);
                 
+                // Accumulate land edges for merging
+                accumulateLandEdges(path, 'trail');
+                
                 // Collect trail path data instead of adding immediately
                 trailPaths.push({
                   d: line(smoothed),
@@ -6682,19 +6693,21 @@
         if (DEBUG) console.log(`Component ${componentIndex}: ${existingTrails.length} trails built`);
       });
       
-      // Batch add all trail paths at once using optimized drawing
-      const trailsG = d3.select('#routes .trails');
-      
-      // Use original D3 approach for now since path data is already in SVG format
-      trailsG.selectAll('path')
-        .data(trailPaths)
-        .enter()
-        .append('path')
-        .each(function(d) {
-          Object.entries(d).forEach(([attr, value]) => {
-            d3.select(this).attr(attr, value);
+      if (!MERGE_LAND_ROUTES) {
+        // Batch add all trail paths at once using optimized drawing
+        const trailsG = d3.select('#routes .trails');
+        
+        // Use original D3 approach for now since path data is already in SVG format
+        trailsG.selectAll('path')
+          .data(trailPaths)
+          .enter()
+          .append('path')
+          .each(function(d) {
+            Object.entries(d).forEach(([attr, value]) => {
+              d3.select(this).attr(attr, value);
+            });
           });
-        });
+      }
       
       if (DEBUG) console.log(`Total trails built: ${existingTrails.length}`);
       
@@ -6767,6 +6780,13 @@
         return nodeId >= 0 ? { ...p, nodeId } : null;
       }).filter(Boolean);
       if (ports.length < 2) return;
+
+      // Create short "port connectors" so visible sea lanes begin exactly at the coast.
+      // These will draw under the ocean mask; the on-land bit is hidden by the mask.
+      window.__state.seaConnectors = ports.map(p => {
+        const [nx, ny] = GraphCache.sea.xy[p.nodeId];
+        return { x1: p.x, y1: p.y, x2: nx, y2: ny };
+      });
 
       // Optional: split by connected component so hubs never cross land-locked seas
       const comp = labelSeaComponents();
@@ -6898,22 +6918,103 @@
       return polylines;
     }
 
-    function renderSeaNetwork(edgeUsage, xy) {
-      const g = d3.select('#routes .searoutes'); // this group already has the ocean mask
-      const polys = polylinesFromEdgeUsage(edgeUsage, xy);
-      const paths = g.selectAll('path').data(polys);
-      paths.join('path')
-        .attr('d', poly => 'M' + poly.map(p => `${p.x},${p.y}`).join('L'))
+    // ---- Land route merging (roads & trails) ----------------------------------
+    const MERGE_LAND_ROUTES = true; // flip to false to compare old behavior
+    const LandEdgeUsage = new Map(); // key "a|b" -> {use:number, cat: 1=trail | 2=road}
+
+    const landEdgeKey = (u, v) => (u < v ? `${u}|${v}` : `${v}|${u}`);
+
+    function accumulateLandEdges(path, type = 'road', weight = 1) {
+      if (!path || path.length < 2) return;
+      const pri = type === 'road' ? 2 : 1;
+      for (let i = 1; i < path.length; i++) {
+        const key = landEdgeKey(path[i - 1], path[i]);
+        const rec = LandEdgeUsage.get(key) || { use: 0, cat: pri };
+        rec.use += weight;
+        if (pri > rec.cat) rec.cat = pri; // roads override trails
+        LandEdgeUsage.set(key, rec);
+      }
+    }
+    function clearLandEdgeUsage() { LandEdgeUsage.clear(); }
+
+    function renderMergedLandNetwork(cells) {
+      const xy = cells.map(c => [c.cx, c.cy]);
+
+      // split by winning category
+      const roadsOnly = new Map();
+      const trailsOnly = new Map();
+      for (const [key, rec] of LandEdgeUsage) {
+        if (rec.cat === 2) roadsOnly.set(key, rec.use);
+        else if (rec.cat === 1) trailsOnly.set(key, rec.use);
+      }
+
+      // reuse node-ID topology merge
+      const roadsPolys  = polylinesFromEdgeUsage(roadsOnly,  xy);
+      const trailsPolys = polylinesFromEdgeUsage(trailsOnly, xy);
+
+      const routesG = d3.select('#routes');
+      const roadsG  = routesG.select('.roads');
+      const trailsG = routesG.select('.trails');
+
+      const lineGen = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
+
+      // roads (solid, thicker)
+      roadsG.selectAll('path').data(roadsPolys).join('path')
+        .attr('d', poly => lineGen(poly))
         .attr('fill', 'none')
-        .attr('stroke', '#ffffff')
-        .attr('stroke-dasharray', '6 4')             // keep your dashed look
+        .attr('stroke', '#6b4e16')
+        .attr('stroke-width', '1.5px')
         .attr('stroke-linecap', 'round')
         .attr('stroke-linejoin', 'round')
-        .attr('opacity', '0.8')
         .attr('vector-effect', 'non-scaling-stroke');
 
-      // Use consistent thin stroke width for all routes
-      g.selectAll('path').attr('stroke-width', '1.2px');
+      // trails (thin, dashed) — only where there isn't a road
+      trailsG.selectAll('path').data(trailsPolys).join('path')
+        .attr('d', poly => lineGen(poly))
+        .attr('fill', 'none')
+        .attr('stroke', '#9b7b3a')
+        .attr('stroke-width', '1px')
+        .attr('stroke-dasharray', '3 3')
+        .attr('stroke-linecap', 'round')
+        .attr('stroke-linejoin', 'round')
+        .attr('vector-effect', 'non-scaling-stroke');
+    }
+
+    function renderSeaNetwork(edgeUsage, xy) {
+      const g = d3.select('#routes .searoutes');
+
+      // Convert merged edge chains to smooth strokes
+      const polys = polylinesFromEdgeUsage(edgeUsage, xy);
+      const lineGen = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
+
+      // Main sea lanes
+      const routeSel = g.selectAll('path.route').data(polys);
+      routeSel.join('path')
+        .attr('class', 'route')
+        .attr('d', poly => lineGen(poly))
+        .attr('fill', 'none')
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', '1.2px')
+        .attr('stroke-dasharray', '6 4')
+        .attr('stroke-linecap', 'round')
+        .attr('stroke-linejoin', 'round')
+        .attr('opacity', 0.8)
+        .attr('vector-effect', 'non-scaling-stroke');
+
+      // Short "port" spurs from land → first sea node (masked on land)
+      const connectors = (window.__state && window.__state.seaConnectors) || [];
+      const connSel = g.selectAll('path.port-connector').data(connectors);
+      connSel.join('path')
+        .attr('class', 'port-connector')
+        .attr('d', d => `M${d.x1},${d.y1}L${d.x2},${d.y2}`)
+        .attr('fill', 'none')
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', '1.2px')
+        .attr('stroke-dasharray', '6 4')
+        .attr('stroke-linecap', 'round')
+        .attr('stroke-linejoin', 'round')
+        .attr('opacity', 0.8)
+        .attr('vector-effect', 'non-scaling-stroke');
     }
 
     /**
@@ -7531,6 +7632,7 @@
       // Reset debug counters and clear caches
       window.__state.shortestPathCallCount = 0;
       seaSSSPCache.clear(); // Clear sea route cache
+      clearLandEdgeUsage();
       
       try {
         // Guard against calling before water mask exists
@@ -7697,6 +7799,13 @@
       
       // Update progress to completion
       ProgressManager.update(100, 'Routes complete!', 'All road and sea networks built successfully');
+      
+      if (MERGE_LAND_ROUTES) {
+        // clear any old direct drawings
+        d3.select('#routes .roads').selectAll('*').remove();
+        d3.select('#routes .trails').selectAll('*').remove();
+        renderMergedLandNetwork(window.__state.cells);
+      }
       
       } catch (error) {
         console.error('Error in computeRoutes:', error);
