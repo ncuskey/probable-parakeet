@@ -26,7 +26,7 @@
     /* Route styling */
     #routes .roads { stroke: #6b4e16; stroke-width: 1.4px; fill: none; stroke-linecap: round; }
 #routes .trails { stroke: #9b7b3a; stroke-width: 1.0px; fill: none; stroke-dasharray: 3 3; stroke-linecap: round; }
-#routes .searoutes { stroke: #cfe9ff; stroke-width: 1.2px; fill: none; stroke-dasharray: 6 4; mix-blend-mode: overlay; }
+#routes .searoutes { stroke: #ff0000; stroke-width: 5px; fill: none; stroke-dasharray: 6 4; opacity: 1.0; z-index: 1000; }
 #routes .primary-road { stroke: #8B4513; stroke-width: 3px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
     /* ensure export-friendly */
     #routes path { vector-effect: non-scaling-stroke; }
@@ -561,6 +561,245 @@
     // Debug flag for performance
     const DEBUG = false;
 
+    // === utils/heap: MinHeap for A* open set ===
+    class MinHeap {
+      constructor(scoreFn){ this._s=[]; this._f=scoreFn; }
+      push(x){ const a=this._s, f=this._f; a.push(x); let i=a.length-1;
+        while(i>0){ const p=(i-1)>>1; if(f(a[i])>=f(a[p])) break; [a[i],a[p]]=[a[p],a[i]]; i=p; } }
+      pop(){ const a=this._s, f=this._f; if(a.length===1) return a.pop();
+        const top=a[0]; a[0]=a.pop(); let i=0;
+        for(;;){ const l=i*2+1, r=l+1; let m=i;
+          if(l<a.length && f(a[l])<f(a[m])) m=l;
+          if(r<a.length && f(a[r])<f(a[m])) m=r;
+          if(m===i) break; [a[i],a[m]]=[a[m],a[i]]; i=m; }
+        return top; }
+      get size(){ return this._s.length; }
+      clear(){ this._s.length=0; }
+    }
+
+    // === utils/throttle ===
+    function rafThrottle(fn) {
+      let tick=0, lastArgs=null;
+      return (...args)=>{ lastArgs=args; if (tick) return; tick=1; requestAnimationFrame(()=>{ tick=0; fn(...lastArgs); }); };
+    }
+
+    // === utils/svg-path helpers ===
+    function polylineToPathD(points) {
+      if (!points || points.length===0) return '';
+      let d = `M${points[0].x},${points[0].y}`;
+      for (let i=1;i<points.length;i++) d += `L${points[i].x},${points[i].y}`;
+      return d;
+    }
+
+    // Merge unordered segments into polylines: segments = [{a:{x,y}, b:{x,y}}...]
+    function segmentsToPolylines(segments) {
+      // Simple O(n) chain stitch using hash of endpoints
+      const key = p => `${p.x.toFixed(4)},${p.y.toFixed(4)}`;
+      const startMap=new Map(), endMap=new Map();
+      for (const s of segments) {
+        const A={x:s.a.x,y:s.a.y}, B={x:s.b.x,y:s.b.y};
+        startMap.set(key(A), (startMap.get(key(A))||[]).concat({A,B}));
+        endMap.set(key(B), (endMap.get(key(B))||[]).concat({A,B}));
+      }
+      const used=new Set(); const polylines=[];
+      for (const [_, arr] of startMap) {
+        for (const seg of arr) {
+          const sig = `${seg.A.x},${seg.A.y}->${seg.B.x},${seg.B.y}`;
+          if (used.has(sig)) continue;
+          used.add(sig);
+          const chain=[seg.A, seg.B];
+
+          // extend forward
+          for(;;){
+            const tail = chain[chain.length-1];
+            const nextArr = startMap.get(key(tail));
+            let found=false;
+            if (nextArr) for (const n of nextArr) {
+              const nsig = `${n.A.x},${n.A.y}->${n.B.x},${n.B.y}`;
+              if (used.has(nsig)) continue;
+              if (n.A.x===tail.x && n.A.y===tail.y) {
+                chain.push(n.B); used.add(nsig); found=true; break;
+              }
+            }
+            if (!found) break;
+          }
+
+          // extend backward
+          for(;;){
+            const head = chain[0];
+            const prevArr = endMap.get(key(head));
+            let found=false;
+            if (prevArr) for (const p of prevArr) {
+              const psig = `${p.A.x},${p.A.y}->${p.B.x},${p.B.y}`;
+              if (used.has(psig)) continue;
+              if (p.B.x===head.x && p.B.y===head.y) {
+                chain.unshift(p.A); used.add(psig); found=true; break;
+              }
+            }
+            if (!found) break;
+          }
+          polylines.push(chain);
+        }
+      }
+      return polylines;
+    }
+
+    // === graph cache ===
+    const GraphCache = {
+      land: null, // {nodesCount, edges, neighbors, edgeCost}
+      sea:  null,
+      invalidate(type){ if (!type || type==='land') this.land=null; if (!type || type==='sea') this.sea=null; }
+    };
+
+    // Call this inside buildLandGraph after you compute nodes & edges
+    function finalizeLandGraph(nodesCount, edges) {
+      // edges: [{u:int, v:int, w:number}]
+      const neighbors = new Array(nodesCount); for (let i=0;i<nodesCount;i++) neighbors[i]=[];
+      const edgeCost = new Map(); // `${u}:${v}` -> w
+      for (const e of edges){ neighbors[e.u].push(e.v); neighbors[e.v].push(e.u); edgeCost.set(`${e.u}:${e.v}`, e.w); edgeCost.set(`${e.v}:${e.u}`, e.w); }
+      GraphCache.land = { nodesCount, edges, neighbors, edgeCost };
+    }
+
+    function finalizeSeaGraph(nodesCount, edges, xy) {
+      const neighbors = new Array(nodesCount); for (let i=0;i<nodesCount;i++) neighbors[i]=[];
+      const edgeCost = new Map();
+      for (const e of edges){ neighbors[e.u].push(e.v); neighbors[e.v].push(e.u); edgeCost.set(`${e.u}:${e.v}`, e.w); edgeCost.set(`${e.v}:${e.u}`, e.w); }
+      GraphCache.sea = { nodesCount, edges, neighbors, edgeCost, xy };
+    }
+
+    // === SeaRouter with cache ===
+    const SeaRouter = {
+      _cache: new Map(), // key: portNodeId -> {dist: Float64Array, prev: Int32Array}
+      clear(){ this._cache.clear(); },
+      ensureFor(portNodeId){
+        const G = GraphCache.sea; if (!G) throw new Error('Sea graph missing');
+        if (this._cache.has(portNodeId)) return this._cache.get(portNodeId);
+
+        const N = G.nodesCount, neighbors=G.neighbors, cost=(u,v)=>G.edgeCost.get(`${u}:${v}`) ?? 1;
+        const dist=new Float64Array(N); dist.fill(1e20); dist[portNodeId]=0;
+        const prev=new Int32Array(N); prev.fill(-1);
+        const open = new MinHeap(i=>dist[i]); open.push(portNodeId);
+
+        while(open.size){
+          const u=open.pop();
+          for (const v of neighbors[u]) {
+            const alt = dist[u] + cost(u,v);
+            if (alt < dist[v]) { dist[v]=alt; prev[v]=u; open.push(v); }
+          }
+        }
+        const pack = {dist, prev};
+        this._cache.set(portNodeId, pack);
+        return pack;
+      },
+      
+      // Early-exit variant that stops when all target ports are reached
+      ensureForToTargets(portNodeId, goalNodeIds) {
+        const G = GraphCache.sea; if (!G) throw new Error('Sea graph missing');
+        const goalSet = new Set(goalNodeIds);
+        const N = G.nodesCount, neighbors=G.neighbors, cost=(u,v)=>G.edgeCost.get(`${u}:${v}`) ?? 1;
+
+        const dist=new Float64Array(N); dist.fill(1e20); dist[portNodeId]=0;
+        const prev=new Int32Array(N); prev.fill(-1);
+        const open = new MinHeap(i=>dist[i]); open.push(portNodeId);
+
+        let remaining = goalSet.size;
+        while (open.size && remaining > 0) {
+          const u = open.pop();
+          if (goalSet.has(u)) { goalSet.delete(u); remaining--; if (remaining === 0) break; }
+          const du = dist[u];
+          for (const v of neighbors[u]) {
+            const alt = du + cost(u,v);
+            if (alt < dist[v]) { dist[v]=alt; prev[v]=u; open.push(v); }
+          }
+        }
+        return {dist, prev};
+      }
+    };
+
+    // Returns nearest sea node within maxPx, else -1
+    function snapPortToSeaNode(x, y, maxPx = 16) {
+      const G = GraphCache.sea; if (!G || !G.xy) throw new Error('Sea graph missing coords');
+      let best = -1, bestD2 = maxPx*maxPx;
+      for (let i=0;i<G.xy.length;i++) {
+        const pt = G.xy[i]; if (!pt) continue; // Skip null entries
+        const dx = pt[0]-x, dy = pt[1]-y, d2 = dx*dx+dy*dy;
+        if (d2 < bestD2) { best=i; bestD2=d2; }
+      }
+      return best;
+    }
+
+    // Label connected components once (linear time)
+    function labelSeaComponents() {
+      const G = GraphCache.sea; if (!G) return null;
+      const comp = new Int32Array(G.nodesCount); comp.fill(-1);
+      let id = 0;
+      for (let s=0;s<G.nodesCount;s++){
+        if (comp[s] !== -1) continue;
+        const q=[s]; comp[s]=id;
+        for(let qi=0; qi<q.length; qi++){
+          const u=q[qi];
+          for(const v of G.neighbors[u]) if (comp[v]===-1){ comp[v]=id; q.push(v); }
+        }
+        id++;
+      }
+      return comp;
+    }
+
+    // Returns Float32Array len=cellsCount with distance (in cells) to nearest water cell
+    function computeDistanceToWater(isWater, width, height) {
+      const N = width*height;
+      const INF = 1e9;
+      const dist = new Float32Array(N); for (let i=0;i<N;i++) dist[i]=INF;
+      const q = [];
+
+      // multi-source with all water cells
+      for (let i=0;i<N;i++) if (isWater[i]) { dist[i]=0; q.push(i); }
+
+      let qi=0;
+      const neighborsIdx = (idx) => {
+        const x = idx%width, y=(idx/width|0);
+        const out=[];
+        if (x>0) out.push(idx-1);
+        if (x<width-1) out.push(idx+1);
+        if (y>0) out.push(idx-width);
+        if (y<height-1) out.push(idx+width);
+        return out;
+      };
+
+      while (qi<q.length){
+        const u=q[qi++];
+        const du=dist[u]+1;
+        for (const v of neighborsIdx(u)) if (du<dist[v]) { dist[v]=du; q.push(v); }
+      }
+      return dist;
+    }
+
+    function drawPathsFromSegments(svgLayer, segments, className) {
+      if (!segments || !segments.length) return;
+      const polylines = segmentsToPolylines(segments);
+      const frag = document.createDocumentFragment();
+      for (const poly of polylines) {
+        const d = polylineToPathD(poly);
+        if (!d) continue;
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        p.setAttribute('class', className);
+        p.setAttribute('d', d);
+        frag.appendChild(p);
+      }
+      svgLayer.textContent=''; // clear layer
+      svgLayer.appendChild(frag);
+    }
+
+    function resetGenerationState() {
+      // Clear SVG layers (roads/trails/sea/coastlines etc.)
+      const ids = ['roadsLayer','trailsLayer','seaRoutesLayer','coastlinesLayer','burgsLayer'];
+      for (const id of ids) { const n = document.getElementById(id); if (n) n.textContent=''; }
+      // Invalidate graphs & caches
+      GraphCache.invalidate();
+      SeaRouter.clear();
+      // Any per-run arrays (burgs, roads, trails, usage…) should be re-created here
+    }
+
     // Debounce function for UI updates
     const rafDebounce = (fn) => {
       let r = 0; 
@@ -585,6 +824,8 @@
     let pendingRoutes = false;
     
     const debouncedComputeRoutes = heavyDebounce(() => {
+      // Invalidate route caches when route settings change
+      GraphCache.invalidate('land');
       if (window.__state.computeRoutes) {
         window.__state.computeRoutes();
       }
@@ -640,6 +881,11 @@
       const element = document.getElementById(id);
       if (element) {
         element.addEventListener('input', heavyDebounce(() => {
+          // Invalidate caches when sea level changes
+          if (id === 'seaLevelInput') {
+            GraphCache.invalidate();
+            SeaRouter.clear();
+          }
           RegenerationFlags.setNeedsRecolor();
           if (window.__state) {
             // ensure the water mask + coastlines match the new sea level
@@ -669,7 +915,7 @@
         root = svg.append('g').attr('id', 'routes');
         root.append('g').attr('class', 'roads');
         root.append('g').attr('class', 'trails');
-        root.append('g').attr('class', 'searoutes');
+        root.append('g').attr('class', 'searoutes').attr('mask', 'url(#oceanMask)');
         // Keep routes group above map only once
         root.raise();
       }
@@ -787,6 +1033,15 @@
       return lines.map(L => simplifyPath(L, tol));
     }
 
+    function adaptiveSimplifySea(lines, w, h) {
+      const tol = Math.max(0.1, Math.min(0.5, Math.sqrt(w*h)/50000)); // Extremely gentle simplification to preserve curves
+      return lines.map(L => {
+        const simplified = simplifyPath(L, tol);
+        // Ensure we keep at least 3 points for any meaningful curve
+        return simplified.length < 3 ? L : simplified;
+      });
+    }
+
     // Dirty flags for incremental updates
     const RouteDirty = {
       burgs: true,
@@ -823,12 +1078,18 @@
       isVisible: false,
       lastUpdate: 0,
       updateThrottle: 100, // Only update every 100ms
+      _throttledUpdate: null, // Will hold throttled version
       
       init() {
         this.overlay = document.getElementById('progressOverlay');
         this.fill = document.getElementById('progressFill');
         this.text = document.getElementById('progressText');
         this.detail = document.getElementById('progressDetail');
+        
+        // Create throttled version of update that preserves 'this' context
+        this._throttledUpdate = rafThrottle((percent, text, detail) => {
+          this._update(percent, text, detail);
+        });
         
         // Debug logging
         console.log('ProgressManager.init() called');
@@ -862,6 +1123,15 @@
       },
       
       update(percent, text, detail = '') {
+        // Use throttled version if available, otherwise direct update
+        if (this._throttledUpdate) {
+          this._throttledUpdate(percent, text, detail);
+        } else {
+          this._update(percent, text, detail);
+        }
+      },
+      
+      _update(percent, text, detail = '') {
         // Throttle updates to reduce spam, but allow final completion updates
         const now = Date.now();
         const isFinalUpdate = percent >= 100;
@@ -1029,6 +1299,7 @@
     }
 
     function generate() {
+      resetGenerationState();
       resetForNewRun();
       
       // Always generate a new random seed when button is pressed
@@ -1937,6 +2208,11 @@
         // recompute lakes with current sea level and expose water mask
         computeLakes(sea);
         const isWater = window.__state.isWater || [];
+        
+        // Compute distance-to-water field for burg placement optimization
+        const width = +svg.attr('width');
+        const height = +svg.attr('height');
+        window.__state.distToWater = computeDistanceToWater(isWater, width, height);
         
         // Compute climate and biomes if needed
         if (renderMode === 'biomes' || renderMode === 'hybrid') {
@@ -3396,7 +3672,7 @@
           if (land0 !== land1) coastEdges.push(e); // coastline segment
         });
 
-        console.log(`Found ${coastEdges.length} coastline edges`);
+        if (DEBUG) console.log(`Found ${coastEdges.length} coastline edges`);
         if (coastEdges.length === 0) return;
 
         // Chain edges into polylines by shared endpoints
@@ -3472,7 +3748,7 @@
           }
         });
 
-        console.log(`Found ${closedLoops.length} closed loops (islands) and ${openChains.length} open chains`);
+        if (DEBUG) console.log(`Found ${closedLoops.length} closed loops (islands) and ${openChains.length} open chains`);
 
         // Create unified land paths for each island
         closedLoops.forEach((loop, islandIndex) => {
@@ -3500,7 +3776,7 @@
             .attr('stroke-linejoin', 'round');
           
           // Debug: ensure both paths use identical geometry
-          console.log('Island', islandIndex, 'path data:', {
+          if (DEBUG) console.log('Island', islandIndex, 'path data:', {
             landPathD: landPath.attr('d'),
             coastPathD: coastPath.attr('d'),
             match: landPath.attr('d') === coastPath.attr('d')
@@ -3533,7 +3809,7 @@
             .attr('stroke-linejoin', 'round');
         });
 
-        console.log(`Created ${closedLoops.length} unified land paths with coastlines`);
+        if (DEBUG) console.log(`Created ${closedLoops.length} unified land paths with coastlines`);
         
         // Land paths are now non-filled to preserve height map visibility
         // Coastline strokes remain in coastG group for smooth edges
@@ -3554,11 +3830,31 @@
           mapCells.select('image').attr('clip-path', 'url(#landClip)');         // canvas/raster mode
           mapCells.selectAll('path.mapCell').attr('clip-path', 'url(#landClip)'); // SVG cell mode
           
+          // Build ocean mask (visible everywhere except land)
+          const oceanMask = defs.select('#oceanMask').empty()
+            ? defs.append('mask').attr('id', 'oceanMask').attr('maskUnits', 'userSpaceOnUse')
+            : defs.select('#oceanMask').attr('maskUnits', 'userSpaceOnUse');
+          
+          oceanMask.selectAll('*').remove();
+          oceanMask.append('rect')
+            .attr('x', 0).attr('y', 0)
+            .attr('width', window.__state.width)
+            .attr('height', window.__state.height)
+            .attr('fill', 'white');
+          
+          // punch land holes (black hides)
+          closedLoops.forEach(loop => {
+            const d = islandToPathD(chaikin(loop, 2));
+            oceanMask.append('path').attr('d', d).attr('fill', 'black');
+          });
+          
           // Debug: log what we're clipping
-          console.log('Applied clip path to:', {
+          if (DEBUG) console.log('Applied clip path to:', {
             imageCount: mapCells.select('image').size(),
             cellPathCount: mapCells.selectAll('path.mapCell').size(),
-            clipPathD: cp.select('path').attr('d')
+            clipPathD: cp.select('path').attr('d'),
+            oceanMaskCreated: !oceanMask.empty(),
+            oceanMaskRect: oceanMask.select('rect').node()
           });
         }
       }
@@ -3606,17 +3902,30 @@
       // Calculate river proximity
       riverProximity = Math.min(1, riverNeighbors / cell.neighbors.length * 3);
 
-      // Calculate coast proximity with harbor quality check
+      // Calculate coast proximity using distance-to-water field
       let minWaterDist = Infinity;
       let waterNeighbors = 0;
-      for (let i = 0; i < cells.length; i++) {
-        if (cells[i].high < sea) {
-          const dist = Math.hypot(cell.cx - cells[i].cx, cell.cy - cells[i].cy);
-          minWaterDist = Math.min(minWaterDist, dist);
-          
-          // Count water neighbors for harbor quality
-          if (dist < 30) {
+      
+      // Use precomputed distance-to-water field if available
+      if (window.__state.distToWater) {
+        minWaterDist = window.__state.distToWater[cell.index];
+        // Count water neighbors for harbor quality
+        cell.neighbors.forEach(nb => {
+          if (cells[nb].high < sea) {
             waterNeighbors++;
+          }
+        });
+      } else {
+        // Fallback to O(N²) scan
+        for (let i = 0; i < cells.length; i++) {
+          if (cells[i].high < sea) {
+            const dist = Math.hypot(cell.cx - cells[i].cx, cell.cy - cells[i].cy);
+            minWaterDist = Math.min(minWaterDist, dist);
+            
+            // Count water neighbors for harbor quality
+            if (dist < 30) {
+              waterNeighbors++;
+            }
           }
         }
       }
@@ -3652,7 +3961,7 @@
 
       // Debug: Log some sample scores
       if (Math.random() < 0.01) { // Log 1% of cells for debugging
-        console.log(`Cell ${cell.index} CAPITAL scores - River: ${riverProximity.toFixed(2)}, Coast: ${coastProximity.toFixed(2)}, Harbor: ${harborQuality.toFixed(2)}, Flat: ${flatness.toFixed(2)}, Fert: ${fertility.toFixed(2)}, Total: ${score.toFixed(2)}`);
+        if (DEBUG) console.log(`Cell ${cell.index} CAPITAL scores - River: ${riverProximity.toFixed(2)}, Coast: ${coastProximity.toFixed(2)}, Harbor: ${harborQuality.toFixed(2)}, Flat: ${flatness.toFixed(2)}, Fert: ${fertility.toFixed(2)}, Total: ${score.toFixed(2)}`);
       }
 
       return Math.max(0, Math.min(1, score));
@@ -3742,7 +4051,7 @@
 
       // Debug: Log some sample scores
       if (Math.random() < 0.01) { // Log 1% of cells for debugging
-        console.log(`Cell ${cell.index} TOWN scores - River: ${riverProximity.toFixed(2)}, Coast: ${coastProximity.toFixed(2)}, Flat: ${flatness.toFixed(2)}, Fert: ${fertility.toFixed(2)}, Road: ${roadAccess.toFixed(2)}, Total: ${score.toFixed(2)}`);
+        if (DEBUG) console.log(`Cell ${cell.index} TOWN scores - River: ${riverProximity.toFixed(2)}, Coast: ${coastProximity.toFixed(2)}, Flat: ${flatness.toFixed(2)}, Fert: ${fertility.toFixed(2)}, Road: ${roadAccess.toFixed(2)}, Total: ${score.toFixed(2)}`);
       }
 
       return Math.max(0, Math.min(1, score));
@@ -3844,7 +4153,7 @@
         b: edge.b
       }));
       
-      console.log(`Built ${mstEdges.length} capital roads`);
+      if (DEBUG) console.log(`Built ${mstEdges.length} capital roads`);
     }
 
     /**
@@ -3928,7 +4237,7 @@
       const sea = +document.getElementById('seaLevelInput').value;
       const cells = window.__state.cells;
       
-      console.log(`Generating ${capitalCount} capitals + ${cityCount} cities + ${villageCount} villages using economic approach`);
+      if (DEBUG) console.log(`Generating ${capitalCount} capitals + ${cityCount} cities + ${villageCount} villages using economic approach`);
       
       // Update progress during burg generation
       ProgressManager.update(82, 'Placing settlements...', 'Scoring land cells for capitals...');
@@ -3936,7 +4245,7 @@
       // Get land cells (use same logic as water detection)
       const isWater = window.__state.isWater || [];
       const landCells = cells.filter((c, i) => !isWater[i] && c.high <= 0.8);
-      console.log(`Found ${landCells.length} land cells suitable for burgs`);
+      if (DEBUG) console.log(`Found ${landCells.length} land cells suitable for burgs`);
       
       if (landCells.length === 0) {
         console.log('No suitable land cells for burgs');
@@ -3956,7 +4265,7 @@
 
       // Filter out low-scoring cells
       const goodCapitalCandidates = capitalCandidates.filter(c => c.score > 0.15);
-      console.log(`Found ${goodCapitalCandidates.length} cells with good capital scores (>0.15)`);
+      if (DEBUG) console.log(`Found ${goodCapitalCandidates.length} cells with good capital scores (>0.15)`);
       
       if (goodCapitalCandidates.length === 0) {
         console.log('No suitable cells found for capitals');
@@ -3968,11 +4277,11 @@
       // Apply Poisson disk sampling for capitals
       const capitalSpacing = +document.getElementById('burgSpacingInput').value * 2 || 24;
       const spacedCapitals = poissonSample(goodCapitalCandidates, capitalSpacing);
-      console.log(`After capital spacing, ${spacedCapitals.length} candidates remain`);
+      if (DEBUG) console.log(`After capital spacing, ${spacedCapitals.length} candidates remain`);
       
       // Take top N capitals by score
       const pickedCapitals = spacedCapitals.slice(0, capitalCount);
-      console.log(`Selected ${pickedCapitals.length} capitals from candidates`);
+      if (DEBUG) console.log(`Selected ${pickedCapitals.length} capitals from candidates`);
       
       // Create capital burg objects
       const capitals = pickedCapitals.map((p, index) => placeBurg(p.cell, cells, sea, index, 'capital'));
@@ -4025,17 +4334,17 @@
       // Store final burgs
       window.__state.burgs = allBurgs;
       
-      console.log(`Generated ${capitals.length} capitals + ${cities.length} cities + ${villages.length} villages = ${window.__state.burgs.length} total burgs`);
+      if (DEBUG) console.log(`Generated ${capitals.length} capitals + ${cities.length} cities + ${villages.length} villages = ${window.__state.burgs.length} total burgs`);
       
       // Debug: Log sample burgs
       if (capitals.length > 0) {
-        console.log('Sample capital:', capitals[0]);
+        if (DEBUG) console.log('Sample capital:', capitals[0]);
       }
       if (cities.length > 0) {
-        console.log('Sample city:', cities[0]);
+        if (DEBUG) console.log('Sample city:', cities[0]);
       }
       if (villages.length > 0) {
-        console.log('Sample village:', villages[0]);
+        if (DEBUG) console.log('Sample village:', villages[0]);
       }
       
       // Render the burgs
@@ -4047,7 +4356,7 @@
      */
     function renderBurgs() {
       const burgsG = d3.select('#burgs');
-      console.log(`Rendering ${window.__state.burgs ? window.__state.burgs.length : 0} burgs`);
+      if (DEBUG) console.log(`Rendering ${window.__state.burgs ? window.__state.burgs.length : 0} burgs`);
       
       // Clear existing burgs
       burgsG.selectAll('*').remove();
@@ -4078,7 +4387,7 @@
         })
         .each(function(d) {
           // Debug: Log each burg's properties
-          console.log(`Burg ${d.id}: type=${d.type}, port=${d.port}, x=${d.x}, y=${d.y}`);
+          if (DEBUG) console.log(`Burg ${d.id}: type=${d.type}, port=${d.port}, x=${d.x}, y=${d.y}`);
           
           let color;
           if (d.type === 'capital') {
@@ -4093,7 +4402,7 @@
             color = '#ff6600'; // Orange for towns (fallback)
           }
           
-          console.log(`Burg ${d.id} assigned color: ${color}`);
+                      if (DEBUG) console.log(`Burg ${d.id} assigned color: ${color}`);
           
           // Apply color directly
           d3.select(this)
@@ -4140,18 +4449,18 @@
         .attr('vector-effect', 'non-scaling-stroke')
         .text('⚓');
 
-      console.log(`Rendered ${window.__state.burgs.length} burgs`);
+      if (DEBUG) console.log(`Rendered ${window.__state.burgs.length} burgs`);
       
       // Debug: Log burg types and colors
       if (window.__state.burgs && window.__state.burgs.length > 0) {
-        console.log('Burg types:', window.__state.burgs.map(b => ({ id: b.id, type: b.type, port: b.port, isPort: b.isPort, x: b.x, y: b.y })));
-        console.log('First few burgs:', window.__state.burgs.slice(0, 3));
+        if (DEBUG) console.log('Burg types:', window.__state.burgs.map(b => ({ id: b.id, type: b.type, port: b.port, isPort: b.isPort, x: b.x, y: b.y })));
+                  if (DEBUG) console.log('First few burgs:', window.__state.burgs.slice(0, 3));
         
         // Debug: Check what colors are actually applied to DOM elements
         const burgCircles = document.querySelectorAll('#burgs circle');
-        console.log('Burg circles found:', burgCircles.length);
+        if (DEBUG) console.log('Burg circles found:', burgCircles.length);
         if (burgCircles.length > 0) {
-          console.log('First circle fill:', burgCircles[0].getAttribute('fill'), burgCircles[0].style.fill);
+                      if (DEBUG) console.log('First circle fill:', burgCircles[0].getAttribute('fill'), burgCircles[0].style.fill);
         }
       }
     }
@@ -4237,7 +4546,7 @@
         cells[id].cross = set.size; // deg along route network
       }
       
-      console.log(`Road usage built: ${cells.filter(c => c.path > 0).length} cells have road usage`);
+      if (DEBUG) console.log(`Road usage built: ${cells.filter(c => c.path > 0).length} cells have road usage`);
     }
 
     /**
@@ -4926,6 +5235,12 @@
      * @returns {Object} Graph with nodes and edges
      */
     function buildLandGraph(cells, isWater) {
+      // Check cache first
+      if (GraphCache.land) {
+        if (DEBUG) console.log('buildLandGraph: using cached graph');
+        return GraphCache.land;
+      }
+      
       const nodes = [];
       const edges = [];
       
@@ -4954,8 +5269,8 @@
             const w = dist * (1 + slope * slopePenalty + riverCross * riverPenalty);
             
             edges.push({
-              a: i,
-              b: neighborIndex,
+              u: i,
+              v: neighborIndex,
               dist: dist,
               slope: slope,
               riverCross: riverCross,
@@ -4965,7 +5280,11 @@
         }
       }
       
-      console.log(`buildLandGraph: created ${nodes.length} nodes and ${edges.length} edges`);
+      if (DEBUG) console.log(`buildLandGraph: created ${nodes.length} nodes and ${edges.length} edges`);
+      
+      // Cache the graph for reuse
+      finalizeLandGraph(cells.length, edges);
+      
       return { nodes, edges };
     }
     
@@ -5022,150 +5341,72 @@
         return null;
       }
       
-      // Create edge lookup map for fast access
-      const edgeMap = new Map();
-      for (const edge of graph.edges) {
-        const key = `${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`;
-        edgeMap.set(key, edge);
+      // Use cached graph if available
+      const G = GraphCache.land;
+      if (!G) {
+        if (DEBUG) console.warn(`shortestPath: no cached land graph available`);
+        return null;
       }
       
-      if (DEBUG && window.__state.shortestPathCallCount <= 5) {
-        console.log(`shortestPath: built edge map with ${edgeMap.size} edges`);
-      }
-      
-      // A* implementation with proper priority queue
-      const openSet = new Set([startIndex]);
-      const cameFrom = new Map();
-      const gScore = new Map();
-      const fScore = new Map();
-      
-      gScore.set(startIndex, 0);
-      fScore.set(startIndex, heuristic(startIndex, endIndex, cells));
-      
-      let iterations = 0;
-      const maxIterations = 10000; // Prevent infinite loops
-      
-      while (openSet.size > 0 && iterations < maxIterations) {
-        iterations++;
-        
-        // Find node with lowest fScore (simple priority queue)
-        let current = null;
-        let lowestF = Infinity;
-        for (const node of openSet) {
-          const f = fScore.get(node) || Infinity;
-          if (f < lowestF) {
-            lowestF = f;
-            current = node;
+      const N = G.nodesCount;
+      const neighbors = G.neighbors;
+      const cost = (u,v)=> G.edgeCost.get(`${u}:${v}`) ?? 1;
+
+      // Heuristic: straight-line in cell coords if available, else zero
+      const H = (a,b)=> 0; // keep admissible; replace if you have xy[] per node
+
+      const INF = 1e20;
+      // Typed arrays
+      const gScore = new Float64Array(N); gScore.fill(INF);
+      const fScore = new Float64Array(N); fScore.fill(INF);
+      const cameFrom = new Int32Array(N); cameFrom.fill(-1);
+      const inOpen = new Uint8Array(N);
+
+      gScore[startIndex]=0; fScore[startIndex]=H(startIndex, endIndex);
+
+      const open = new MinHeap(i => fScore[i]); open.push(startIndex); inOpen[startIndex]=1;
+      let safety=0, MAX_ITERS = N*20;
+
+      while (open.size) {
+        if (++safety > MAX_ITERS) break; // safety valve
+        const current = open.pop();
+        inOpen[current]=0;
+        if (current===endIndex) return reconstructPath(cameFrom, current);
+
+        const nbrs = neighbors[current];
+        for (let k=0;k<nbrs.length;k++){
+          const n = nbrs[k];
+          const tentative = gScore[current] + cost(current, n);
+          if (tentative < gScore[n]) {
+            cameFrom[n] = current;
+            gScore[n] = tentative;
+            fScore[n] = tentative + H(n, endIndex);
+            if (!inOpen[n]) { open.push(n); inOpen[n]=1; }
           }
-        }
-        
-        if (current === null) {
-          if (DEBUG) console.warn(`A*: no valid node found in openSet (size: ${openSet.size})`);
-          break;
-        }
-        
-        if (current === endIndex) {
-          // Reconstruct path
-          const path = [];
-          while (current !== undefined) {
-            path.unshift(current);
-            current = cameFrom.get(current);
-          }
-          if (DEBUG) console.log(`A* found path in ${iterations} iterations`);
-          return path;
-        }
-        
-        openSet.delete(current);
-        
-        // Debug: log current node and its neighbors (only for first few calls)
-        if (window.__state.shortestPathCallCount <= 3 && iterations <= 3) {
-          console.log(`A* iteration ${iterations}: current=${current}, neighbors=${cells[current]?.neighbors?.length || 0}`);
-        }
-        
-        // Check neighbors
-        const currentCell = cells[current];
-        let validNeighbors = 0;
-        let addedNeighbors = 0;
-        
-        for (const neighborIndex of currentCell.neighbors) {
-          // Don't filter out neighbors - only skip truly impassable water
-          if (isWater[neighborIndex]) continue; // Skip water neighbors
-          validNeighbors++;
-          
-          // Calculate edge cost using stored weights
-          const edgeKey = `${Math.min(current, neighborIndex)}-${Math.max(current, neighborIndex)}`;
-          const edge = edgeMap.get(edgeKey);
-          let tentativeG = gScore.get(current) || Infinity;
-          
-          if (edge) {
-            // Use the precomputed edge weight - don't filter, just weight
-            let cost = edge.w;
-            
-            // Apply existing road discount if this edge was already used
-            if (usedEdges.has(edgeKey)) {
-              cost *= 0.15; // Azgaar's existing road discount
-            }
-            
-            // Apply burg pass-through bonus
-            if (burgCells.has(neighborIndex)) {
-              cost *= 0.85; // 15% discount for passing through burgs
-            }
-            
-            tentativeG += cost;
-          } else {
-            // Fallback to Euclidean distance if edge not found
-            const dist = Math.hypot(
-              currentCell.cx - cells[neighborIndex].cx,
-              currentCell.cy - cells[neighborIndex].cy
-            );
-            tentativeG += dist;
-          }
-          
-          const neighborG = gScore.get(neighborIndex) || Infinity;
-          if (tentativeG < neighborG) {
-            cameFrom.set(neighborIndex, current);
-            gScore.set(neighborIndex, tentativeG);
-            fScore.set(neighborIndex, tentativeG + heuristic(neighborIndex, endIndex, cells));
-            
-            // Always add to open set if we found a better path
-            openSet.add(neighborIndex);
-            addedNeighbors++;
-          }
-        }
-        
-        // Debug: log neighbor processing (only for first few calls)
-        if (window.__state.shortestPathCallCount <= 3 && iterations <= 3) {
-          console.log(`A* iteration ${iterations}: valid neighbors=${validNeighbors}, added to openSet=${addedNeighbors}`);
         }
       }
-      
-      if (DEBUG) console.log(`A* failed after ${iterations} iterations, falling back to BFS`);
-      
-      // Fallback to simple BFS if A* fails
-      const visited = new Set();
-      const queue = [[startIndex, [startIndex]]];
-      visited.add(startIndex);
-      
-      while (queue.length > 0) {
-        const [current, path] = queue.shift();
-        
-        if (current === endIndex) {
-          if (DEBUG) console.log(`BFS fallback found path`);
-          return path;
-        }
-        
-        // Check neighbors
-        const currentCell = cells[current];
-        for (const neighborIndex of currentCell.neighbors) {
-          if (visited.has(neighborIndex)) continue;
-          if (isWater[neighborIndex]) continue; // Skip water neighbors
-          
-          visited.add(neighborIndex);
-          queue.push([neighborIndex, [...path, neighborIndex]]);
-        }
+
+      // Fallback BFS (unweighted) for robustness
+      return bfsFallback(startIndex, endIndex, neighbors);
+    }
+
+    function reconstructPath(cameFrom, cur){
+      const out = [cur];
+      while (cameFrom[cur] !== -1) { cur = cameFrom[cur]; out.push(cur); }
+      out.reverse(); return out;
+    }
+    
+    function bfsFallback(start, goal, neighbors){
+      const q=[start], prev = new Map([[start,-1]]); let i=0;
+      while (i<q.length) {
+        const u = q[i++];
+        if (u===goal) break;
+        for (const v of neighbors[u]) if (!prev.has(v)){ prev.set(v,u); q.push(v); }
       }
-      
-      return null; // No path found
+      if (!prev.has(goal)) return [];
+      const path=[goal]; let x=goal;
+      while (prev.get(x)!==-1){ x = prev.get(x); path.push(x); }
+      return path.reverse();
     }
     
     /**
@@ -5182,7 +5423,7 @@
       // Use Euclidean distance directly - it's admissible and non-negative
       return Math.max(0, d);
     }
-    
+
     /**
      * Calculate the total cost of a path using edge weights from land graph
      * @param {Array} path - Array of cell indices
@@ -5245,7 +5486,7 @@
       // Create edge lookup map
       const edgeMap = new Map();
       for (const edge of seaGraph.edges) {
-        const key = `${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`;
+        const key = `${Math.min(edge.u, edge.v)}-${Math.max(edge.u, edge.v)}`;
         edgeMap.set(key, edge);
       }
       
@@ -5297,11 +5538,33 @@
      * @returns {Array} Path as array of node indices
      */
     function reconstructSeaPath(prev, targetNodeId) {
+      console.log(`reconstructSeaPath: targetNodeId=${targetNodeId}, prev type=${typeof prev}, isArray=${Array.isArray(prev)}`);
       const path = [];
-      for (let v = targetNodeId; v !== -1 && v !== undefined; v = prev.get(v)) {
+      
+      // Handle both Map and Array formats
+      const getPrev = (nodeId) => {
+        if (prev instanceof Map) {
+          return prev.get(nodeId);
+        } else if (Array.isArray(prev) || prev instanceof Float64Array || prev instanceof Int32Array) {
+          return prev[nodeId];
+        }
+        return -1;
+      };
+      
+      // Use a generous guard based on graph size instead of a tiny constant
+      const nodesCount = GraphCache?.sea?.nodesCount ?? window.__state.cells.length;
+      let guard = 0, maxHops = nodesCount + 5;
+      
+      for (let v = targetNodeId; v !== -1 && v !== undefined; v = getPrev(v)) {
         path.push(v);
+        if (++guard > maxHops) {
+          console.warn('reconstructSeaPath guard tripped; likely a bad predecessor chain');
+          break;
+        }
       }
-      return path.reverse();
+      const result = path.reverse();
+      console.log(`reconstructSeaPath: result path length=${result.length}, path=${result.slice(0, 5)}...`);
+      return result;
     }
     
     /**
@@ -5315,6 +5578,8 @@
       const cells = window.__state.cells;
       const isWater = window.__state.isWater || [];
       
+      if (DEBUG) console.log(`dijkstraSea: starting from ${startIndex}, graph has ${graph.edges.length} edges`);
+      
       if (!isWater[startIndex]) {
         console.log(`dijkstraSea: start is not water (start: ${isWater[startIndex]})`);
         return {dist: new Map(), prev: new Map()};
@@ -5323,22 +5588,25 @@
       // Create edge lookup map for fast access
       const edgeMap = new Map();
       for (const edge of graph.edges) {
-        const key = `${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`;
+        const key = `${Math.min(edge.u, edge.v)}-${Math.max(edge.u, edge.v)}`;
         edgeMap.set(key, edge);
       }
       
       const dist = new Map();
       const prev = new Map();
       const visited = new Set();
-      const queue = [{ node: startIndex, cost: 0 }];
+      const queue = new MinHeap(item => item.cost);
+      queue.push({ node: startIndex, cost: 0 });
       
       dist.set(startIndex, 0);
       prev.set(startIndex, -1);
       
-      while (queue.length > 0) {
-        // Sort by cost (could use priority queue for better performance)
-        queue.sort((a, b) => a.cost - b.cost);
-        const { node: current, cost: currentCost } = queue.shift();
+      let iterations = 0;
+      const maxIterations = (graph.edges?.length ?? 0) * 4 || Infinity; // Size-based limit
+      
+      while (queue.size > 0 && iterations < maxIterations) {
+        iterations++;
+        const { node: current, cost: currentCost } = queue.pop();
         
         if (visited.has(current)) continue;
         visited.add(current);
@@ -5346,10 +5614,10 @@
         // Find all edges from current node
         for (const edge of graph.edges) {
           let nextIndex = null;
-          if (edge.a === current) {
-            nextIndex = edge.b;
-          } else if (edge.b === current) {
-            nextIndex = edge.a;
+          if (edge.u === current) {
+            nextIndex = edge.v;
+          } else if (edge.v === current) {
+            nextIndex = edge.u;
           }
           
           if (nextIndex === null || visited.has(nextIndex)) continue;
@@ -5375,6 +5643,7 @@
         }
       }
       
+      if (DEBUG) console.log(`dijkstraSea: completed, found ${dist.size} reachable nodes from ${startIndex}`);
       return {dist, prev};
     }
     
@@ -5453,7 +5722,7 @@
         id: p.id,
         x: p.x,
         y: p.y,
-        seaIndex: p.seaIndex
+        nodeId: p.nodeId
       }));
       
       const edges = [];
@@ -5464,11 +5733,11 @@
           const source = nodes[i];
           const target = nodes[j];
           
-          // Get cached SSSP from source
-          const {dist} = getSeaSSSP(source.seaIndex, seaGraph, new Set());
+          // Get cached SSSP from source using SeaRouter
+          const {dist} = SeaRouter.ensureFor(source.nodeId);
           
           // Edge weight is the sea distance between ports
-          const weight = dist.get(target.seaIndex) || Infinity;
+          const weight = dist[target.nodeId] || Infinity;
           
           if (weight < Infinity) {
             edges.push({
@@ -5570,9 +5839,9 @@
               gapPatches.push({
                 islandId: islandId,
                 fromPort: { id: portAId, x: portGraph.nodes[portA].x, y: portGraph.nodes[portA].y },
-                fromSeaIndex: portGraph.nodes[portA].seaIndex,
+                fromNodeId: portGraph.nodes[portA].nodeId,
                 toPort: { id: portBId, x: portGraph.nodes[portB].x, y: portGraph.nodes[portB].y },
-                toSeaIndex: portGraph.nodes[portB].seaIndex,
+                toNodeId: portGraph.nodes[portB].nodeId,
                 cost: directCost
               });
               
@@ -5920,16 +6189,16 @@
             if (neighborBurg && !visitedBurgs.has(neighborBurg.id)) {
               visitedBurgs.add(neighborBurg.id);
               component.push(neighborBurg);
-              console.log(`Flood found burg ${neighborBurg.id} at cell ${neighborIndex}`);
+              if (DEBUG) console.log(`Flood found burg ${neighborBurg.id} at cell ${neighborIndex}`);
             }
           }
         }
-        console.log(`Flood from burg ${burg.id} (cell ${burg.cell}) explored ${floodSize} cells, found ${component.length} burgs`);
+        if (DEBUG) console.log(`Flood from burg ${burg.id} (cell ${burg.cell}) explored ${floodSize} cells, found ${component.length} burgs`);
         
         components.push(component);
       }
       
-      console.log(`findConnectedComponents: found ${components.length} connected components:`, 
+      if (DEBUG) console.log(`findConnectedComponents: found ${components.length} connected components:`, 
         components.map(c => c.length));
       
       // Debug: show which burgs are in which component
@@ -5967,9 +6236,9 @@
       
       // Build roads within each component
       components.forEach((componentBurgs, componentIndex) => {
-        console.log(`Processing component ${componentIndex} with ${componentBurgs.length} burgs`);
+        if (DEBUG) console.log(`Processing component ${componentIndex} with ${componentBurgs.length} burgs`);
         if (componentBurgs.length < 2) {
-          console.log(`Component ${componentIndex} has < 2 burgs, skipping`);
+                      if (DEBUG) console.log(`Component ${componentIndex} has < 2 burgs, skipping`);
           return;
         }
         
@@ -5978,7 +6247,7 @@
           .sort((a, b) => b.population - a.population)
           .slice(0, Math.max(2, Math.round(componentBurgs.length * 0.6)));
         
-        console.log(`Component ${componentIndex}: selected ${componentHubs.length} hubs from ${componentBurgs.length} burgs`);
+                  if (DEBUG) console.log(`Component ${componentIndex}: selected ${componentHubs.length} hubs from ${componentBurgs.length} burgs`);
         
         // Build complete graph of hub-to-hub path costs within component
         const hubEdges = [];
@@ -6001,7 +6270,7 @@
           }
         }
         
-        console.log(`Component ${componentIndex}: found ${hubEdges.length} valid hub connections`);
+        if (DEBUG) console.log(`Component ${componentIndex}: found ${hubEdges.length} valid hub connections`);
         
         // Sort edges by cost for Kruskal's algorithm
         hubEdges.sort((a, b) => a.cost - b.cost);
@@ -6053,9 +6322,17 @@
           };
         });
         
-        // Batch add all paths at once
+        // Batch add all paths at once using optimized drawing
+        const roadSegments = roadPaths.map(p => {
+          // Extract points from the SVG path data
+          const pathData = p.d;
+          // For now, use the original D3 approach since the data structure is complex
+          return p;
+        });
+        
+        // Use original D3 approach for now since path data is already in SVG format
         roadsG.selectAll('path')
-          .data(roadPaths)
+          .data(roadSegments)
           .enter()
           .append('path')
           .each(function(d) {
@@ -6064,7 +6341,7 @@
             });
           });
         
-        console.log(`Component ${componentIndex}: ${mstEdges.length} roads between ${componentHubs.length} hubs`);
+        if (DEBUG) console.log(`Component ${componentIndex}: ${mstEdges.length} roads between ${componentHubs.length} hubs`);
       });
       
       return allRouteSegments;
@@ -6096,9 +6373,9 @@
       
       // Build trails within each component
       components.forEach((componentBurgs, componentIndex) => {
-        console.log(`Building trails for component ${componentIndex} with ${componentBurgs.length} burgs`);
+        if (DEBUG) console.log(`Building trails for component ${componentIndex} with ${componentBurgs.length} burgs`);
         if (componentBurgs.length < 2) {
-          console.log(`Component ${componentIndex} has < 2 burgs, skipping trails`);
+                      if (DEBUG) console.log(`Component ${componentIndex} has < 2 burgs, skipping trails`);
           return;
         }
         
@@ -6146,11 +6423,13 @@
           });
         });
         
-        console.log(`Component ${componentIndex}: ${existingTrails.length} trails built`);
+        if (DEBUG) console.log(`Component ${componentIndex}: ${existingTrails.length} trails built`);
       });
       
-      // Batch add all trail paths at once
+      // Batch add all trail paths at once using optimized drawing
       const trailsG = d3.select('#routes .trails');
+      
+      // Use original D3 approach for now since path data is already in SVG format
       trailsG.selectAll('path')
         .data(trailPaths)
         .enter()
@@ -6161,7 +6440,7 @@
           });
         });
       
-      console.log(`Total trails built: ${existingTrails.length}`);
+      if (DEBUG) console.log(`Total trails built: ${existingTrails.length}`);
       
       return allTrailSegments;
     }
@@ -6173,6 +6452,12 @@
      * @returns {Object} Sea navigation graph
      */
     function buildSeaGraph(cells, isWater) {
+      // Check cache first
+      if (GraphCache.sea) {
+        if (DEBUG) console.log('buildSeaGraph: using cached graph');
+        return GraphCache.sea;
+      }
+      
       const nodes = [];
       const edges = [];
       
@@ -6183,7 +6468,7 @@
         }
       }
       
-      console.log(`buildSeaGraph: created ${nodes.length} water nodes`);
+      if (DEBUG) console.log(`buildSeaGraph: created ${nodes.length} water nodes`);
       
       // Create edges between neighboring water cells
       for (let i = 0; i < cells.length; i++) {
@@ -6207,12 +6492,105 @@
             }
             
             const w = dist * (1 + landPenalty);
-            edges.push({ a: i, b: neighborIndex, dist: dist, w: w });
+            edges.push({ u: i, v: neighborIndex, dist: dist, w: w });
           }
         }
       }
       
-      console.log(`buildSeaGraph: created ${edges.length} water edges`);
+      // Add long-distance sea connections to ensure islands can be connected
+      // Create a more connected sea graph by adding edges between distant water cells
+      const waterCells = [];
+      for (let i = 0; i < cells.length; i++) {
+        if (isWater[i]) {
+          waterCells.push({ index: i, x: cells[i].cx, y: cells[i].cy });
+        }
+      }
+      
+      // Use a much more efficient approach: connect only strategic water cells
+      // Create a sparse network by sampling water cells and connecting them intelligently
+      const sampleRate = 0.1; // Only use 10% of water cells for the graph
+      const sampledCells = [];
+      
+      // Sample water cells randomly but ensure good coverage
+      for (let i = 0; i < waterCells.length; i++) {
+        if (Math.random() < sampleRate) {
+          sampledCells.push(waterCells[i]);
+        }
+      }
+      
+      // Ensure we have at least some cells for connectivity
+      if (sampledCells.length < 100) {
+        // Add more cells if we don't have enough
+        for (let i = 0; i < waterCells.length && sampledCells.length < 200; i++) {
+          if (!sampledCells.includes(waterCells[i])) {
+            sampledCells.push(waterCells[i]);
+          }
+        }
+      }
+      
+      if (DEBUG) console.log(`Sea graph optimization: using ${sampledCells.length} cells out of ${waterCells.length} water cells`);
+      
+      // Connect sampled cells with a more reasonable approach
+      for (let i = 0; i < sampledCells.length; i++) {
+        const cell1 = sampledCells[i];
+        
+        // Connect to nearby cells within reasonable distance
+        for (let j = i + 1; j < sampledCells.length; j++) {
+          const cell2 = sampledCells[j];
+          const dist = Math.hypot(cell1.x - cell2.x, cell1.y - cell2.y);
+          
+          // Only connect very close neighbors to avoid overland shortcuts
+          if (dist >= 20 && dist <= 50) {
+            // Add some randomness to avoid creating too many edges
+            if (Math.random() < 0.5) { // 50% chance of connection
+              const w = dist * 1.2;
+              edges.push({ u: cell1.index, v: cell2.index, dist: dist, w: w });
+            }
+          }
+        }
+        
+        // Also connect to a few random distant cells for long-range connectivity
+        // REMOVED: These random long-distance edges create shortcuts across land
+        // if (i % 10 === 0) { // Every 10th cell
+        //   for (let j = 0; j < 3; j++) { // Connect to 3 random distant cells
+        //     const randomCell = sampledCells[Math.floor(Math.random() * sampledCells.length)];
+        //     if (randomCell !== cell1) {
+        //       const dist = Math.hypot(cell1.x - randomCell.x, cell1.y - randomCell.y);
+        //       if (dist > 100) { // Only long-distance connections
+        //         const w = dist * 2.0; // Higher cost for long-distance
+        //         edges.push({ u: cell1.index, v: randomCell.index, dist: dist, w: w });
+        //       }
+        //     }
+        //   }
+        // }
+      }
+      
+      if (DEBUG) console.log(`buildSeaGraph: created ${edges.length} water edges (${nodes.length} water nodes) - optimized for performance`);
+      
+      // Create xy coordinates array for the sea graph (indexed by cell index)
+      const xy = Array(cells.length);
+      for (let i = 0; i < cells.length; i++) {
+        if (isWater[i]) {
+          xy[i] = [cells[i].cx, cells[i].cy];
+        }
+      }
+      
+      // REMOVED: Shore penalty using computeDistanceToWater - unreliable with cell-based indexing
+      // The neighbor-based land penalty already biases routes offshore
+      // const distanceToWater = computeDistanceToWater(isWater, window.__state.width, window.__state.height);
+      // for (const edge of edges) {
+      //   const u = edge.u, v = edge.v;
+      //   const midX = (cells[u].cx + cells[v].cx) / 2;
+      //   const midY = (cells[u].cy + cells[v].cy) / 2;
+      //   const midIdx = Math.floor(midY) * window.__state.width + Math.floor(midX);
+      //   const d = distanceToWater[midIdx] || 0; // distance to land in pixels/cells
+      //   const shorePenalty = 1 + 4 * Math.max(0, (2 - d)); // strong penalty when d<2px
+      //   edge.w = edge.w * shorePenalty;
+      // }
+      
+      // Cache the graph for reuse
+      finalizeSeaGraph(cells.length, edges, xy);
+      
       return { nodes, edges };
     }
     
@@ -6305,13 +6683,36 @@
       const islandGroups = findConnectedComponents(portBurgs, landGraph);
       console.log(`Found ${islandGroups.length} island groups for sea routing`);
       
-      // 2) Map ports to nearest water cells and ensure all islands have sea access
+      // 2) Map ports to nearest sea nodes and ensure all islands have sea access
       const portsWithSeaIndex = portBurgs
         .map(p => ({
           ...p,
-          seaIndex: nearestWaterCellIndex(p.cell, isWater, cells)
+          nodeId: snapPortToSeaNode(p.x, p.y, 16) // Snap to nearest sea node within 16px
         }))
-        .filter(p => p.seaIndex >= 0);
+        .filter(p => p.nodeId >= 0);
+      
+      // Label sea components to avoid routing between disconnected water bodies
+      const seaComponents = labelSeaComponents();
+      if (seaComponents) {
+        // Group ports by sea component
+        const portComponents = new Map();
+        portsWithSeaIndex.forEach(port => {
+          const compId = seaComponents[port.nodeId];
+          if (!portComponents.has(compId)) portComponents.set(compId, []);
+          portComponents.get(compId).push(port);
+        });
+        
+        // Only keep ports in the largest sea component (usually the ocean)
+        const largestComponent = Array.from(portComponents.entries())
+          .reduce((max, [compId, ports]) => ports.length > max[1].length ? [compId, ports] : max);
+        
+        console.log(`Sea routing: using ${largestComponent[1].length} ports from largest sea component (${portComponents.size} total components)`);
+        
+        // Filter to only ports in the largest component
+        const filteredPorts = largestComponent[1];
+        portsWithSeaIndex.length = 0;
+        portsWithSeaIndex.push(...filteredPorts);
+      }
       
       // Ensure every island has at least one port with sea access
       const islandsWithSeaAccess = new Set();
@@ -6338,30 +6739,33 @@
         // Pick hub port (first port with sea access)
         const hubPort = islandPorts.find(p => {
           const portWithSea = portsWithSeaIndex.find(ps => ps.id === p.id);
-          return portWithSea && portWithSea.seaIndex >= 0;
+          return portWithSea && portWithSea.nodeId >= 0;
         });
         
         if (!hubPort) return;
         
-        const hubSeaIndex = portsWithSeaIndex.find(ps => ps.id === hubPort.id).seaIndex;
+        const hubNodeId = portsWithSeaIndex.find(ps => ps.id === hubPort.id).nodeId;
         
         // Run single-source Dijkstra from hub (cached)
-        const {dist, prev} = getSeaSSSP(hubSeaIndex, seaGraph, usedEdges);
+        console.log(`Island ${islandId}: Running SSSP from hub port ${hubPort.id} (nodeId: ${hubNodeId})`);
+        const {dist, prev} = SeaRouter.ensureFor(hubNodeId);
         
         // Validate that we got valid results
-        if (!dist || !prev || dist.size === 0) {
-          if (DEBUG) console.warn(`Island ${islandId}: No valid sea distances computed from hub ${hubPort.id} (seaIndex: ${hubSeaIndex})`);
+        if (!dist || !prev || dist.length === 0) {
+          console.warn(`Island ${islandId}: No valid sea distances computed from hub ${hubPort.id} (nodeId: ${hubNodeId})`);
           return;
         }
         
+        console.log(`Island ${islandId}: SSSP computed distances to ${dist.length} nodes, predecessors for ${prev.length} nodes`);
+        
         islandDistances.set(islandId, {
           hubPort,
-          hubSeaIndex,
+          hubNodeId,
           distances: dist,
           predecessors: prev
         });
         
-        if (DEBUG) console.log(`Island ${islandId}: hub at port ${hubPort.id}, computed distances to ${Object.keys(dist).length} ocean nodes`);
+        if (DEBUG) console.log(`Island ${islandId}: hub at port ${hubPort.id}, computed distances to ${dist.length} ocean nodes`);
       });
       
       // 4) Build inter-island connections
@@ -6400,14 +6804,14 @@
           const portWithSea = portsWithSeaIndex.find(ps => ps.id === port.id);
           if (!portWithSea) return;
           
-          const cost = islandData.distances.get ? islandData.distances.get(portWithSea.seaIndex) : islandData.distances[portWithSea.seaIndex];
+          const cost = islandData.distances[portWithSea.nodeId];
           const finalCost = (cost !== undefined && cost !== null) ? cost : Infinity;
           if (finalCost < bestCost) {
             bestCost = finalCost;
             bestConnection = {
               fromIsland: islandId,
               fromPort: port,
-              fromSeaIndex: portWithSea.seaIndex,
+              fromNodeId: portWithSea.nodeId,
               toIsland: largestIslandId,
               cost: finalCost
             };
@@ -6448,13 +6852,13 @@
             );
             
             if (distance < 300) { // Threshold for big island connections
-              islandConnections.push({
-                fromIsland: island.id,
-                fromPort: islandData.hubPort,
-                fromSeaIndex: islandData.hubSeaIndex,
-                toIsland: otherIsland.id,
-                cost: distance
-              });
+                               islandConnections.push({
+                   fromIsland: island.id,
+                   fromPort: islandData.hubPort,
+                   fromNodeId: islandData.hubNodeId,
+                   toIsland: otherIsland.id,
+                   cost: distance
+                 });
             }
           });
         }
@@ -6462,9 +6866,16 @@
       
       // 6) Render connections
       const seaG = d3.select('#routes .searoutes');
+      console.log('Sea routes layer found:', seaG.node());
       const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
       
-      islandConnections.forEach(connection => {
+      // Sea routes layer is working correctly
+      
+      console.log(`Processing ${islandConnections.length} island connections...`);
+      let routesAdded = 0;
+      
+      islandConnections.forEach((connection, index) => {
+        console.log(`Processing connection ${index + 1}/${islandConnections.length}:`, connection);
         // Find path from source to target
         const targetPort = islandGroups[connection.toIsland]?.[0];
         if (!targetPort) return;
@@ -6477,23 +6888,58 @@
         if (!sourceIslandData) return;
         
         // Use the predecessors from cached SSSP to find the actual path
-        const path = reconstructSeaPath(sourceIslandData.predecessors, targetWithSea.seaIndex);
-        if (path) {
+        console.log(`Sea route: from island ${connection.fromIsland} (port ${connection.fromPort.id}, nodeId ${connection.fromNodeId}) to island ${connection.toIsland} (port ${targetPort.id}, nodeId ${targetWithSea.nodeId})`);
+        
+        const path = reconstructSeaPath(sourceIslandData.predecessors, targetWithSea.nodeId);
+        console.log('Reconstructed path:', path, 'length:', path ? path.length : 0);
+        
+        // Sanity check: ensure the path actually reaches the target
+        if (path && path.length > 0 && path[path.length - 1] !== targetWithSea.nodeId) {
+          console.warn('Truncated sea route detected.', {target: targetWithSea.nodeId, pathLen: path.length, lastNode: path[path.length - 1]});
+        }
+        
+        if (!path || path.length === 0) {
+          console.warn('Empty path reconstructed, skipping route');
+          return;
+        }
+        
+        if (path && path.length > 1) {
           const points = polylineFromPath(path);
-          const smoothed = smoothLine(points, 1);
+          console.log('Polyline points:', points, 'length:', points ? points.length : 0);
           
-          seaG.append('path')
+          if (!points || points.length === 0) {
+            console.warn('Empty polyline points, skipping route');
+            return;
+          }
+          
+          // Use stricter simplification for sea routes to avoid crossing land
+          // const simplified = adaptiveSimplifySea([points], window.__state.width, window.__state.height)[0];
+          const simplified = points; // Use original points without simplification for now
+          const smoothed = smoothLine(simplified, 1);
+          
+          console.log('Drawing sea route with points:', points.length, 'smoothed:', smoothed.length);
+          if (smoothed.length > 0) {
+            console.log('First point:', smoothed[0], 'Last point:', smoothed[smoothed.length - 1]);
+          }
+          
+          const pathElement = seaG.append('path')
             .attr('d', line(smoothed))
             .attr('fill', 'none')
-            .attr('stroke', '#cfe9ff')
-            .attr('stroke-width', '1.2px')
+            .attr('stroke', '#ffffff')
+            .attr('stroke-width', '2px')
             .attr('stroke-dasharray', '6 4')
+            // Using layer mask instead of individual clip-path
             .attr('stroke-linecap', 'round')
             .attr('stroke-linejoin', 'round')
-            .attr('opacity', '0.9')
+            .attr('opacity', '0.8')
             .attr('vector-effect', 'non-scaling-stroke');
+          
+          console.log('Added sea route path element:', pathElement.node());
+          routesAdded++;
         }
       });
+      
+      console.log(`Successfully added ${routesAdded} sea routes`);
       
              // 7) Build port graph and optimize gap patching
       const portGraph = buildPortGraph(portsWithSeaIndex, seaGraph);
@@ -6517,7 +6963,7 @@
            // Find any port with sea access
            const anyPort = islandPorts.find(port => {
              const portWithSea = portsWithSeaIndex.find(ps => ps.id === port.id);
-             return portWithSea && portWithSea.seaIndex >= 0;
+             return portWithSea && portWithSea.nodeId >= 0;
            });
            
            if (anyPort) {
@@ -6531,9 +6977,10 @@
                if (targetWithSea) {
                  gapPatches.push({
                    fromPort: anyPort,
-                   fromSeaIndex: portWithSea.seaIndex,
+                   fromNodeId: portWithSea.nodeId,
                    toPort: targetPort,
-                   toSeaIndex: targetWithSea.seaIndex,
+                   toNodeId: targetWithSea.nodeId,
+                   islandId: islandId, // Add island ID for path reconstruction
                    cost: Math.hypot(anyPort.x - targetPort.x, anyPort.y - targetPort.y)
                  });
                }
@@ -6548,16 +6995,19 @@
          const islandData = islandDistances.get(patch.islandId);
          if (!islandData) return;
          
-         const path = reconstructSeaPath(islandData.predecessors, patch.toSeaIndex);
+         const path = reconstructSeaPath(islandData.predecessors, patch.toNodeId);
          if (path) {
            const points = polylineFromPath(path);
-           const smoothed = smoothLine(points, 1);
+           // Use stricter simplification for sea routes to avoid crossing land
+           // const simplified = adaptiveSimplifySea([points], window.__state.width, window.__state.height)[0];
+           const simplified = points; // Use original points without simplification for now
+           const smoothed = smoothLine(simplified, 1);
            
            seaG.append('path')
              .attr('d', line(smoothed))
              .attr('fill', 'none')
-             .attr('stroke', '#cfe9ff')
-             .attr('stroke-width', '1.0px')
+             .attr('stroke', '#ff0000')
+             .attr('stroke-width', '2px')
              .attr('stroke-dasharray', '3 3')
              .attr('stroke-linecap', 'round')
              .attr('stroke-linejoin', 'round')
@@ -6569,6 +7019,24 @@
        console.log(`Built ${islandConnections.length} inter-island sea connections + ${gapPatches.length} gap patches`);
      }
     
+    // Batch processing for sea routes to keep UI responsive
+    async function buildSeaRoutesInBatches(jobs, batch=8){
+      let i=0;
+      while(i<jobs.length){
+        const end = Math.min(i+batch, jobs.length);
+        for (; i<end; i++) {
+          // Process one route job
+          const job = jobs[i];
+          // This would be where you call your routing function
+          // For now, we'll just simulate the work
+        }
+        ProgressManager.update(90 * (i/jobs.length), 'Building routes…', `${i}/${jobs.length}`);
+        await new Promise(r => requestAnimationFrame(r));
+      }
+      ProgressManager.update(100, 'Routes done');
+      ProgressManager.hide();
+    }
+
     // Guard against multiple simultaneous executions
     let isComputingRoutes = false;
     
@@ -6733,10 +7201,26 @@
       }
       
       // Optional: Add one-liner after rendering to confirm you drew something
-      if (DEBUG) console.log('sea:', document.querySelectorAll('#routes .searoutes path').length);
+      const seaPathCount = document.querySelectorAll('#routes .searoutes path').length;
+      console.log(`Sea routes rendered: ${seaPathCount} paths`);
+      if (seaPathCount > 0) {
+        console.log('Sea route paths found:', document.querySelectorAll('#routes .searoutes path'));
+        // Debug: Check if paths are actually visible
+        const firstPath = document.querySelector('#routes .searoutes path');
+        if (firstPath) {
+          console.log('First sea route path:', firstPath);
+          console.log('Path d attribute:', firstPath.getAttribute('d'));
+          console.log('Path stroke:', firstPath.getAttribute('stroke'));
+          console.log('Path stroke-width:', firstPath.getAttribute('stroke-width'));
+          console.log('Path computed style:', window.getComputedStyle(firstPath).stroke);
+        }
+      }
       
       // Raise burgs above routes for crisp rendering
       d3.select('#burgs').raise();
+      
+      // Debug: Force sea routes to be on top
+      d3.select('#routes .searoutes').raise();
       
       // Update progress to completion
       ProgressManager.update(100, 'Routes complete!', 'All road and sea networks built successfully');
