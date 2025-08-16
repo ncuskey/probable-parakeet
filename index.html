@@ -1516,6 +1516,8 @@
       window.__state.delaunay = delaunay;
       window.__state.voronoi = voronoi;
       window.__state.svg = svg;
+      window.__state.width = width;
+      window.__state.height = height;
       window.__state.add = add;
       window.__state.recolor = rafDebounce(recolor);
       window.__state.autoSeed = autoSeed;
@@ -3625,6 +3627,74 @@
         return ringToPathD(outer) + holes.map(ringToPathD).join("");
       }
 
+      // --- Land Mask and Underlay Helper ---
+      function ensureLandUnderlay(svg, zoomRoot, width, height) {
+        const defs = svg.select('defs');
+
+        // Prefer unified land paths; fall back to landPaths if needed
+        const unifiedPaths = window.__state.unifiedLandPaths || [];
+        const landPaths = window.__state.landPaths || [];
+
+        if (!unifiedPaths.length && !landPaths.length) return;
+
+        // Build a single SVG 'd' string for all land rings
+        let landD = '';
+        
+        if (unifiedPaths.length > 0) {
+          // Use unified paths (arrays of points)
+          landD = unifiedPaths
+            .map(poly => 'M' + poly.map(p => p.join(',')).join('L') + 'Z')
+            .join('');
+        } else if (landPaths.length > 0) {
+          // Use land paths (objects with path properties)
+          landD = landPaths
+            .map(lp => lp.path.attr('d'))
+            .join('');
+        }
+
+        if (!landD) return;
+
+        // --- Land mask (white = land, black = sea) ---
+        defs.select('#landMask').remove();
+        const landMask = defs.append('mask')
+          .attr('id', 'landMask')
+          .attr('maskContentUnits', 'userSpaceOnUse');
+
+        landMask.append('rect')
+          .attr('width', width).attr('height', height)
+          .attr('fill', 'black');
+
+        landMask.append('path')
+          .attr('d', landD)
+          .attr('fill', 'white');
+
+        // --- Land underlay (fills hairline gaps inland) ---
+        zoomRoot.select('rect.land-underlay').remove();
+        zoomRoot.insert('rect', '.mapCells') // under polygons, above ocean
+          .attr('class', 'land-underlay')
+          .attr('x', 0).attr('y', 0)
+          .attr('width', width).attr('height', height)
+          .attr('fill', typeof landColor === 'function' ? landColor(0.0) : '#8fbf7a')
+          .attr('mask', 'url(#landMask)');
+
+        // --- Optional: land-side coastline seam stroke (clips stroke to land only) ---
+        defs.select('#landClip').remove();
+        defs.append('clipPath').attr('id', 'landClip')
+          .append('path').attr('d', landD);
+
+        if (window.__state.coastD) {
+          zoomRoot.select('path.coast-seam').remove();
+          zoomRoot.append('path')
+            .attr('class', 'coast-seam')
+            .attr('d', window.__state.coastD)
+            .attr('clip-path', 'url(#landClip)')
+            .attr('stroke', typeof landColor === 'function' ? landColor(0.0) : '#8fbf7a')
+            .attr('stroke-width', 1.2)
+            .attr('fill', 'none')
+            .attr('vector-effect', 'non-scaling-stroke');
+        }
+      }
+
       // Compute average color for an island based on its cells
       function computeIslandColor(loop, renderMode, sea, cells) {
         if (renderMode === 'biomes' || renderMode === 'hybrid') {
@@ -3917,6 +3987,29 @@
             oceanMaskRect: oceanMask.select('rect').node()
           });
         }
+
+        // Create unified land paths for masking and underlay
+        if (closedLoops.length > 0) {
+          window.__state.unifiedLandPaths = closedLoops.map(loop => {
+            const smoothedLoop = chaikin(loop, 2);
+            return smoothedLoop;
+          });
+        }
+
+        // Save coastline path data for seam stroke
+        if (closedLoops.length > 0) {
+          const coastD = closedLoops.map(loop => {
+            const smoothedLoop = chaikin(loop, 2);
+            return islandToPathD(smoothedLoop);
+          }).join('');
+          window.__state.coastD = coastD;
+        }
+
+        // Build land mask & underlay so inland hairlines show land, not sea
+        const svg = window.__state.svg;
+        const zoomRoot = d3.select('#zoomRoot');
+        const width = +svg.attr('width'), height = +svg.attr('height');
+        ensureLandUnderlay(svg, zoomRoot, width, height);
       }
     }
 
