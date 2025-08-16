@@ -1776,11 +1776,7 @@
       ProgressManager.setPhase('rivers');
       recolor();
       
-      // Hide progress overlay when complete
-      ProgressManager.setPhase('final');
-      setTimeout(() => {
-        ProgressManager.hide();
-      }, 1000); // Increased delay to 1 second so you can see the completion
+      // Progress overlay will be hidden by computeRoutes() when everything is complete
 
       function relaxOnce(pts, w, h) {
         const dly = d3.Delaunay.from(pts);
@@ -7512,7 +7508,6 @@
         await new Promise(r => requestAnimationFrame(r));
       }
       ProgressManager.update(100, 'Routes done');
-      ProgressManager.hide();
     }
 
     // Guard against multiple simultaneous executions
