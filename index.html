@@ -103,6 +103,10 @@
       100% { opacity: 1; }
     }
 
+    /* Zoom and pan touch handling */
+    #map { touch-action: none; cursor: grab; }
+    #map:active { cursor: grabbing; }
+
     .progress-overlay {
       animation: pulse 2s ease-in-out infinite;
     }
@@ -912,12 +916,8 @@
       const svg = d3.select('svg');
       let root = d3.select('#routes');
       if (root.empty()) {
-        root = svg.append('g').attr('id', 'routes');
-        root.append('g').attr('class', 'roads');
-        root.append('g').attr('class', 'trails');
-        root.append('g').attr('class', 'searoutes').attr('mask', 'url(#oceanMask)');
-        // Keep routes group above map only once
-        root.raise();
+        // Routes are now created in the zoomRoot, so just get the existing one
+        root = d3.select('#routes');
       }
       const g = {
         root,
@@ -1324,21 +1324,25 @@
       window.__state.burgs = [];
 
       const svg = d3.select('svg');
+      
+      // Create zoomable wrapper group
+      const zoomRoot = svg.append('g').attr('id', 'zoomRoot');
+      
       // Solid ocean backdrop to eliminate water seam artifacts (anti-aliasing between polygons)
-      svg.select('rect.ocean').remove();
-      svg.append('rect')
+      zoomRoot.select('rect.ocean').remove();
+      zoomRoot.append('rect')
         .attr('class','ocean')
         .attr('x',0).attr('y',0)
         .attr('width', +svg.attr('width'))
         .attr('height', +svg.attr('height'))
         .attr('fill', WATER_COLOR);
-      const mapCells = svg.append('g')
+      const mapCells = zoomRoot.append('g')
         .attr('class', 'mapCells');
-      const riversShade = svg.append('g').attr('class', 'riversShade');
-      const riversG = svg.append('g').attr('class', 'rivers');
-      const coastG = svg.append('g').attr('class', 'coastline');
-      const burgsG = svg.append('g').attr('id', 'burgs');
-      const routesG = svg.append('g').attr('id', 'routes');
+      const riversShade = zoomRoot.append('g').attr('class', 'riversShade');
+      const riversG = zoomRoot.append('g').attr('class', 'rivers');
+      const coastG = zoomRoot.append('g').attr('class', 'coastline');
+      const burgsG = zoomRoot.append('g').attr('id', 'burgs');
+      const routesG = zoomRoot.append('g').attr('id', 'routes');
       const roadsG = routesG.append('g').attr('class', 'roads');
       const trailsG = routesG.append('g').attr('class', 'trails');
       const seaG = routesG.append('g').attr('class', 'searoutes');
@@ -1349,6 +1353,39 @@
       const width = +svg.attr('width');
       const height = +svg.attr('height');
       const n = sizeInput.valueAsNumber;
+
+      // Add D3 zoom and pan functionality
+      // Improve touchpad scroll feel a bit:
+      const wheelDelta = (event) =>
+        -event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.002); // lines vs pixels
+
+      const zoom = d3.zoom()
+        .scaleExtent([0.5, 24])                    // min/max zoom
+        .wheelDelta(wheelDelta)
+        .translateExtent([[0, 0], [width, height]])// keep map roughly in view
+        .extent([[0, 0], [width, height]])
+        .on('zoom', (event) => {
+          zoomRoot.attr('transform', event.transform);
+        });
+
+      svg.call(zoom).call(zoom.transform, d3.zoomIdentity); // initial
+
+      // Optional helper functions for zoom control
+      window.resetZoom = function() {
+        svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity);
+      };
+
+      window.zoomToBBox = function(bbox, pad = 24) {
+        const cx = bbox.x + bbox.width/2, cy = bbox.y + bbox.height/2;
+        const k = Math.min(
+          width / (bbox.width + 2*pad),
+          height / (bbox.height + 2*pad)
+        );
+        svg.transition().duration(400).call(
+          zoom.transform,
+          d3.zoomIdentity.translate(width/2, height/2).scale(k).translate(-cx, -cy)
+        );
+      };
 
       // Get the world seed for reproducible generation
       const seedInput = document.getElementById('seedInput').value;
