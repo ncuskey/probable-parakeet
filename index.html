@@ -1431,7 +1431,7 @@
         -event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.002); // lines vs pixels
 
       const zoom = d3.zoom()
-        .scaleExtent([0.5, 24])                    // min/max zoom
+        .scaleExtent([1.0, 24])                    // min/max zoom - prevent zooming out smaller than original size
         .wheelDelta(wheelDelta)
         .translateExtent([[0, 0], [width, height]])// keep map roughly in view
         .extent([[0, 0], [width, height]])
@@ -1452,7 +1452,7 @@
           event.preventDefault();
           const point = d3.pointer(event, svg.node());
           const currentTransform = d3.zoomTransform(svg.node());
-          const newScale = currentTransform.k * 2;
+          const newScale = Math.max(1.0, currentTransform.k * 2); // Respect minimum zoom level
           const newTransform = d3.zoomIdentity
             .translate(point[0], point[1])
             .scale(newScale)
