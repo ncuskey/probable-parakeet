@@ -1,0 +1,16 @@
+{
+  "name": "Voronoi Heightmap Playground",
+  "short_name": "MapGen",
+  "description": "Interactive voronoi-based heightmap generator",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#5E4FA2",
+  "theme_color": "#5E4FA2",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgdmlld0JveD0iMCAwIDE5MiAxOTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxOTIiIGhlaWdodD0iMTkyIiBmaWxsPSIjNUU0RkEyIi8+CjxwYXRoIGQ9Ik05NiA0OEM3My45MDg2IDQ4IDU2IDY1LjkwODYgNTYgODhWMTQ0QzU2IDE2Ni4wOTEgNzMuOTA4NiAxODQgOTYgMTg0QzExOC4wOTEgMTg0IDEzNiAxNjYuMDkxIDEzNiAxNDRWODhDMTM2IDY1LjkwODYgMTE4LjA5MSA0OCA5NiA0OFoiIGZpbGw9IndoaXRlIi8+CjxwYXRoIGQ9Ik04OCA5NkM4OCA5MS41ODE3IDkxLjU4MTcgODggOTYgODhIMTA0QzEwOC40MTggODggMTEyIDkxLjU4MTcgMTEyIDk2VjEyOEMxMTIgMTMyLjQxOCAxMDguNDE4IDEzNiAxMDQgMTM2SDk2QzkxLjU4MTcgMTM2IDg4IDEzMi40MTggODggMTI4Vjk2WiIgZmlsbD0iIzVFNEZBMiIvPgo8L3N2Zz4K",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="manifest" href="manifest.json" />
   <title>Voronoi Heightmap Playground</title>
   <style>
     :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; }
@@ -109,6 +110,28 @@
 
     .progress-overlay {
       animation: pulse 2s ease-in-out infinite;
+    }
+
+    /* Mobile-first adjustments */
+    @media (max-width: 768px) {
+      body { margin: 8px; }
+      #map { height: 60vh; }                 /* keep the map big enough to pinch/drag */
+      .controls { position: sticky; bottom: 0; background: #fff; padding: 8px; border-top: 1px solid #ddd; }
+      input[type="range"] { width: 100%; }    /* sliders fit narrow screens */
+      #routes .searoutes { stroke-width: 2px; }  /* thinner lines on phones */
+    }
+
+    /* Finger-friendly tap targets on coarse pointers (phones/tablets) */
+    @media (pointer: coarse) {
+      button, .primary-btn, .settings-btn { min-height: 44px; font-size: 16px; }
+      label { font-size: 16px; }
+    }
+
+    /* Safe-area insets for the modal (iOS) */
+    @supports(padding: env(safe-area-inset-top)) {
+      .modal-content { 
+        margin: calc(8px + env(safe-area-inset-top)) auto calc(8px + env(safe-area-inset-bottom));
+      }
     }
 
     /* Modal styles */
@@ -827,13 +850,17 @@
     let isRouting = false;
     let pendingRoutes = false;
     
+    // Heavier debounce for sliders on phones
+    const isCoarse = window.matchMedia('(pointer: coarse)').matches;
+    const HEAVY_DELAY = isCoarse ? 400 : 200;
+
     const debouncedComputeRoutes = heavyDebounce(() => {
       // Invalidate route caches when route settings change
       GraphCache.invalidate('land');
       if (window.__state.computeRoutes) {
         window.__state.computeRoutes();
       }
-    }, 200);
+    }, HEAVY_DELAY);
 
     // Cached DOM elements for performance
     const DOM = {
@@ -896,7 +923,7 @@
             if (typeof window.drawCoastlines === 'function') window.drawCoastlines();
             if (typeof window.__state.recolor === 'function') window.__state.recolor();
           }
-        }, 200));
+        }, HEAVY_DELAY));
       }
     });
 
@@ -1189,6 +1216,17 @@
       // Initialize progress manager after DOM is ready
       document.addEventListener('DOMContentLoaded', () => {
         ProgressManager.init();
+        
+        // Register service worker for offline functionality
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+              console.log('ServiceWorker registration successful');
+            })
+            .catch(err => {
+              console.log('ServiceWorker registration failed: ', err);
+            });
+        }
       });
       
       // Also try to init immediately in case DOM is already loaded
@@ -1198,6 +1236,17 @@
         });
       } else {
         ProgressManager.init();
+      }
+      
+      // Register service worker immediately if DOM is ready
+      if (document.readyState !== 'loading' && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js')
+          .then(registration => {
+            console.log('ServiceWorker registration successful');
+          })
+          .catch(err => {
+            console.log('ServiceWorker registration failed: ', err);
+          });
       }
 
     // Define constants up-front so they're available when generate() first runs
@@ -1393,6 +1442,27 @@
 
       svg.call(zoom).call(zoom.transform, d3.zoomIdentity); // initial
 
+      // Double-tap zoom for one-hand use on mobile
+      let lastTap = 0;
+      svg.on('touchend', function(event) {
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTap;
+        if (tapLength < 500 && tapLength > 0) {
+          // Double tap detected
+          event.preventDefault();
+          const point = d3.pointer(event, svg.node());
+          const currentTransform = d3.zoomTransform(svg.node());
+          const newScale = currentTransform.k * 2;
+          const newTransform = d3.zoomIdentity
+            .translate(point[0], point[1])
+            .scale(newScale)
+            .translate(-point[0], -point[1]);
+          
+          svg.transition().duration(300).call(zoom.transform, newTransform);
+        }
+        lastTap = currentTime;
+      });
+
       // Optional helper functions for zoom control
       window.resetZoom = function() {
         svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity);
@@ -1470,12 +1540,16 @@
       }
 
       // Draw polygons - use canvas for large maps, SVG for smaller ones
-      const useCanvas = cells.length > 8000;
+      const isCoarse = window.matchMedia('(pointer: coarse)').matches;
+      const useCanvas = isCoarse ? cells.length > 4000 : cells.length > 8000;
       
       if (useCanvas) {
         // Canvas-based rendering for large maps
-        TerrainCanvas.canvas.width = width;
-        TerrainCanvas.canvas.height = height;
+        // Scale the backing store by DPR so it isn't blurry on phones
+        const dpr = Math.min(2, window.devicePixelRatio || 1); // cap to 2 for perf
+        TerrainCanvas.canvas.width = width * dpr;
+        TerrainCanvas.canvas.height = height * dpr;
+        TerrainCanvas.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         TerrainCanvas.ctx.fillStyle = '#000';
         
         cells.forEach(cell => {
@@ -2285,7 +2359,8 @@
         const shades = shadingMode === 'shaded' ? computeShading(cells, sea) : null;
         
         // Check if we're using canvas rendering
-        const useCanvas = cells.length > 8000;
+        const isCoarse = window.matchMedia('(pointer: coarse)').matches;
+        const useCanvas = isCoarse ? cells.length > 4000 : cells.length > 8000;
         
         if (useCanvas && TerrainCanvas.isDirty()) {
           // Re-render canvas for large maps
@@ -2995,7 +3070,20 @@
           const a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
           a.download = filename;
-          a.click();
+          
+          // iOS-friendly export: open in new tab if download is blocked
+          try {
+            a.click();
+          } catch (e) {
+            // Fallback for iOS: open data URL in new tab
+            const dataURL = canvas.toDataURL('image/png');
+            const newWindow = window.open();
+            if (newWindow) {
+              newWindow.document.write(`<img src="${dataURL}" alt="Map Export" style="max-width: 100%; height: auto;">`);
+              newWindow.document.title = filename;
+            }
+          }
+          
           URL.revokeObjectURL(a.href);
         }, 'image/png');
       }
@@ -4527,6 +4615,15 @@
         .attr('class', 'burg')
         .attr('data-burg-id', d => d.id);
 
+      // Add hit areas for easier tapping on mobile
+      burgs.append('circle')
+        .attr('class', 'burg-hit')
+        .attr('cx', 0)
+        .attr('cy', 0)
+        .attr('r', 12)                      // tap halo
+        .attr('fill', 'transparent')
+        .style('pointer-events', 'all');    // ensure it catches taps
+
       // Add circles for burg symbols with different styles per type
       burgs.append('circle')
         .attr('cx', 0)
@@ -4585,6 +4682,7 @@
         .attr('stroke-width', '0.5')
         .attr('paint-order', 'stroke fill')
         .attr('vector-effect', 'non-scaling-stroke')
+        .style('pointer-events', 'all')    // ensure capital symbols are tappable
         .text('★');
 
       // Add port symbols for ports (anchor) - only cities can be ports
@@ -4600,6 +4698,7 @@
         .attr('stroke-width', '0.5')
         .attr('paint-order', 'stroke fill')
         .attr('vector-effect', 'non-scaling-stroke')
+        .style('pointer-events', 'all')    // ensure port symbols are tappable
         .text('⚓');
 
       if (DEBUG) console.log(`Rendered ${window.__state.burgs.length} burgs`);
