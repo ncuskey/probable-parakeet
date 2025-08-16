@@ -6581,21 +6581,70 @@
       renderSeaNetwork(edgeUsage, G.xy);
     }
 
-    function renderSeaNetwork(edgeUsage, xy) {
-      const segs = [];
-      let maxUse = 1;
-      for (const [key, use] of edgeUsage) {
-        const [a, b] = key.split('|').map(Number);
-        const A = xy[a], B = xy[b];
-        if (!A || !B) continue;
-        segs.push({ a: { x: A[0], y: A[1] }, b: { x: B[0], y: B[1] }, use });
-        if (use > maxUse) maxUse = use;
+    // Turn the set of used edges into non-overlapping polylines (node-ID based)
+    function polylinesFromEdgeUsage(edgeUsage, xy) {
+      const adj = new Map();                // nodeId -> Set<neighborId>
+      const degree = new Map();
+      const edgeKey = (u,v)=> u<v ? `${u}|${v}` : `${v}|${u}`;
+      const addAdj = (u,v)=>{
+        if (!adj.has(u)) adj.set(u,new Set());
+        if (!adj.has(v)) adj.set(v,new Set());
+        adj.get(u).add(v); adj.get(v).add(u);
+        degree.set(u,(degree.get(u)||0)+1);
+        degree.set(v,(degree.get(v)||0)+1);
+      };
+
+      for (const key of edgeUsage.keys()) {
+        const [a,b] = key.split('|').map(Number);
+        addAdj(a,b);
       }
 
-      // Merge to polylines so overlaps become a single line
-      const polys = segmentsToPolylines(segs);
+      const visited = new Set();
+      const polylines = [];
 
-      const g = d3.select('#routes .searoutes');
+      function walkChain(start, next){
+        const line = [];
+        let u = start, v = next;
+        line.push({x: xy[u][0], y: xy[u][1]});
+        while (true) {
+          visited.add(edgeKey(u,v));
+          line.push({x: xy[v][0], y: xy[v][1]});
+          const degV = (adj.get(v)||new Set()).size;
+          if (degV !== 2) break;
+          // continue through the degree-2 corridor
+          let w = undefined;
+          for (const n of adj.get(v)) {
+            if (n !== u && !visited.has(edgeKey(v,n))) { w = n; break; }
+          }
+          if (w == null) break;
+          u = v; v = w;
+        }
+        return line;
+      }
+
+      // Start chains from junctions (degree != 2)
+      for (const [node, deg] of degree) {
+        if (deg !== 2) {
+          for (const n of adj.get(node) || []) {
+            const ek = edgeKey(node,n);
+            if (!visited.has(ek)) polylines.push(walkChain(node,n));
+          }
+        }
+      }
+
+      // Any remaining cycles (all nodes degree==2)
+      for (const [u, neigh] of adj) {
+        for (const v of neigh) {
+          const ek = edgeKey(u,v);
+          if (!visited.has(ek)) polylines.push(walkChain(u,v));
+        }
+      }
+      return polylines;
+    }
+
+    function renderSeaNetwork(edgeUsage, xy) {
+      const g = d3.select('#routes .searoutes'); // this group already has the ocean mask
+      const polys = polylinesFromEdgeUsage(edgeUsage, xy);
       const paths = g.selectAll('path').data(polys);
       paths.join('path')
         .attr('d', poly => 'M' + poly.map(p => `${p.x},${p.y}`).join('L'))
@@ -6607,11 +6656,8 @@
         .attr('opacity', '0.8')
         .attr('vector-effect', 'non-scaling-stroke');
 
-      // Optional: vary width by approximate load
-      // (cheap proxy: number of segments in a poly, normalized)
-      const maxSegs = Math.max(...polys.map(p => Math.max(1, p.length - 1)));
-      g.selectAll('path')
-        .attr('stroke-width', (d) => 1.2 + 2.8 * ((d.length - 1) / maxSegs));
+      // Use consistent thin stroke width for all routes
+      g.selectAll('path').attr('stroke-width', '1.2px');
     }
 
     /**
