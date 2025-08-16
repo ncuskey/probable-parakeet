@@ -6445,6 +6445,175 @@
       return allTrailSegments;
     }
     
+    // ---- Water Path Validation ---------------------------------------------
+    
+    // Helper: returns true if the segment stays over water
+    function waterOnlySegment(ax, ay, bx, by, isWater, cells, steps = Math.ceil(Math.hypot(ax-bx, ay-by) / 6)) {
+      for (let s = 1; s < steps; s++) {
+        const t = s / steps;
+        const x = ax + (bx - ax) * t;
+        const y = ay + (by - ay) * t;
+        
+        // Find the nearest cell using brute force (since delaunay isn't available)
+        let nearestIdx = -1;
+        let nearestDist = Infinity;
+        for (let i = 0; i < cells.length; i++) {
+          const dist = Math.hypot(cells[i].cx - x, cells[i].cy - y);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestIdx = i;
+          }
+        }
+        
+        if (nearestIdx < 0 || !isWater[nearestIdx]) return false;
+      }
+      return true;
+    }
+
+    // ---- Hub & Spoke Sea Network ---------------------------------------------
+
+    function getPortCandidates() {
+      // Prefer explicit ports if you have them; otherwise use coastal burgs
+      const ports = (window.__state.ports && window.__state.ports.length)
+        ? window.__state.ports.map(p => ({ x: p.x, y: p.y, name: p.name }))
+        : (window.__state.burgs || [])
+            .filter(b => b.port || b.isPort || b.type === 'port' || b.isCoastal)
+            .map(b => ({ x: b.x, y: b.y, name: b.name }));
+      return ports;
+    }
+
+    function chooseHubsFarthestFirst(portNodes, k) {
+      // k ≈ sqrt(P) is a nice default
+      const hubs = [];
+      if (!portNodes.length) return hubs;
+      hubs.push(portNodes[0]);
+
+      while (hubs.length < k && hubs.length < portNodes.length) {
+        let best = null, bestScore = -1;
+        for (const p of portNodes) {
+          if (hubs.includes(p)) continue;
+          const score = hubs.reduce((m, h) => Math.min(m, h.dist[p.nodeId]), Infinity);
+          if (score > bestScore) { bestScore = score; best = p; }
+        }
+        hubs.push(best);
+      }
+      return hubs;
+    }
+
+    function buildSeaTransitNetwork({ kHubs } = {}) {
+      const G = GraphCache.sea;
+      if (!G) return;
+
+      // 1) Collect/snap ports to sea graph
+      const rawPorts = getPortCandidates();
+      const ports = rawPorts.map(p => {
+        const nodeId = snapPortToSeaNode(p.x, p.y, 24);
+        return nodeId >= 0 ? { ...p, nodeId } : null;
+      }).filter(Boolean);
+      if (ports.length < 2) return;
+
+      // Optional: split by connected component so hubs never cross land-locked seas
+      const comp = labelSeaComponents();
+      const groups = new Map();
+      for (const p of ports) {
+        const c = comp ? comp[p.nodeId] : 0;
+        if (!groups.has(c)) groups.set(c, []);
+        groups.get(c).push(p);
+      }
+
+      // Edge usage accumulator (undirected)
+      const edgeUsage = new Map();
+      const addPath = (prev, a, b, weight = 1) => {
+        for (let v = b; v !== -1 && v !== a; v = prev[v]) {
+          const u = prev[v]; if (u < 0) break;
+          const key = u < v ? `${u}|${v}` : `${v}|${u}`;
+          edgeUsage.set(key, (edgeUsage.get(key) || 0) + weight);
+        }
+      };
+
+      // Process each connected sea component separately
+      for (const [_cid, P] of groups) {
+        if (P.length === 0) continue;
+
+        // Precompute one Dijkstra per **candidate hub** (cached by SeaRouter)
+        const packs = new Map();
+        for (const p of P) packs.set(p.nodeId, SeaRouter.ensureFor(p.nodeId));
+
+        // 2) Choose hubs (default k ≈ sqrt(P))
+        const K = kHubs || Math.max(1, Math.round(Math.sqrt(P.length)));
+        // Annotate ports with distance maps for farthest-first
+        for (const p of P) p.dist = packs.get(p.nodeId).dist;
+        const hubs = chooseHubsFarthestFirst(P, K);
+
+        // 3) Assign every port to nearest hub by **sea distance**
+        const hubPacks = new Map(hubs.map(h => [h.nodeId, packs.get(h.nodeId)]));
+        for (const p of P) {
+          let best = hubs[0], bestD = Infinity;
+          for (const h of hubs) {
+            const d = hubPacks.get(h.nodeId).dist[p.nodeId];
+            if (d < bestD) { bestD = d; best = h; }
+          }
+          p.hub = best;
+          addPath(hubPacks.get(best.nodeId).prev, best.nodeId, p.nodeId, 1);
+        }
+
+        // 4) Connect hubs with an MST over sea distances (trunks)
+        const hubList = hubs.slice();
+        const edges = [];
+        for (let i = 0; i < hubList.length; i++)
+          for (let j = i + 1; j < hubList.length; j++)
+            edges.push({ i, j, w: packs.get(hubList[i].nodeId).dist[hubList[j].nodeId] });
+
+        edges.sort((a, b) => a.w - b.w);
+        const parent = hubList.map((_, i) => i);
+        const find = i => parent[i] === i ? i : (parent[i] = find(parent[i]));
+        const unite = (a, b) => { a = find(a); b = find(b); if (a === b) return false; parent[a] = b; return true; };
+
+        for (const e of edges) {
+          if (unite(e.i, e.j)) {
+            const A = hubList[e.i].nodeId, B = hubList[e.j].nodeId;
+            addPath(packs.get(A).prev, A, B, 3); // trunk edges carry more weight
+          }
+        }
+      }
+
+      // 5) Render all used edges once (shared segments)
+      renderSeaNetwork(edgeUsage, G.xy);
+    }
+
+    function renderSeaNetwork(edgeUsage, xy) {
+      const segs = [];
+      let maxUse = 1;
+      for (const [key, use] of edgeUsage) {
+        const [a, b] = key.split('|').map(Number);
+        const A = xy[a], B = xy[b];
+        if (!A || !B) continue;
+        segs.push({ a: { x: A[0], y: A[1] }, b: { x: B[0], y: B[1] }, use });
+        if (use > maxUse) maxUse = use;
+      }
+
+      // Merge to polylines so overlaps become a single line
+      const polys = segmentsToPolylines(segs);
+
+      const g = d3.select('#routes .searoutes');
+      const paths = g.selectAll('path').data(polys);
+      paths.join('path')
+        .attr('d', poly => 'M' + poly.map(p => `${p.x},${p.y}`).join('L'))
+        .attr('fill', 'none')
+        .attr('stroke', '#ffffff')
+        .attr('stroke-dasharray', '6 4')             // keep your dashed look
+        .attr('stroke-linecap', 'round')
+        .attr('stroke-linejoin', 'round')
+        .attr('opacity', '0.8')
+        .attr('vector-effect', 'non-scaling-stroke');
+
+      // Optional: vary width by approximate load
+      // (cheap proxy: number of segments in a poly, normalized)
+      const maxSegs = Math.max(...polys.map(p => Math.max(1, p.length - 1)));
+      g.selectAll('path')
+        .attr('stroke-width', (d) => 1.2 + 2.8 * ((d.length - 1) / maxSegs));
+    }
+
     /**
      * Build sea navigation graph
      * @param {Array} cells - All cells array
@@ -6541,10 +6710,13 @@
           
           // Only connect very close neighbors to avoid overland shortcuts
           if (dist >= 20 && dist <= 50) {
-            // Add some randomness to avoid creating too many edges
-            if (Math.random() < 0.5) { // 50% chance of connection
-              const w = dist * 1.2;
-              edges.push({ u: cell1.index, v: cell2.index, dist: dist, w: w });
+            // Check if the path between cells stays over water
+            if (waterOnlySegment(cell1.x, cell1.y, cell2.x, cell2.y, isWater, cells)) {
+              // Add some randomness to avoid creating too many edges
+              if (Math.random() < 0.5) { // 50% chance of connection
+                const w = dist * 1.2;
+                edges.push({ u: cell1.index, v: cell2.index, dist: dist, w: w });
+              }
             }
           }
         }
@@ -7175,8 +7347,8 @@
             
             if (DEBUG) console.log(`Port components:`, portComponents.map(ports => ports.length));
             
-            // Build sea routes between different landmasses
-            buildSeaBackbone(portBurgs, seaGraph, landGraph);
+            // Build hub-and-spoke sea transit network
+            buildSeaTransitNetwork({ kHubs: Math.round(Math.sqrt((window.__state.ports?.length || window.__state.burgs?.length || 16) / 2)) });
             
             const seaRouteTime = performance.now() - seaRouteStart;
             if (DEBUG) console.log(`Sea routes built in ${seaRouteTime.toFixed(1)}ms (cache hits: ${seaSSSPCache.size})`);
