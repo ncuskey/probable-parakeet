@@ -1341,8 +1341,9 @@
       const riversShade = zoomRoot.append('g').attr('class', 'riversShade');
       const riversG = zoomRoot.append('g').attr('class', 'rivers');
       const coastG = zoomRoot.append('g').attr('class', 'coastline');
-      const burgsG = zoomRoot.append('g').attr('id', 'burgs');
       const routesG = zoomRoot.append('g').attr('id', 'routes');
+      // Burgs go outside zoomRoot so they can be counter-scaled independently
+      const burgsG = svg.append('g').attr('id', 'burgs');
       const roadsG = routesG.append('g').attr('class', 'roads');
       const trailsG = routesG.append('g').attr('class', 'trails');
       const seaG = routesG.append('g').attr('class', 'searoutes');
@@ -1353,6 +1354,27 @@
       const width = +svg.attr('width');
       const height = +svg.attr('height');
       const n = sizeInput.valueAsNumber;
+
+      // Keep the current zoom transform so we can position burgs after (re)draws
+      window.currentTransform = d3.zoomIdentity;
+
+      // Throttled for smoothness
+      window.updateBurgPositions = rafThrottle((t = window.currentTransform) => {
+        window.currentTransform = t;
+        
+        // Update burg groups with transform
+        const burgGroups = burgsG.selectAll('g.burg');
+        burgGroups.attr('transform', d => `translate(${t.applyX(d.x)},${t.applyY(d.y)})`);
+        
+        if (DEBUG && burgGroups.size() > 0) {
+          console.log(`Updated ${burgGroups.size()} burg positions with transform:`, t);
+        }
+          
+        // Update any standalone burg circles (if they exist)
+        burgsG.selectAll('circle.burg')
+          .attr('cx', d => t.applyX(d.x))
+          .attr('cy', d => t.applyY(d.y));
+      });
 
       // Add D3 zoom and pan functionality
       // Improve touchpad scroll feel a bit:
@@ -1365,7 +1387,8 @@
         .translateExtent([[0, 0], [width, height]])// keep map roughly in view
         .extent([[0, 0], [width, height]])
         .on('zoom', (event) => {
-          zoomRoot.attr('transform', event.transform);
+          zoomRoot.attr('transform', event.transform);   // map (land/sea/routes) zooms
+          window.updateBurgPositions(event.transform);          // burgs reproject to screen coords
         });
 
       svg.call(zoom).call(zoom.transform, d3.zoomIdentity); // initial
@@ -4413,11 +4436,11 @@
 
       // Add circles for burg symbols with different styles per type
       burgs.append('circle')
-        .attr('cx', d => d.x)
-        .attr('cy', d => d.y)
+        .attr('cx', 0)
+        .attr('cy', 0)
         .attr('r', d => {
           if (d.type === 'capital') return 5; // Capitals are largest
-          if (d.type === 'city' && d.port) return 4.5; // Port cities are very large
+          if (d.type === 'city' && d.port) return 6; // Port cities are largest to accommodate anchors
           if (d.type === 'city') return 4; // Cities are large
           if (d.type === 'village') return 2.5; // Villages are smallest
           return 2.5; // Default size
@@ -4429,12 +4452,12 @@
           let color;
           if (d.type === 'capital') {
             color = '#ff0000'; // Red for capitals
+          } else if (d.type === 'city' && d.port) {
+            color = '#ffffff'; // White for port cities
           } else if (d.type === 'city') {
             color = '#0066cc'; // Blue for cities
           } else if (d.type === 'village') {
             color = '#ff6600'; // Orange for villages
-          } else if (d.port) {
-            color = '#0066cc'; // Blue for ports (fallback)
           } else {
             color = '#ff6600'; // Orange for towns (fallback)
           }
@@ -4459,8 +4482,8 @@
       // Add special symbols for capitals (star)
       burgs.filter(d => d.type === 'capital')
         .append('text')
-        .attr('x', d => d.x)
-        .attr('y', d => d.y + 1)
+        .attr('x', 0)
+        .attr('y', 1)
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'middle')
         .attr('font-size', '7px')
@@ -4474,14 +4497,14 @@
       // Add port symbols for ports (anchor) - only cities can be ports
       burgs.filter(d => d.port && d.type === 'city')
         .append('text')
-        .attr('x', d => d.x)
-        .attr('y', d => d.y + 1)
+        .attr('x', 0)
+        .attr('y', 1)
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'middle')
-        .attr('font-size', '5px')
+        .attr('font-size', '8px')
         .attr('fill', '#fff')
         .attr('stroke', '#000')
-        .attr('stroke-width', '0.3')
+        .attr('stroke-width', '0.5')
         .attr('paint-order', 'stroke fill')
         .attr('vector-effect', 'non-scaling-stroke')
         .text('⚓');
@@ -4499,6 +4522,14 @@
         if (burgCircles.length > 0) {
                       if (DEBUG) console.log('First circle fill:', burgCircles[0].getAttribute('fill'), burgCircles[0].style.fill);
         }
+      }
+      
+      // Position burgs at current zoom level
+      if (window.updateBurgPositions) {
+        if (DEBUG) console.log('Calling updateBurgPositions after rendering burgs');
+        window.updateBurgPositions(window.currentTransform);
+      } else if (DEBUG) {
+        console.warn('updateBurgPositions not available');
       }
     }
 
