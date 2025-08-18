@@ -3541,6 +3541,8 @@
                 const towns = placeTowns(rescored, cells, capitals);
                 // 5) Publish burgs
                 window.__state.burgs = capitals.concat(towns);
+                // Ensure unique IDs for downstream algorithms (routes, rendering)
+                window.__state.burgs.forEach((b, idx) => { if (b.id == null) b.id = idx; });
                 // 6) Regions & labels (reuse your existing machinery)
                 generateRegionalNames({renameAll: false});
                 assignMacroRegions(capitals);
@@ -6500,12 +6502,19 @@
       const edges = mstOverPoints(capitals);
       const graph = buildLandGraphSimple(cells, isWater);
       const polylines = [];
+      // Mark cells used by primary roads so subsequent paths reuse them (0.15 cost)
+      function markPathUsage(path, cells) {
+        for (const i of path) cells[i].pathUsed = (cells[i].pathUsed ?? 0) + 1;
+      }
       for (const [ai, bi] of edges) {
         const A = capitals[ai], B = capitals[bi];
         const start = A.cell, goal = B.cell;
         const path = aStarCells(start, goal, graph, cells);
         const line = pathToPolyline(path, cells);
-        if (line.length) polylines.push(line);
+        if (line.length) {
+          polylines.push(line);
+          markPathUsage(path, cells);
+        }
       }
       return polylines;
     }
