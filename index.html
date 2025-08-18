@@ -2162,6 +2162,30 @@
 
     // Expose generate() globally for the button
     window.generate = generate;
+
+    // Hide tunable panels to align with deterministic Azgaar flow
+    function hideTunablePanels() {
+      const sel = [
+        "#settlements-tab",
+        "#routes-tab",
+        "#tab-settlements",
+        "#tab-routes"
+      ];
+      sel.forEach(s => {
+        const el = document.querySelector(s);
+        if (el) {
+          el.setAttribute("aria-hidden", "true");
+          el.style.display = "none";
+        }
+      });
+    }
+    hideTunablePanels();
+
+    // Make any leftover slider-driven callbacks no-ops
+    const NO_OP = () => {};
+    ["debouncedComputeRoutes", "toggleRoutes", "generateBurgs"].forEach(fn => {
+      if (typeof window[fn] === "function") window[fn] = NO_OP;
+    });
     
     // toggleRoutes removed with fixed pipeline
 
