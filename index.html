@@ -6579,6 +6579,66 @@
       return polylines;
     }
 
+    // --- Ports helpers (sheltered harbors, island promotion, capital links) ---
+    function isShelteredHarborCell(i, cells, isWater, oceanIdOf) {
+      const nbrs = cells[i].neighbors || [];
+      const oceanNbrs = nbrs.filter(j => isWater[j] && ((oceanIdOf && oceanIdOf[j]) ?? -1) >= 0);
+      return oceanNbrs.length === 1;
+    }
+
+    function tagPortsOnBurgs(burgs, cells, isWater, oceanIdOf) {
+      for (const b of burgs) {
+        const i = (b.cell !== undefined ? b.cell : b.cellIndex);
+        if (i == null) continue;
+        const coastal = (cells[i].neighbors || []).some(n => isWater[n]);
+        b.isPort = coastal && isShelteredHarborCell(i, cells, isWater, oceanIdOf);
+      }
+    }
+
+    function ensureIslandPorts(burgs, cells, isWater, islandOf, baseScore) {
+      const byIsl = new Map();
+      for (const b of burgs) {
+        const idx = (b.cell !== undefined ? b.cell : b.cellIndex);
+        const isl = islandOf ? (islandOf[idx] ?? -1) : -1;
+        if (!byIsl.has(isl)) byIsl.set(isl, []);
+        byIsl.get(isl).push(b);
+      }
+      for (const [isl, bs] of byIsl) {
+        if (!bs || bs.length === 0) continue;
+        if (bs.some(b => b.isPort)) continue;
+        let best = null, bestScore = -Infinity;
+        for (const b of bs) {
+          const i = (b.cell !== undefined ? b.cell : b.cellIndex);
+          const coastal = (cells[i].neighbors||[]).some(n => isWater[n]);
+          if (!coastal) continue;
+          const s = baseScore ? (baseScore[i] ?? 0) : 0;
+          if (s > bestScore) { bestScore = s; best = b; }
+        }
+        if (best) best.isPort = true;
+      }
+    }
+
+    function connectCapitalToNearestRegionalPort(capital, burgs, cells, isWater) {
+      const capIdx = (capital.cell !== undefined ? capital.cell : capital.cellIndex);
+      const portsSameRegion = burgs.filter(b => b.isPort && b.regionId === capital.regionId);
+      if (!portsSameRegion.length) return null;
+      let best = null, bestD = Infinity;
+      for (const p of portsSameRegion) {
+        const pi = (p.cell !== undefined ? p.cell : p.cellIndex);
+        const d = Math.hypot(cells[pi].cx - cells[capIdx].cx, cells[pi].cy - cells[capIdx].cy);
+        if (d < bestD) { bestD = d; best = p; }
+      }
+      if (!best) return null;
+      const graph = buildLandGraph(cells, isWater);
+      const goalIdx = (best.cell !== undefined ? best.cell : best.cellIndex);
+      const path = aStarCells(capIdx, goalIdx, graph, cells);
+      if (path && path.length) {
+        for (const i of path) cells[i].pathUsed = (cells[i].pathUsed ?? 0) + 1;
+        return pathToPolyline(path, cells);
+      }
+      return null;
+    }
+
     // === Road proximity bump + town placement (not wired) ===
     function indexCellsNearPolylines(cells, polylines, radiusPx = 8) {
       const r2 = radiusPx * radiusPx;
