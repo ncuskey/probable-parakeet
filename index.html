@@ -2559,7 +2559,7 @@
       } else {
         // SVG-based rendering for smaller maps
       mapCells.selectAll('path.mapCell')
-        .data(cells)
+        .data(cells.filter(c => c.high >= sea))
         .enter()
         .append('path')
         .attr('class', 'mapCell')
@@ -5226,6 +5226,11 @@
             oceanMaskCreated: !oceanMask.empty(),
             oceanMaskRect: oceanMask.select('rect').node()
           });
+
+          // Remove water cell paths entirely to prevent anti-aliased Voronoi seams showing in the sea
+          mapCells.selectAll('path.mapCell')
+            .filter(d => isWater[d.index])
+            .remove();
         }
 
         // Create unified land paths for masking and underlay
