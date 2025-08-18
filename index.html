@@ -3535,7 +3535,6 @@
                 window.__state.macroCapitals = capitals;
                 // 3) Connect capitals with primary roads (MST + A*)
                 const primaryRoads = connectCapitalsWithRoads(capitals, cells, isWater);
-                drawPrimaryRoads(primaryRoads);
                 // 4) Rescore near roads & place towns
                 const roadIndex = indexCellsNearPolylines(cells, primaryRoads, 8);
                 const rescored = rescoreWithRoads(baseScore, cells, roadIndex);
@@ -3554,11 +3553,9 @@
               }
               // === Azgaar-style pipeline end ===
 
-              ProgressManager.setPhase('routes');
-              ProgressManager.update(90, 'Building routes...', 'Computing road and sea networks...');
-              
-              // Kick off routes in fixed pipeline
+              // Build the full, merged land/sea route network (roads + trails + sea lanes)
               if (window.__state.computeRoutes) {
+                ProgressManager.update(92, 'Building roads & sea lanes...');
                 window.__state.computeRoutes();
               }
               // Fixed pipeline: no separate route recomputation toggles
