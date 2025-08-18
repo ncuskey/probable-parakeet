@@ -6629,7 +6629,8 @@
         if (d < bestD) { bestD = d; best = p; }
       }
       if (!best) return null;
-      const graph = buildLandGraph(cells, isWater);
+      // Use simple neighbor graph that aStarCells expects
+      const graph = buildLandGraphSimple(cells, isWater);
       const goalIdx = (best.cell !== undefined ? best.cell : best.cellIndex);
       const path = aStarCells(capIdx, goalIdx, graph, cells);
       if (path && path.length) {
