@@ -303,6 +303,8 @@
     .settings-btn:hover {
       background-color: #545b62;
     }
+
+    .region-neutral { fill: none; stroke: currentColor; opacity: 0.08; }
   </style>
 </head>
 <body>
@@ -628,6 +630,10 @@
         connectStrategy: "mst", // "mst" + A* for edges (capitals network)
         slopePenalty: 1.2,
         riverCrossPenalty: 1.0,
+      },
+      regions: {
+        allowNeutral: true,
+        maxManorDistance: 140
       }
     };
 
@@ -1087,7 +1093,6 @@
       }
       return chosen;
     }
-
     // --- Build region boundary segments from labeled cells ---------------------
     function buildRegionSegments(cells, isWater, regionOfCell) {
       const segsByRegion = new Map(); // region -> segments [{a:[x,y], b:[x,y]}]
@@ -1307,7 +1312,20 @@
             const d = effectiveCapitalDist(c.cx, c.cy, cap, capPowers[k], compId, capComp, overseasPenalty);
             if (d < bestD) { bestD = d; bestI = k; }
           }
-          regionId = bestI;
+          // Distance guard for neutrals
+          if (CONFIG.regions.allowNeutral) {
+            // Euclidean distance to chosen capital
+            const cap = capitals[bestI];
+            const capCell = cap.cellIndex ?? nearestCellIndex(cells, cap.x, cap.y);
+            const dPx = Math.hypot(c.cx - cap.x, c.cy - cap.y);
+            if (dPx > CONFIG.regions.maxManorDistance) {
+              regionId = -1; // neutral
+            } else {
+              regionId = bestI;
+            }
+          } else {
+            regionId = bestI;
+          }
         }
 
         regionOfCell[i] = regionId;
@@ -1475,7 +1493,7 @@
       const { regionOfCell } = res;
       console.log('Region assignment complete, regions:', new Set(regionOfCell.filter(r => r >= 0)).size);
 
-      // Build boundary segments per region and stitch into rings
+      // Build boundary segments per region and stitch into rings; ignore neutrals (-1)
       const segsByRegion = buildRegionSegments(cells, isWater, regionOfCell);
       console.log('Built segments for regions:', segsByRegion.size);
 
@@ -1514,6 +1532,15 @@
       // Update region label data & draw (uses your polylabel-based code)
       // getStatePolys will now prefer macro-regions below if you update it as follows.
       window.__state.regionOfCell = regionOfCell;
+
+      // Optional: draw neutral cells lightly (hatch/outline)
+      d3.select('#regions-neutral').remove();
+      d3.select('#map').append('g').attr('id', 'regions-neutral')
+        .selectAll('path')
+        .data(cells.map((c, i) => ({ c, i })).filter(o => regionOfCell[o.i] === -1))
+        .enter().append('path')
+        .attr('class', 'region-neutral')
+        .attr('d', o => 'M' + o.c.poly.map(p => p.join(',')).join('L') + 'Z');
       
       // after drawing overlay, refresh per-cell region colors
       window.__state.applyRegionCellFills(window.__state.regionOfCell, d3.schemeTableau10 || d3.schemeCategory10);
@@ -1859,7 +1886,6 @@
       }
       return d;
     }
-    
     /**
      * Draw lines with instrumentation for debugging
      * @param {string} selector - CSS selector for the target group
@@ -2650,7 +2676,6 @@
       };
 
       // Note: Region computation will be called after map generation is complete
-
     // Helper function to apply region cell fills
     window.__state.applyRegionCellFills = function(regionOfCell, palette) {
       const sel = d3.select('#mapCells').selectAll('path.mapCell');
@@ -4171,7 +4196,6 @@
           URL.revokeObjectURL(a.href);
         }, 'image/png');
       }
-
       // Expose export functions globally
       window.saveSVG = saveSVG;
       window.savePNG = savePNG;
@@ -5682,7 +5706,6 @@
         console.warn('updateBurgPositions not available');
       }
     }
-
     // Draggable burg labels; store screen-pinned px/py on drag, clear on double-click (to unpin)
     const burgDrag = d3.drag()
       .on('start', function (event, d) { d3.select(this).classed('dragging', true); })
@@ -6453,7 +6476,6 @@
 
       return dist * slopeMult * riverMult * reuseMult;
     }
-
     function aStarCells(start, goal, graph, cells) {
       const open = new MinHeap(n => n.f); // you already have MinHeap
       const g = new Map(), f = new Map(), came = new Map();
@@ -6494,7 +6516,7 @@
     }
 
     function mstOverPoints(points) {
-      // Prim’s MST on complete graph in geometric space
+      // Prim's MST on complete graph in geometric space
       const n = points.length;
       if (n <= 1) return [];
       const inTree = new Array(n).fill(false);
@@ -7201,7 +7223,6 @@
       if (DEBUG) console.log(`dijkstraSea: completed, found ${dist.size} reachable nodes from ${startIndex}`);
       return {dist, prev};
     }
-    
     /**
      * Find path from start to end using precomputed distances from dijkstraSea
      * @param {number} startIndex - Starting cell index
@@ -8000,7 +8021,6 @@
       }
       return true;
     }
-
     // ---- Hub & Spoke Sea Network ---------------------------------------------
 
     function getPortCandidates() {
