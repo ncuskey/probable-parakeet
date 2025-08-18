@@ -45,6 +45,50 @@
     }
     .labels-burgs text.capital { font-weight: 700; letter-spacing: .5px; }
     .labels-regions text { font-size: 18px; opacity: .9; }
+    .region-label { 
+      font-size: 20px; 
+      font-weight: 600; 
+      fill: #2c3e50; 
+      stroke: #fff; 
+      stroke-width: 4px; 
+      opacity: 0.9; 
+    }
+    
+    #regions path { 
+      mix-blend-mode: multiply; 
+      pointer-events: none; 
+    }
+    
+    /* View toggle button styling - now inline with other controls */
+    #viewToggleBtn {
+      margin-left: 8px;
+    }
+    
+    /* Regions view: hide raster & overlay; show only region fills; remove borders */
+    body.view-mode-regions #mapCells image { display: none; }
+    body.view-mode-regions #regions .overlay { display: none; }
+    body.view-mode-regions #regions .mapCell {
+      stroke: none;            /* remove stained-glass/voronoi lines */
+      shape-rendering: geometricPrecision; /* reduce aliasing seams */
+    }
+
+    /* Terrain view: show raster & overlay; keep overlay subtle */
+    body.view-mode-terrain #mapCells image { display: block; }
+    body.view-mode-terrain #regions .overlay { display: block; }
+    body.view-mode-terrain #regions .mapCell {
+      stroke: none;            /* ensure no cell borders in terrain view */
+    }
+
+    /* Overlay tint is subtle and non-interactive */
+    #regions .overlay path {
+      fill-opacity: 0.15;      /* reduce from ~0.25 to ~0.15 to avoid muted colors */
+      pointer-events: none;    /* don't block interactions */
+    }
+
+    /* Routes stay crisp regardless of zoom */
+    #routes path {
+      vector-effect: non-scaling-stroke;
+    }
 
     /* Progress overlay styling */
     .progress-overlay {
@@ -303,6 +347,7 @@
       <button onclick="generate()" class="primary-btn">Generate Map</button>
       <button onclick="toggleSettings()" class="settings-btn">⚙️ Settings</button>
       <button id="regenNamesBtn" class="primary-btn">Regenerate Names</button>
+      <button id="viewToggleBtn" class="primary-btn">Show Regions</button>
     </div>
 
     <div class="row">
@@ -536,6 +581,29 @@
             <input id="regionCount" type="number" min="1" max="20" value="3" style="width:4rem">
             <button id="applyRegionCount">Apply</button>
           </div>
+
+          <div class="row">
+            <label>Disbalance:</label>
+            <input id="disbalanceInput" value="0.35" type="range" min="0" max="1" step="0.05"
+                   oninput="disbalanceOutput.value = disbalanceInput.valueAsNumber; computeAndDrawRegions();">
+            <output id="disbalanceOutput">0.35</output>
+            <span class="hint">higher = more unequal region sizes</span>
+          </div>
+
+          <div class="row">
+            <label>Overseas Penalty:</label>
+            <input id="overseasPenaltyInput" value="2.0" type="range" min="1" max="3" step="0.1"
+                   oninput="overseasPenaltyOutput.value = overseasPenaltyInput.valueAsNumber; computeAndDrawRegions();">
+            <output id="overseasPenaltyOutput">2.0</output>
+          </div>
+
+          <div class="row">
+            <label>Max Manor Distance (px):</label>
+            <input id="maxManorDistInput" value="120" type="range" min="40" max="300" step="5"
+                   oninput="maxManorDistOutput.value = maxManorDistInput.valueAsNumber; computeAndDrawRegions();">
+            <output id="maxManorDistOutput">120</output>
+            <span class="hint">beyond this = neutral land</span>
+          </div>
         </div>
 
         <!-- Routes Tab -->
@@ -596,8 +664,53 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <!-- D3 v7 (uses d3.pointer and d3-delaunay for Voronoi) -->
   <script src="https://d3js.org/d3.v7.min.js"></script>
-  <!-- Polylabel for region label placement -->
-  <script src="https://unpkg.com/polylabel@1.1.0/polylabel.js"></script>
+      <!-- Queue implementation for polylabel -->
+    <script>
+      // Simple Queue implementation for polylabel
+      if (typeof Queue === 'undefined') {
+        class Queue {
+          constructor() {
+            this.items = [];
+          }
+          
+          enqueue(item) {
+            this.items.push(item);
+          }
+          
+          dequeue() {
+            return this.items.shift();
+          }
+          
+          isEmpty() {
+            return this.items.length === 0;
+          }
+          
+          size() {
+            return this.items.length;
+          }
+        }
+        
+        // Make Queue globally available for polylabel
+        window.Queue = Queue;
+      }
+    </script>
+    
+    <!-- Polylabel for region label placement -->
+    <script>
+      // Browser-compatible polylabel implementation
+      function polylabel(polygon, precision = 1.0) {
+        const rings = polygon[0];
+        if (!rings || rings.length < 3) return [0, 0];
+        
+        // Simple centroid fallback for now
+        let x = 0, y = 0;
+        for (const point of rings) {
+          x += point[0];
+          y += point[1];
+        }
+        return [x / rings.length, y / rings.length];
+      }
+    </script>
 
   <script>
     // Map size management function
@@ -990,6 +1103,88 @@
       return kept;
     }
 
+    // --- Land components (islands) --------------------------------------------
+    function labelLandComponents(cells, isWater) {
+      const comp = new Int32Array(cells.length); comp.fill(-1);
+      let id = 0;
+      for (let i = 0; i < cells.length; i++) {
+        if (isWater[i] || comp[i] !== -1) continue;
+        const q = [i]; comp[i] = id;
+        for (let qi = 0; qi < q.length; qi++) {
+          const u = q[qi];
+          const neigh = cells[u].neighbors || [];
+          for (const v of neigh) {
+            if (!isWater[v] && comp[v] === -1) { comp[v] = id; q.push(v); }
+          }
+        }
+        id++;
+      }
+      return comp; // -1 for water
+    }
+
+    // --- Ensure we have a polygon for each cell (Voronoi) ----------------------
+    function ensureCellPolys(cells, width, height) {
+      if (cells.length && cells[0].poly) return; // already present
+      const pts = cells.map(c => [c.cx, c.cy]);
+      const vor = d3.Delaunay.from(pts).voronoi([0,0,width,height]);
+      for (let i = 0; i < cells.length; i++) {
+        const poly = vor.cellPolygon(i);
+        cells[i].poly = poly ? poly.map(p => [p[0], p[1]]) : [[cells[i].cx, cells[i].cy]];
+      }
+    }
+
+    // --- Build region boundary segments from labeled cells ---------------------
+    function buildRegionSegments(cells, isWater, regionOfCell) {
+      const segsByRegion = new Map(); // region -> segments [{a:[x,y], b:[x,y]}]
+      const pushSeg = (rid, a, b) => {
+        if (!segsByRegion.has(rid)) segsByRegion.set(rid, []);
+        segsByRegion.get(rid).push({a:{x:a[0],y:a[1]}, b:{x:b[0],y:b[1]}});
+      };
+
+      // For each cell edge shared with different region (or water/neutral), add to region's boundary
+      for (let i = 0; i < cells.length; i++) {
+        const ri = regionOfCell[i];
+        if (ri < 0 || isWater[i]) continue;
+        const poly = cells[i].poly;
+        const neigh = cells[i].neighbors || [];
+        for (let e = 0; e < poly.length; e++) {
+          const a = poly[e], b = poly[(e+1) % poly.length];
+
+          // Find neighboring cell that shares this edge (if any)
+          // We approximate by checking all neighbors; in your model, neighbor polygons share edges
+          let sameRegionNeighbor = false;
+          for (const j of neigh) {
+            if (j === i || isWater[j]) continue;
+            if (regionOfCell[j] === ri) {
+              // If neighbor shares an edge that matches (a,b) ~ (b',a') we'll consider interior edge
+              // Cheap test: midpoint distance to neighbor polygon; if close, treat as interior
+              const pj = cells[j].poly;
+              if (pj) {
+                const mx = (a[0]+b[0])*0.5, my=(a[1]+b[1])*0.5;
+                // inside neighbor bbox quick test
+                const jb = d3.polygonContains(pj, [mx,my]);
+                if (jb) { sameRegionNeighbor = true; break; }
+              }
+            }
+          }
+          if (!sameRegionNeighbor) pushSeg(ri, a, b);
+        }
+      }
+      return segsByRegion;
+    }
+
+    // --- Stitch segments to rings; reuse your segmentsToPolylines --------------
+    function segmentsToRings(segments) {
+      // Use your existing segmentsToPolylines and close rings when endpoints meet
+      const polys = segmentsToPolylines(segments);
+      // Ensure closure:
+      for (const p of polys) {
+        const first = p[0], last = p[p.length-1];
+        if (first.x !== last.x || first.y !== last.y) p.push({x:first.x, y:first.y});
+      }
+      return polys;
+    }
+
     // Deterministic shuffle of an array using seeded RNG
     function seededShuffle(arr, seedStr) {
       const rng = NameGen.seededRNG('style|' + seedStr);
@@ -1019,6 +1214,21 @@
     // Number of macro-regions. You can set this anywhere before generation, e.g. __state.macroRegionCount = 6;
     function getMacroRegionCount() {
       return Math.max(1, +(window.__state?.macroRegionCount ?? 3));
+    }
+
+    // --- Capital powers with disbalance ---------------------------------------
+    function computeCapitalPowers(capitals, disbalance = 0.35, seed = 'powers') {
+      const rng = NameGen.seededRNG(String(seed));
+      // draw power in [1 - d, 1 + d]; smaller -> more attractive
+      return capitals.map(() => (1 - disbalance) + rng() * (2 * disbalance));
+    }
+
+    // distance with island penalty + power
+    function effectiveCapitalDist(ax, ay, cap, capPower, cellCompId, burgCompId, overseasPenalty) {
+      const dx = ax - cap.x, dy = ay - cap.y;
+      let d = Math.hypot(dx, dy);
+      if (cellCompId !== burgCompId) d *= overseasPenalty;
+      return d * capPower;
     }
 
     // -------------------- MACRO-REGIONS (K) --------------------
@@ -1072,6 +1282,94 @@
         b.regionId = best;
       }
       window.__state.macroCapitals = caps;
+    }
+
+    // --- Azgaar-style region assignment ---------------------------------------
+    function assignRegionsAzgaar({ K, disbalance, overseasPenalty, maxManorDistPx }) {
+      const cells = window.__state.cells || [];
+      const isWater = window.__state.isWater || [];
+      const width  = +d3.select('#map').attr('width');
+      const height = +d3.select('#map').attr('height');
+
+      if (!cells.length) return null;
+
+      ensureCellPolys(cells, width, height);
+      const landComp = labelLandComponents(cells, isWater);
+
+      // Capitals (use flagged if present; else farthest-first you already have)
+      let capitals = window.__state.macroCapitals;
+      if (!capitals || capitals.length !== K) {
+        capitals = chooseMacroCapitals(K);
+        window.__state.macroCapitals = capitals;
+      }
+
+      // Capital powers
+      const mapSeed = String(window.__state?.seed ?? 'mapseed');
+      const capPowers = computeCapitalPowers(capitals, disbalance, `${mapSeed}|powers`);
+
+      // 1) Assign towns (burgs) to nearest capital by effective distance
+      const burgs = (window.__state.burgs || []).filter(b => !b.removed);
+      for (const b of burgs) {
+        const bComp = landComp[b.cellIndex ?? nearestCellIndex(cells, b.x, b.y)];
+        let bestI = 0, bestD = Infinity;
+        for (let i = 0; i < capitals.length; i++) {
+          const d = effectiveCapitalDist(b.x, b.y, capitals[i], capPowers[i], bComp, landComp[capitals[i].cellIndex ?? nearestCellIndex(cells, capitals[i].x, capitals[i].y)], overseasPenalty);
+          if (d < bestD) { bestD = d; bestI = i; }
+        }
+        b.regionId = bestI;
+      }
+
+      // 2) Assign land cells to nearest manor (town) with max distance threshold,
+      //    else FALL BACK to nearest capital so every land cell gets a region.
+      const manors = burgs.map(b => ({
+        x: b.x, y: b.y, regionId: b.regionId,
+        comp: landComp[b.cellIndex ?? nearestCellIndex(cells, b.x, b.y)]
+      }));
+      const qt = d3.quadtree().x(d => d.x).y(d => d.y).addAll(manors);
+
+      const regionOfCell = new Int32Array(cells.length); regionOfCell.fill(-1);
+
+      for (let i = 0; i < cells.length; i++) {
+        if (isWater[i]) continue;
+
+        const c = cells[i], compId = landComp[i];
+
+        // Manor step (fast nearest in screen coords)
+        const nearest = qt.find(c.cx, c.cy); // unbounded nearest
+        let regionId = -1;
+
+        if (nearest) {
+          let d = Math.hypot(c.cx - nearest.x, c.cy - nearest.y);
+          if (nearest.comp !== compId) d *= overseasPenalty;
+          if (d <= maxManorDistPx) regionId = nearest.regionId; // adopt manor's region
+        }
+
+        // Fallback to capital (ensures coverage for small islands / remote cells)
+        if (regionId === -1) {
+          let bestI = 0, bestD = Infinity;
+          for (let k = 0; k < capitals.length; k++) {
+            const cap = capitals[k];
+            const capComp = landComp[cap.cellIndex ?? nearestCellIndex(cells, cap.x, cap.y)];
+            const d = effectiveCapitalDist(c.cx, c.cy, cap, capPowers[k], compId, capComp, overseasPenalty);
+            if (d < bestD) { bestD = d; bestI = k; }
+          }
+          regionId = bestI;
+        }
+
+        regionOfCell[i] = regionId;
+      }
+
+      return { regionOfCell, landComp, capitals, capPowers };
+    }
+
+    // helper: fallback nearest cell index by brute force (rarely hot)
+    function nearestCellIndex(cells, x, y) {
+      let best = 0, bestD2 = Infinity;
+      for (let i = 0; i < cells.length; i++) {
+        const dx = cells[i].cx - x, dy = cells[i].cy - y, d2 = dx*dx + dy*dy;
+        if (d2 < bestD2) { bestD2 = d2; best = i; }
+      }
+      return best;
     }
 
     // -------------------- REGIONAL STYLES + NAME ASSIGNMENT --------------------
@@ -1193,113 +1491,112 @@
       return regionNames;
     }
 
-    // Build region polygons in GeoJSON-ish format: [ [ [x,y], ... ] , ... ]
-    // Now uses macro-regions with proper naming
-    function getStatePolys() {
-      // Use macro-regions if available, otherwise fall back to cell clusters
-      const caps = window.__state?.macroCapitals;
-      if (caps && caps.length > 0) {
-        // Use macro-regions with proper names
-        const regionNames = generateRegionNames();
-        const cells = window.__state?.cells || [];
-        const isWater = window.__state?.isWater || [];
-        
-        // Create region polygons based on nearest capital assignment
-        const regionCells = new Array(caps.length).fill().map(() => []);
-        
-        // Assign each land cell to nearest capital
-        for (let i = 0; i < cells.length; i++) {
-          if (isWater[i]) continue;
-          
-          let bestRegion = 0;
-          let bestDist = Infinity;
-          
-          for (let j = 0; j < caps.length; j++) {
-            const cap = caps[j];
-            const dx = cells[i].cx - cap.x;
-            const dy = cells[i].cy - cap.y;
-            const dist = dx*dx + dy*dy;
-            if (dist < bestDist) {
-              bestDist = dist;
-              bestRegion = j;
-            }
-          }
-          
-          regionCells[bestRegion].push(cells[i]);
-        }
-        
-        // Create polygons for each region
-        return caps.map((cap, i) => {
-          const cells = regionCells[i];
-          if (cells.length === 0) {
-            // Fallback to simple point representation
-            return {
-              id: i,
-              name: regionNames[i] || `Region ${i + 1}`,
-              rings: [[[cap.x, cap.y]]],
-              capital: cap
-            };
-          }
-          
-          // Create a polygon from the cell centroids
-          const points = cells.map(c => [c.cx, c.cy]);
-          
-          // Simple convex hull approximation (for now)
-          // In a more sophisticated version, you could use proper polygon simplification
-          const rings = [points];
-          
-          return {
-            id: i,
-            name: regionNames[i] || `Region ${i + 1}`,
-            rings: rings,
-            capital: cap
-          };
-        });
-      }
+    function computeAndDrawRegions() {
+      // console.log('computeAndDrawRegions called');
+      const cells = window.__state.cells || [];
+      const isWater = window.__state.isWater || [];
       
-      // Fallback: Create regions based on cell clusters (original logic)
+      // console.log('Cells:', cells.length, 'Water cells:', isWater.length);
+      
+      // Only proceed if we have valid data
+      if (!cells.length || !isWater.length) {
+        console.warn('No valid cell data for region computation');
+        return;
+      }
+
+      const K = Math.max(1, +(document.getElementById('regionCount')?.value ?? (window.__state?.macroRegionCount ?? 3)));
+      window.__state.macroRegionCount = K;
+      console.log('Region count K:', K);
+
+      const disbalance = +document.getElementById('disbalanceInput')?.value || 0.35;
+      const overseasPenalty = +document.getElementById('overseasPenaltyInput')?.value || 2.0;
+      const maxManorDistPx = +document.getElementById('maxManorDistInput')?.value || 120;
+      console.log('Parameters:', { disbalance, overseasPenalty, maxManorDistPx });
+
+      const res = assignRegionsAzgaar({ K, disbalance, overseasPenalty, maxManorDistPx });
+      if (!res) {
+        console.warn('assignRegionsAzgaar returned null');
+        return;
+      }
+      const { regionOfCell } = res;
+      console.log('Region assignment complete, regions:', new Set(regionOfCell.filter(r => r >= 0)).size);
+
+      // Build boundary segments per region and stitch into rings
+      const segsByRegion = buildRegionSegments(cells, isWater, regionOfCell);
+      console.log('Built segments for regions:', segsByRegion.size);
+
+      // Draw region fills (one <path> per stitched ring; grouped per region)
+      const g = d3.select('#regions');
+      g.selectAll('*').remove();
+
+      const overlay = g.append('g').attr('class', 'overlay'); // <- stitched polygons/tint
+      const regionIds = Array.from(segsByRegion.keys()).sort((a,b)=>a-b);
+      console.log('Drawing regions:', regionIds);
+      
+      regionIds.forEach((rid, idx) => {
+        const segs = segsByRegion.get(rid);
+        if (!segs || !segs.length) {
+          console.warn('No segments for region', rid);
+          return;
+        }
+        const rings = segmentsToRings(segs);
+        console.log(`Region ${rid}: ${rings.length} rings`);
+
+        const palette = d3.schemeTableau10 || d3.schemeCategory10;
+        const color = palette[rid % palette.length];
+        const line = d3.line().x(d=>d.x).y(d=>d.y);
+
+        overlay.selectAll(`path.r${rid}`).data(rings).join('path')
+          .attr('class', `r${rid}`)
+          .attr('d', r => line(r) + 'Z')
+          .attr('fill', color)
+          .attr('fill-rule', 'evenodd')
+          .attr('opacity', 0.25)
+          .attr('stroke', 'rgba(0,0,0,0.15)')
+          .attr('stroke-width', 0.8)
+          .attr('vector-effect','non-scaling-stroke');
+      });
+      
+      console.log('Region rendering complete');
+
+      // Update region label data & draw (uses your polylabel-based code)
+      // getStatePolys will now prefer macro-regions below if you update it as follows.
+      window.__state.regionOfCell = regionOfCell;
+      
+      // after drawing overlay, refresh per-cell region colors
+      window.__state.applyRegionCellFills(window.__state.regionOfCell, d3.schemeTableau10 || d3.schemeCategory10);
+      
+      // keep the currently selected view
+      window.__state.setViewMode(window.__state.currentViewMode);
+    }
+
+    // Build region polygons in GeoJSON-ish format: [ [ [x,y], ... ] , ... ]
+    // Now uses actual computed regions from Azgaar-style assignment
+    function getStatePolys() {
       const cells = window.__state?.cells || [];
       const isWater = window.__state?.isWater || [];
-      
-      // Create regions based on connected land cell clusters
-      const visited = new Set();
-      const regions = [];
-      
+      const roc = window.__state?.regionOfCell; // Int32Array from assignment
+      if (!roc || !cells.length) return [];
+
+      // group cells by region id (>=0 only)
+      const byR = new Map();
       for (let i = 0; i < cells.length; i++) {
-        if (visited.has(i) || isWater[i]) continue;
-        
-        // Flood fill to find connected land region
-        const region = [];
-        const queue = [i];
-        visited.add(i);
-        
-        while (queue.length > 0) {
-          const cellIdx = queue.shift();
-          const cell = cells[cellIdx];
-          region.push(cellIdx);
-          
-          // Add unvisited land neighbors
-          for (const neighborIdx of cell.neighbors) {
-            if (!visited.has(neighborIdx) && !isWater[neighborIdx]) {
-              visited.add(neighborIdx);
-              queue.push(neighborIdx);
-            }
-          }
-        }
-        
-        // Only create regions with significant size
-        if (region.length > 50) {
-          const regionCells = region.map(idx => cells[idx]);
-          const rings = [regionCells.map(c => [c.cx, c.cy])];
-          regions.push({
-            id: regions.length,
-            name: `Region ${regions.length + 1}`,
-            rings: rings
-          });
-        }
+        const r = roc[i];
+        if (r < 0 || isWater[i]) continue;
+        if (!byR.has(r)) byR.set(r, []);
+        byR.get(r).push(i);
       }
-      
-      return regions;
+
+      // For each region, rebuild boundary segments → rings
+      const out = [];
+      const segsByRegion = buildRegionSegments(cells, isWater, roc);
+      for (const [rid, segs] of segsByRegion) {
+        const rings = segmentsToRings(segs);
+        // Convert to [ [ [x,y], ... ] ] form expected by computeRegionLabelData
+        const ringPts = rings.map(r => r.map(p => [p.x, p.y]));
+        out.push({ id: rid, name: `Region ${rid+1}`, rings: ringPts });
+      }
+      return out;
     }
 
     // Region label dataset via pole of inaccessibility (polylabel)
@@ -1312,11 +1609,11 @@
         
         try {
           // polylabel input is array of rings, each ring is array of [x,y]
-          if (typeof polylabel === 'function') {
+          if (typeof polylabel === 'function' && rings && rings.length >= 3) {
             const p = polylabel([rings], 1.5); // precision in pixels
             return { id: s.id, name: s.name, x: p[0], y: p[1] };
           } else {
-            // Fallback to centroid if polylabel is not available
+            // Fallback to centroid if polylabel is not available or invalid polygon
             const centroid = d3.polygonCentroid(rings);
             return { id: s.id, name: s.name, x: centroid[0], y: centroid[1] };
           }
@@ -1770,33 +2067,33 @@
         });
         
         // Debug logging
-        console.log('ProgressManager.init() called');
-        console.log('overlay:', this.overlay);
-        console.log('fill:', this.fill);
-        console.log('text:', this.text);
-        console.log('detail:', this.detail);
+        // console.log('ProgressManager.init() called');
+        // console.log('overlay:', this.overlay);
+        // console.log('fill:', this.fill);
+        // console.log('text:', this.text);
+        // console.log('detail:', this.detail);
       },
       
       show() {
-        console.log('ProgressManager.show() called');
+        // console.log('ProgressManager.show() called');
         if (this.overlay) {
           this.overlay.style.display = 'flex';
           this.isVisible = true;
-          console.log('Progress overlay shown');
+          // console.log('Progress overlay shown');
           
           // Force a repaint to ensure visibility
           this.overlay.offsetHeight;
         } else {
-          console.log('Progress overlay not found!');
+          // console.log('Progress overlay not found!');
         }
       },
       
       hide() {
-        console.log('ProgressManager.hide() called');
+        // console.log('ProgressManager.hide() called');
         if (this.overlay) {
           this.overlay.style.display = 'none';
           this.isVisible = false;
-          console.log('Progress overlay hidden');
+          // console.log('Progress overlay hidden');
         }
       },
       
@@ -1872,10 +2169,10 @@
         if ('serviceWorker' in navigator) {
           navigator.serviceWorker.register('/sw.js')
             .then(registration => {
-              console.log('ServiceWorker registration successful');
+              // console.log('ServiceWorker registration successful');
             })
             .catch(err => {
-              console.log('ServiceWorker registration failed: ', err);
+              // console.log('ServiceWorker registration failed: ', err);
             });
         }
         
@@ -1889,18 +2186,10 @@
 
         // Add event listener for apply region count button
         document.getElementById('applyRegionCount')?.addEventListener('click', () => {
-          const k = +document.getElementById('regionCount').value || 3;
-          window.__state.macroRegionCount = Math.max(1, Math.min(20, k));
-          // Re-pick capitals & regenerate names
-          const K = window.__state.getMacroRegionCount();
-          const caps = window.__state.chooseMacroCapitals(K);
-          window.__state.assignMacroRegions(caps);
-          window.__state.regenerationCount = (window.__state.regenerationCount || 0) + 1;
-          window.__state.generateRegionalNames({ renameAll: true });
+          window.__state.macroRegionCount = Math.max(1, Math.min(20, +document.getElementById('regionCount').value || 3));
+          window.__state.computeAndDrawRegions();
           window.__state.renderBurgLabels();
-          window.__state.renderRegionLabels();
-          updateLabelPositions(currentTransform);
-          window.__state.logCurrentStyles(); // Log current style assignments
+          updateLabelPositions(window.currentTransform || d3.zoomIdentity);
         });
       });
       
@@ -1947,7 +2236,7 @@
     }
 
     // State we expose for tests/debugging
-    window.__state = { cells: null, delaunay: null, voronoi: null, svg: null, add: null, recolor: null, autoSeed: null, drawCoastlines: null, applyBorder: null, borderPx: 0, generate: generate, burgs: [], regenerationCount: 0, chooseMacroCapitals: null, assignMacroRegions: null, getMacroRegionCount: null, buildRegionStyles: null, generateRegionNames: null };
+    window.__state = { cells: null, delaunay: null, voronoi: null, svg: null, add: null, recolor: null, autoSeed: null, drawCoastlines: null, applyBorder: null, borderPx: 0, generate: generate, burgs: [], regenerationCount: 0, chooseMacroCapitals: null, assignMacroRegions: null, getMacroRegionCount: null, buildRegionStyles: null, generateRegionNames: null, logCurrentStyles: null, assignRegionsAzgaar: null, computeAndDrawRegions: null };
 
     // Export functions (will be defined later)
     window.saveSVG = null;
@@ -1996,6 +2285,9 @@
     trailDensityOutput.value = trailDensityInput.valueAsNumber;
     slopePenaltyOutput.value = slopePenaltyInput.valueAsNumber;
     riverPenaltyOutput.value = riverPenaltyInput.valueAsNumber;
+    disbalanceOutput.value = disbalanceInput.valueAsNumber;
+    overseasPenaltyOutput.value = overseasPenaltyInput.valueAsNumber;
+    maxManorDistOutput.value = maxManorDistInput.valueAsNumber;
 
     generate();
 
@@ -2070,6 +2362,7 @@
       const riversShade = zoomRoot.append('g').attr('class', 'riversShade');
       const riversG = zoomRoot.append('g').attr('class', 'rivers');
       const coastG = zoomRoot.append('g').attr('class', 'coastline');
+      const regionsG = zoomRoot.append('g').attr('id', 'regions'); // below routes
       const routesG = zoomRoot.append('g').attr('id', 'routes');
       // Burgs go outside zoomRoot so they can be counter-scaled independently
       const burgsG = svg.append('g').attr('id', 'burgs');
@@ -2096,7 +2389,7 @@
         burgGroups.attr('transform', d => `translate(${t.applyX(d.x)},${t.applyY(d.y)})`);
         
         if (DEBUG && burgGroups.size() > 0) {
-          console.log(`Updated ${burgGroups.size()} burg positions with transform:`, t);
+          // console.log(`Updated ${burgGroups.size()} burg positions with transform:`, t);
         }
           
         // Update any standalone burg circles (if they exist)
@@ -2167,15 +2460,15 @@
 
       // Get the world seed for reproducible generation
       const seedInput = document.getElementById('seedInput').value;
-      console.log('Seed input value:', seedInput, 'type:', typeof seedInput);
+      // console.log('Seed input value:', seedInput, 'type:', typeof seedInput);
       // Always generate a new random seed unless user has explicitly set one
       const worldSeed = seedInput ? +seedInput : Math.floor(Math.random() * 999999) + 1;
-      console.log('Generated world seed:', worldSeed);
+      // console.log('Generated world seed:', worldSeed);
       
       // Update the seed input to show the current seed (if it was random)
       if (!seedInput) {
         document.getElementById('seedInput').value = worldSeed;
-        console.log('Updated seed input to:', worldSeed);
+        // console.log('Updated seed input to:', worldSeed);
       }
       const rand = mulberry32(worldSeed);
       
@@ -2267,7 +2560,8 @@
         .attr('id', d => d.index)
         .attr('d', d => 'M' + d.poly.map(p => p.join(',')).join('L') + 'Z')
         .attr('fill', '#000')
-        .attr('fill-rule', 'nonzero');
+        .attr('fill-rule', 'nonzero')
+        .attr('stroke', 'none'); // Ensure no cell borders from initial creation
       }
 
       // Keep shared state for tests and other functions
@@ -2295,6 +2589,135 @@
       window.__state.buildRegionStyles = buildRegionStyles;
       window.__state.generateRegionNames = generateRegionNames;
       window.__state.logCurrentStyles = logCurrentStyles;
+      window.__state.assignRegionsAzgaar = assignRegionsAzgaar;
+      window.__state.computeAndDrawRegions = computeAndDrawRegions;
+
+      // Add test function for debugging regions
+      window.__state.testRegions = () => {
+        // console.log('Testing region computation...');
+        if (window.__state.computeAndDrawRegions) {
+          try {
+            window.__state.computeAndDrawRegions();
+            // console.log('Region test completed');
+          } catch (error) {
+            console.error('Region test failed:', error);
+          }
+        } else {
+          console.error('computeAndDrawRegions not available');
+        }
+      };
+
+      // View mode functionality
+      window.__state.currentViewMode = 'terrain'; // 'terrain' | 'regions'
+
+      window.__state.setViewMode = function(mode){
+        window.__state.currentViewMode = mode;
+        const isRegions = mode === 'regions';
+        document.body.classList.toggle('view-mode-regions', isRegions);
+        document.body.classList.toggle('view-mode-terrain', !isRegions);
+
+        const raster = document.querySelector('#mapCells image');
+        const overlay = document.querySelector('#regions .overlay');
+        if (raster) raster.hidden = isRegions;
+        if (overlay) overlay.hidden = isRegions;
+
+        const btn = document.getElementById('viewToggleBtn');
+        if (btn) btn.textContent = (mode === 'regions') ? 'Show Height Map' : 'Show Regions';
+
+        repaintCellsForMode(mode);
+      }
+
+      function repaintCellsForMode(mode) {
+        const isRegions = mode === 'regions';
+        document.querySelectorAll('#regions .mapCell').forEach(cell => {
+          const fill = isRegions ? cell.dataset.regionFill : cell.dataset.terrainFill;
+          if (fill) cell.setAttribute('fill', fill);
+          // Remove strokes in both modes to prevent cell borders
+          cell.setAttribute('stroke', 'none');
+        });
+      }
+
+      // initial state
+      window.__state.setViewMode('terrain');
+
+      document.getElementById('viewToggleBtn')?.addEventListener('click', () => {
+        window.__state.setViewMode(window.__state.currentViewMode === 'regions' ? 'terrain' : 'regions');
+      });
+
+      // Simple region label renderer
+      window.__state.renderSimpleRegionLabels = () => {
+        const cells = window.__state.cells || [];
+        const roc = window.__state.regionOfCell;
+        if (!roc || !cells.length) return;
+        
+        // Group cells by region
+        const regionCells = new Map();
+        for (let i = 0; i < cells.length; i++) {
+          const regionId = roc[i];
+          if (regionId >= 0) {
+            if (!regionCells.has(regionId)) regionCells.set(regionId, []);
+            regionCells.get(regionId).push(cells[i]);
+          }
+        }
+        
+        // Calculate centroids and render labels
+        const labelsG = d3.select('.labels-regions');
+        labelsG.selectAll('*').remove();
+        
+        const labelData = [];
+        regionCells.forEach((cells, regionId) => {
+          if (cells.length === 0) return;
+          
+          // Calculate centroid
+          let x = 0, y = 0;
+          for (const cell of cells) {
+            x += cell.cx;
+            y += cell.cy;
+          }
+          x /= cells.length;
+          y /= cells.length;
+          
+          labelData.push({ x, y, text: `Region ${regionId + 1}` });
+        });
+        
+        // Add labels with proper data binding
+        labelsG.selectAll('text')
+          .data(labelData)
+          .join('text')
+          .attr('x', d => d.x)
+          .attr('y', d => d.y)
+          .text(d => d.text)
+          .attr('class', 'region-label');
+        
+        // console.log('Simple region labels rendered');
+      };
+
+      // Note: Region computation will be called after map generation is complete
+
+    // Helper function to apply region cell fills
+    window.__state.applyRegionCellFills = function(regionOfCell, palette) {
+      const sel = d3.select('#mapCells').selectAll('path.mapCell');
+
+      // cache terrain fill once
+      sel.each(function(d, i) {
+        const me = d3.select(this);
+        if (!me.attr('data-terrain-fill')) {
+          me.attr('data-terrain-fill', me.attr('fill') || '#ccc');
+        }
+      });
+
+      // assign region fill for land cells (water keeps terrain fill)
+      sel.each(function(d, i) {
+        const me = d3.select(this);
+        const rid = regionOfCell?.[i];
+        if (rid >= 0) {
+          const color = palette[rid % palette.length];
+          me.attr('data-region-fill', color);
+        } else {
+          me.attr('data-region-fill', null);
+        }
+      });
+    };
 
           // Initialize reusable typed arrays for performance
     window.__state.tmp = {
@@ -2506,7 +2929,7 @@
 
       // --- Template Executor ---
       function applyTemplate(templateKey, uiVals, seed) {
-        console.debug('Templates keys:', Object.keys(templates));
+        // console.debug('Templates keys:', Object.keys(templates));
         const tpl = templates[templateKey];
         if (!tpl) {
           console.error(`Template '${templateKey}' not found`);
@@ -3118,6 +3541,7 @@
                   }
                 }
               })
+              .attr('stroke', 'none') // Ensure no cell borders after recoloring
               .style('fill', d => {
                 if (isWater[d.index]) {
                   return 'none';
@@ -3168,6 +3592,9 @@
             
             setTimeout(() => {
               generateBurgs();
+              
+              // Compute and draw regions after burgs are generated
+              // Note: These functions will be called after they're defined and assigned to window.__state
               
               ProgressManager.setPhase('routes');
               ProgressManager.update(90, 'Building routes...', 'Computing road and sea networks...');
@@ -3511,9 +3938,9 @@
         
         // Debug: Check if rivers exist before export
         const originalRivers = svgNode.querySelectorAll('g.rivers path, g.riversShade path');
-        console.log(`Original rivers before export: ${originalRivers.length} paths`);
+        // console.log(`Original rivers before export: ${originalRivers.length} paths`);
         if (originalRivers.length === 0) {
-          console.log('No rivers found! Computing rivers...');
+                      // console.log('No rivers found! Computing rivers...');
           if (window.__state.computeRoutes) {
             window.__state.computeRoutes();
           }
@@ -3521,7 +3948,7 @@
         
         // Debug: Check if coastlines exist before export
         const originalCoastlines = svgNode.querySelectorAll('g.coastline path.coast');
-        console.log(`Original coastlines before export: ${originalCoastlines.length} paths`);
+        // console.log(`Original coastlines before export: ${originalCoastlines.length} paths`);
         if (originalCoastlines.length === 0) {
           console.log('No coastlines found! Computing coastlines...');
           if (window.__state.drawCoastlines) {
@@ -4370,7 +4797,7 @@
         // Debug: Log lake information
         const lakes = window.__state.lakes || [];
         if (lakes.length > 0) {
-          console.log(`Found ${lakes.length} lakes:`);
+          // console.log(`Found ${lakes.length} lakes:`);
           lakes.forEach((lake, i) => {
             const outletValid = lake.outlet >= 0 && lake.outlet < cells.length;
             const outletIsLake = outletValid && window.__state.isLake && window.__state.isLake[lake.outlet] === 1;
@@ -4548,7 +4975,7 @@
         
         const isLand = cells.map((c,i) => !isWaterArr[i]);
         
-        console.log(`Drawing coastlines - Sea level: ${sea}, Land cells: ${isLand.filter(l => l).length}, Water cells: ${isWaterArr.filter(w => w).length}`);
+        // console.log(`Drawing coastlines - Sea level: ${sea}, Land cells: ${isLand.filter(l => l).length}, Water cells: ${isWaterArr.filter(w => w).length}`);
         
         // Update progress during coastline computation
         ProgressManager.update(72, 'Drawing coastlines...', 'Finding coastline edges...');
@@ -4740,6 +5167,7 @@
           // Apply clipping to both render modes
           mapCells.select('image').attr('clip-path', 'url(#landClip)');         // canvas/raster mode
           mapCells.selectAll('path.mapCell').attr('clip-path', 'url(#landClip)'); // SVG cell mode
+          d3.select('#regions').attr('clip-path', 'url(#landClip)');            // region fills
           
           // Build ocean mask (visible everywhere except land)
           const oceanMask = defs.select('#oceanMask').empty()
@@ -5036,7 +5464,7 @@
     function buildCapitalRoads(capitals) {
       if (capitals.length < 2) return;
       
-      console.log(`Building capital road network for ${capitals.length} capitals`);
+              // console.log(`Building capital road network for ${capitals.length} capitals`);
       
       // Create edges between all capital pairs
       const edges = [];
@@ -5115,7 +5543,7 @@
       
       // Debug: Log port detection for some burgs
       if (Math.random() < 0.1) { // Log 10% of burgs
-        console.log(`Burg ${id} port detection: minWaterDist=${minWaterDist.toFixed(1)}px, isPort=${isPort}, type=${type}`);
+        // console.log(`Burg ${id} port detection: minWaterDist=${minWaterDist.toFixed(1)}px, isPort=${isPort}, type=${type}`);
       }
 
       // Determine if it's on a river
@@ -5179,7 +5607,7 @@
       if (DEBUG) console.log(`Found ${landCells.length} land cells suitable for burgs`);
       
       if (landCells.length === 0) {
-        console.log('No suitable land cells for burgs');
+        // console.log('No suitable land cells for burgs');
         window.__state.burgs = [];
         generateRegionalNames({ renameAll: false });
         renderBurgs();
@@ -5202,7 +5630,7 @@
       if (DEBUG) console.log(`Found ${goodCapitalCandidates.length} cells with good capital scores (>0.15)`);
       
       if (goodCapitalCandidates.length === 0) {
-        console.log('No suitable cells found for capitals');
+        // console.log('No suitable cells found for capitals');
         window.__state.burgs = [];
         generateRegionalNames({ renameAll: false });
         renderBurgs();
@@ -5306,7 +5734,7 @@
       burgsG.selectAll('*').remove();
       
       if (!window.__state.burgs || window.__state.burgs.length === 0) {
-        console.log('No burgs to render');
+        // console.log('No burgs to render');
         return;
       }
 
@@ -5559,16 +5987,16 @@
 
           // Finally, position everyone (those hidden just won't show)
           burgLabelsG.selectAll('text')
-            .attr('x', d => d.px != null ? d.px : t.applyX(d.x) + (d.ox || 0))
-            .attr('y', d => d.py != null ? d.py : t.applyY(d.y) + (d.oy || 0));
+            .attr('x', d => d && (d.px != null ? d.px : (d.x != null ? t.applyX(d.x) + (d.ox || 0) : 0)))
+            .attr('y', d => d && (d.py != null ? d.py : (d.y != null ? t.applyY(d.y) + (d.oy || 0) : 0)));
         }
 
         // Regions: always from map coords (no drag here)
         const regionLabelsG = d3.select('.labels-regions');
         if (!regionLabelsG.empty()) {
           regionLabelsG.selectAll('text')
-            .attr('x', d => t.applyX(d.x))
-            .attr('y', d => t.applyY(d.y));
+            .attr('x', d => d && d.x != null ? t.applyX(d.x) : 0)
+            .attr('y', d => d && d.y != null ? t.applyY(d.y) : 0);
         }
       } catch (error) {
         console.error('Error updating label positions:', error);
@@ -5896,7 +6324,7 @@
         for (const n of c.neighbors) used[n] = 1;
       }
 
-      console.log(`Generated ${cities.length} cities using coastal/river economic scoring`);
+      // console.log(`Generated ${cities.length} cities using coastal/river economic scoring`);
       return cities;
     }
 
@@ -5980,7 +6408,7 @@
         for (const n of c.neighbors) used[n] = 1;
       }
 
-      console.log(`Generated ${villages.length} villages using inland/road economic scoring`);
+      // console.log(`Generated ${villages.length} villages using inland/road economic scoring`);
       return villages;
     }
 
@@ -6001,7 +6429,7 @@
         
         if (ports.length === 0) {
           // No ports on this island - find best candidate
-          console.log(`Island ${islandIndex} has no ports, finding best candidate...`);
+          // console.log(`Island ${islandIndex} has no ports, finding best candidate...`);
           
           let bestPortCandidate = null;
           let bestPortScore = -1;
@@ -6039,7 +6467,7 @@
             bestPortCandidate.isSignificantPort = true;
             console.log(`Promoted ${bestPortCandidate.type} ${bestPortCandidate.id} to port on island ${islandIndex}`);
           } else {
-            console.log(`No suitable port candidate found on island ${islandIndex}`);
+            // console.log(`No suitable port candidate found on island ${islandIndex}`);
           }
         }
       }
@@ -6083,7 +6511,7 @@
         const islandPorts = islandGroups[capitalIsland].filter(burg => burg.isSignificantPort);
         
         if (islandPorts.length === 0) {
-          console.log(`No ports on capital ${capital.id}'s island, skipping connection`);
+          // console.log(`No ports on capital ${capital.id}'s island, skipping connection`);
           continue;
         }
         
@@ -6100,7 +6528,7 @@
         }
         
         if (nearestPort) {
-          console.log(`Connecting capital ${capital.id} to port ${nearestPort.id} (distance: ${minDist.toFixed(1)}px)`);
+          // console.log(`Connecting capital ${capital.id} to port ${nearestPort.id} (distance: ${minDist.toFixed(1)}px)`);
           
           // Build road from capital to port
           const landGraph = window.__state.landGraph;
@@ -7310,11 +7738,11 @@
       
       // Debug: show which burgs are in which component
       components.forEach((component, i) => {
-        console.log(`Component ${i}:`, component.map(b => `burg ${b.id} (cell ${b.cell})`));
+        // console.log(`Component ${i}:`, component.map(b => `burg ${b.id} (cell ${b.cell})`));
       });
       
-      // Debug: show burg positions to verify they're on different landmasses
-      console.log('Burg positions:', burgs.map(b => ({ id: b.id, cell: b.cell, x: cells[b.cell].cx, y: cells[b.cell].cy })));
+              // Debug: show burg positions to verify they're on different landmasses
+        // console.log('Burg positions:', burgs.map(b => ({ id: b.id, cell: b.cell, x: cells[b.cell].cx, y: cells[b.cell].cy })));
       
       return components;
     }
@@ -7363,10 +7791,10 @@
         
         for (let i = 0; i < componentHubs.length; i++) {
           for (let j = i + 1; j < componentHubs.length; j++) {
-            console.log(`Trying path from hub ${i} (cell ${componentHubs[i].cell}) to hub ${j} (cell ${componentHubs[j].cell})`);
+            // console.log(`Trying path from hub ${i} (cell ${componentHubs[i].cell}) to hub ${j} (cell ${componentHubs[j].cell})`);
             const path = shortestPath(componentHubs[i].cell, componentHubs[j].cell, landGraph, usedEdges, burgCells);
             if (path) {
-              console.log(`Found path: ${path.length} cells`);
+                              // console.log(`Found path: ${path.length} cells`);
               
               // Calculate weighted cost using edge weights from land graph
               const cost = calculatePathCost(path, landGraph);
@@ -7503,7 +7931,7 @@
             .sort((a, b) => a.dist - b.dist)
             .slice(0, maxConnections);
           
-          console.log(`Burg ${burg.id} (cell ${burg.cell}): found ${nearby.length} nearby burgs within ${maxDistance}px`);
+          // console.log(`Burg ${burg.id} (cell ${burg.cell}): found ${nearby.length} nearby burgs within ${maxDistance}px`);
         
           nearby.forEach(item => {
             const path = shortestPath(burg.cell, item.burg.cell, landGraph, usedEdges, burgCells);
@@ -8625,17 +9053,17 @@
       
       // Optional: Add one-liner after rendering to confirm you drew something
       const seaPathCount = document.querySelectorAll('#routes .searoutes path').length;
-      console.log(`Sea routes rendered: ${seaPathCount} paths`);
+              // console.log(`Sea routes rendered: ${seaPathCount} paths`);
       if (seaPathCount > 0) {
-        console.log('Sea route paths found:', document.querySelectorAll('#routes .searoutes path'));
+                  // console.log('Sea route paths found:', document.querySelectorAll('#routes .searoutes path'));
         // Debug: Check if paths are actually visible
         const firstPath = document.querySelector('#routes .searoutes path');
         if (firstPath) {
-          console.log('First sea route path:', firstPath);
-          console.log('Path d attribute:', firstPath.getAttribute('d'));
-          console.log('Path stroke:', firstPath.getAttribute('stroke'));
-          console.log('Path stroke-width:', firstPath.getAttribute('stroke-width'));
-          console.log('Path computed style:', window.getComputedStyle(firstPath).stroke);
+          // console.log('First sea route path:', firstPath);
+                      // console.log('Path d attribute:', firstPath.getAttribute('d'));
+            // console.log('Path stroke:', firstPath.getAttribute('stroke'));
+            // console.log('Path stroke-width:', firstPath.getAttribute('stroke-width'));
+            // console.log('Path computed style:', window.getComputedStyle(firstPath).stroke);
         }
       }
       
@@ -8671,6 +9099,29 @@
         // Hide progress overlay after a short delay to show completion
         setTimeout(() => {
           ProgressManager.hide();
+          
+          // Compute and draw regions after map generation is complete
+          if (window.__state.computeAndDrawRegions) {
+            try {
+              // console.log('Computing Azgaar-style regions...');
+              window.__state.computeAndDrawRegions();
+              
+              // Only call render functions if they exist
+              if (window.__state.renderSimpleRegionLabels) {
+                window.__state.renderSimpleRegionLabels();
+              }
+              if (window.__state.renderBurgLabels) {
+                window.__state.renderBurgLabels();
+              }
+              if (typeof updateLabelPositions === 'function') {
+                updateLabelPositions(window.currentTransform || d3.zoomIdentity);
+              }
+              // console.log('Regions computed successfully');
+            } catch (error) {
+              console.warn('Error computing regions:', error);
+              // Continue without regions if there's an error
+            }
+          }
         }, 1000);
         
         // If there's a pending request, run once more
