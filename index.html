@@ -6406,11 +6406,26 @@
     }
 
     function cellMoveCost(u, v, cells) {
-      // TODO: refine with slope & river crossing penalties
-      // For now Euclidean center distance
+      // Base Euclidean step
       const ax = cells[u].cx, ay = cells[u].cy;
       const bx = cells[v].cx, by = cells[v].cy;
-      return Math.hypot(ax - bx, ay - by);
+      const dist = Math.hypot(ax - bx, ay - by);
+
+      // Slope penalty (favor flatter ground)
+      const su = cells[u].localSlope ?? 0;
+      const sv = cells[v].localSlope ?? 0;
+      const slope = (su + sv) * 0.5; // 0..1 (flatter→0)
+      const slopeMult = 1 + slope * ((CONFIG?.roads?.slopePenalty ?? 1.2) - 1); // e.g., 1..1.2
+
+      // River crossing / adjacency penalty (approximation)
+      const riverAdj = (cells[u].hasRiver ? 1 : 0) + (cells[v].hasRiver ? 1 : 0);
+      const riverMult = riverAdj > 0 ? (1 + (CONFIG?.roads?.riverCrossPenalty ?? 1.0)) : 1; // e.g., +1.0
+
+      // Existing road reuse discount (0.15) — if target cell already has a road
+      const used = cells[v].pathUsed ?? 0;
+      const reuseMult = used > 0 ? 0.15 : 1;
+
+      return dist * slopeMult * riverMult * reuseMult;
     }
 
     function aStarCells(start, goal, graph, cells) {
