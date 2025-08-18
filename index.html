@@ -32,6 +32,20 @@
     /* ensure export-friendly */
     #routes path { vector-effect: non-scaling-stroke; }
 
+    /* Label styling */
+    .labels-burgs text, .labels-regions text {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-size: 13px;
+      fill: #1f2a44;
+      paint-order: stroke fill;
+      stroke: #fff;
+      stroke-width: 3px;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+    .labels-burgs text.capital { font-weight: 700; letter-spacing: .5px; }
+    .labels-regions text { font-size: 18px; opacity: .9; }
+
     /* Progress overlay styling */
     .progress-overlay {
       position: absolute;
@@ -288,6 +302,7 @@
     <div class="row">
       <button onclick="generate()" class="primary-btn">Generate Map</button>
       <button onclick="toggleSettings()" class="settings-btn">⚙️ Settings</button>
+      <button id="regenNamesBtn" class="primary-btn">Regenerate Names</button>
     </div>
 
     <div class="row">
@@ -515,6 +530,12 @@
             <input id="fertilityWeightInput" value="0.1" type="range" min="0" max="1" step="0.1" oninput="fertilityWeightOutput.value = fertilityWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
             <output id="fertilityWeightOutput">0.1</output>
           </div>
+
+          <div class="row">
+            <label>Regions:</label>
+            <input id="regionCount" type="number" min="1" max="20" value="3" style="width:4rem">
+            <button id="applyRegionCount">Apply</button>
+          </div>
         </div>
 
         <!-- Routes Tab -->
@@ -575,6 +596,8 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <!-- D3 v7 (uses d3.pointer and d3-delaunay for Voronoi) -->
   <script src="https://d3js.org/d3.v7.min.js"></script>
+  <!-- Polylabel for region label placement -->
+  <script src="https://unpkg.com/polylabel@1.1.0/polylabel.js"></script>
 
   <script>
     // Map size management function
@@ -677,6 +700,596 @@
       sea:  null,
       invalidate(type){ if (!type || type==='land') this.land=null; if (!type || type==='sea') this.sea=null; }
     };
+
+    // === LABEL HELPERS ===
+    function toScreen([x,y], t=window.currentTransform){ return [t.applyX(x), t.applyY(y)]; }
+
+    // -------------------- MARKOV NAME GENERATOR (regional) ---------------------
+    const NameGen = (() => {
+      // ---- Seeded RNG -----------------------------------------------------------
+      function xmur3(str) {
+        let h = 1779033703 ^ str.length;
+        for (let i = 0; i < str.length; i++) {
+          h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+          h = (h << 13) | (h >>> 19);
+        }
+        return () => {
+          h = Math.imul(h ^ (h >>> 16), 2246822507);
+          h = Math.imul(h ^ (h >>> 13), 3266489909);
+          return (h ^= h >>> 16) >>> 0;
+        };
+      }
+      function mulberry32(a) {
+        return function() {
+          let t = (a += 0x6D2B79F5);
+          t = Math.imul(t ^ (t >>> 15), t | 1);
+          t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+      function seededRNG(seedStr) { const s = xmur3(seedStr)(); return mulberry32(s); }
+
+      // Util RNG (seedable if you want later)
+      const rnd = (n) => Math.floor(Math.random() * n);
+
+      class Markov {
+        constructor(order = 2) { this.order = order; this.table = new Map(); }
+
+        train(words) {
+          const o = this.order;
+          for (let w of words) {
+            w = '^'.repeat(o) + w.toLowerCase() + '$';
+            for (let i = 0; i <= w.length - o - 1; i++) {
+              const key = w.slice(i, i + o);
+              const next = w[i + o];
+              if (!this.table.has(key)) this.table.set(key, {});
+              const bucket = this.table.get(key);
+              bucket[next] = (bucket[next] || 0) + 1;
+            }
+          }
+          return this;
+        }
+
+        sample(minLen = 4, maxLen = 10, maxTries = 100, rng = Math.random, temp = 1) {
+          const o = this.order;
+          const keys = Array.from(this.table.keys());
+          for (let attempt = 0; attempt < maxTries; attempt++) {
+            let out = '^'.repeat(o);
+            while (true) {
+              const bucket = this.table.get(out.slice(-o));
+              if (!bucket) break;
+              // weighted choice
+              const items = Object.entries(bucket);
+              // apply temperature: raise weights^(1/temp)
+              let total = 0;
+              const weighted = items.map(([ch, c]) => {
+                const w = Math.pow(c, 1 / Math.max(0.25, temp));
+                total += w;
+                return [ch, w];
+              });
+              let pick = rng() * total;
+              let next = '$';
+              for (const [ch, w] of weighted) { pick -= w; if (pick <= 0) { next = ch; break; } }
+              if (next === '$') break;
+              out += next;
+              const core = out.slice(o);
+              if (core.length >= maxLen) break;
+            }
+            const core = out.slice(o);
+            const clean = core.replace(/\^/g, '');
+            if (clean.length >= minLen && clean.length <= maxLen && /^[a-z' -]+$/.test(clean)) {
+              // basic vowel/consonant sanity to reject junky runs
+              if (!/(.)\1{2,}/.test(clean)) return clean;
+            }
+          }
+          return null;
+        }
+      }
+
+      function capitalize(w) {
+        if (!w) return w;
+        return w.split(/[\s-]+/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+      }
+
+      // --- Ten style packs: each with order + length bounds + seed corpus ---
+      // NOTES:
+      // - Corpora are lightweight seeds; Markov expands variety beyond them.
+      // - Feel free to extend/tune corpora any time.
+      const STYLE_PACKS = {
+        nordic: { // coastal/northern
+          order: 2, min: 4, max: 10,
+          corpus: [
+            'Skeld','Vargan','Ormstad','Haldor','Brynja','Njarvik','Fjordin',
+            'Velgr','Ragnar','Torvik','Kjeld','Svea','Eldheim','Hafn','Ulvdal',
+            'Grimstad','Hauk','Sigrid'
+          ]
+        },
+        romance: { // mediterranean/latinate
+          order: 3, min: 5, max: 11,
+          corpus: [
+            'Valeria','Montel','Rivara','Portenza','Caravano','Bellac','Serenne',
+            'Lunaro','Grazia','Vintor','Aramonte','Rosale','Meridia','Castello','Alvento'
+          ]
+        },
+        desert: { // arid/eastern
+          order: 2, min: 4, max: 10,
+          corpus: [
+            'Qasira','Zehara','Nadir','Sahir','Razeem','Falun','Azmar','Jahra','Selim',
+            'Kharif','Taybah','Samir','Maziri','Hazim','Yazira','Karim'
+          ]
+        },
+        celtic: { // isles/highlands
+          order: 2, min: 4, max: 10,
+          corpus: [
+            'Duneth','Branagh','Kellan','Fionn','Ardan','Morwen','Caerlin','Eilin','Taran',
+            'Rowan','Bryn','Aislinn','Keir','Torin','Maeve','Islay'
+          ]
+        },
+        slavic: { // continental/eastern
+          order: 2, min: 5, max: 11,
+          corpus: [
+            'Novgor','Radomir','Miroslav','Breznik','Dravina','Velika','Zagora','Stoyan',
+            'Kresna','Dobrin','Zorya','Milena','Ludvik','Petrov','Stanek'
+          ]
+        },
+        germanic: { // central
+          order: 2, min: 5, max: 11,
+          corpus: [
+            'Bergheim','Dornstadt','Kalten','Lindorf','Marburg','Rosenau','Waldsee',
+            'Greifs','Halden','Rothen','Falken','Jagerthal','Steinau','Bracken'
+          ]
+        },
+        elvish: { // airy/forested
+          order: 3, min: 5, max: 12,
+          corpus: [
+            'Lethariel','Evendel','Narial','Sylthas','Faelir','Aerendil','Eryndor',
+            'Melian','Thalanor','Ithilwen','Althoras','Sereth','Vaelion','Lorien'
+          ]
+        },
+        dwarven: { // rugged/mountain
+          order: 2, min: 4, max: 10,
+          corpus: [
+            'Khazruk','Bromdur','Thrain','Garmek','Durnbold','Stonhelm','Kragmar',
+            'Beldran','Morgrin','Grundar','Torbek','Borrim','Kazgar'
+          ]
+        },
+        polynesian: { // islander
+          order: 2, min: 4, max: 10,
+          corpus: [
+            'Hanae','Makoa','Keoni','Nalani','Moana','Tane','Anuenue','Kaia','Nohea',
+            'Hilo','Kailua','Mahina','Kanoa','Nalu','Kalani'
+          ]
+        },
+        steppe: { // plains/steppe
+          order: 2, min: 4, max: 10,
+          corpus: [
+            'Temur','Batuhan','Saran','Altai','Kulan','Orhon','Yesugen','Qulan','Tengri',
+            'Erdem','Sogda','Taygan','Arslan','Borte','Sayan'
+          ]
+        }
+      };
+
+      function makeModel(style) {
+        const m = new Markov(style.order);
+        return m.train(style.corpus.map(s => s.toLowerCase()));
+      }
+
+      function uniqueSetFromExisting(burgs) {
+        const set = new Set();
+        for (const b of burgs) if (b.name) set.add(b.name.toLowerCase());
+        return set;
+      }
+
+      function generateUnique(model, used, cfg, maxAttempts = 200) {
+        const {min, max, rng = Math.random, temp = 1} = cfg;
+        for (let i = 0; i < maxAttempts; i++) {
+          const w = model.sample(min, max, 100, rng, temp);
+          if (!w) continue;
+          const c = capitalize(w);
+          if (!used.has(c.toLowerCase())) {
+            // reject near-duplicates vs. already used names
+            let clash = false;
+            for (const u of used) { if (tooSimilar(c, u)) { clash = true; break; } }
+            if (!clash) { used.add(c.toLowerCase()); return c; }
+          }
+        }
+        return 'Unnamed';
+      }
+
+      // Example: post-process a generated token depending on style
+      function stylizeName(raw, styleKey, rng = Math.random) {
+        if (!raw) return raw;
+        const r = () => rng();
+        switch (styleKey) {
+          case 'nordic':     return r()<0.25 ? raw.replace(/a/g,'aa') : raw;
+          case 'romance':    return r()<0.20 ? raw + 'a' : raw;
+          case 'desert':     return r()<0.20 && !/'/.test(raw) ? raw.slice(0,2) + "'" + raw.slice(2) : raw;
+          case 'celtic':     return r()<0.20 ? raw.replace(/th/g,'dh') : raw;
+          case 'slavic':     return r()<0.15 ? raw.replace(/v/g,'w') : raw;
+          case 'germanic':   return r()<0.20 ? raw.replace(/stein$/,'steyn') : raw;
+          case 'elvish':     return r()<0.25 ? raw.replace(/l/g,'ll') : raw;
+          case 'dwarven':    return r()<0.25 ? 'Kh' + raw : raw;
+          case 'polynesian': return r()<0.20 ? raw.replace(/k/g,'kh') : raw;
+          case 'steppe':     return r()<0.20 ? raw.replace(/a/g,'aa') : raw;
+          default:           return raw;
+        }
+      }
+
+      return { STYLE_PACKS, makeModel, generateUnique, uniqueSetFromExisting, capitalize, stylizeName, seededRNG };
+    })();
+
+    // ---- Similarity -----------------------------------------------------------
+    function levenshtein(a, b) {
+      a = a.toLowerCase(); b = b.toLowerCase();
+      const m = a.length, n = b.length;
+      if (!m || !n) return m || n;
+      const dp = new Array(n + 1);
+      for (let j = 0; j <= n; j++) dp[j] = j;
+      for (let i = 1; i <= m; i++) {
+        let prev = dp[0]; dp[0] = i;
+        for (let j = 1; j <= n; j++) {
+          const tmp = dp[j];
+          dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+          prev = tmp;
+        }
+      }
+      return dp[n];
+    }
+    function tooSimilar(a, b) {
+      const dist = levenshtein(a, b);
+      const maxLen = Math.max(a.length, b.length);
+      const norm = dist / Math.max(1, maxLen);
+      return norm <= 0.25; // reject very close variants
+    }
+
+    // ---- Label visibility -----------------------------------------------------
+    const LabelRules = {
+      capitalMinK: 0.8, // show capital labels above this zoom
+      townMinK: 1.6     // show town labels above this zoom
+    };
+
+    // ---- Collision culling ----------------------------------------------------
+    function cullOverlappingLabels(nodes) {
+      // nodes: [{x,y,text,width,height,priority, sel}] in SCREEN coords, highest priority first
+      const tree = d3.quadtree().x(d=>d.x).y(d=>d.y);
+      const kept = [];
+      for (const n of nodes) {
+        const w = n.width, h = n.height;
+        let collide = false;
+        tree.visit((quad, x1, y1, x2, y2) => {
+          const q = quad.data;
+          if (q) {
+            const dx = Math.abs(q.x - n.x);
+            const dy = Math.abs(q.y - n.y);
+            if (dx < (q.width + w) / 2 && dy < (q.height + h) / 2) { collide = true; return true; }
+          }
+          return x1 > n.x + w || x2 < n.x - w || y1 > n.y + h || y2 < n.y - h;
+        });
+        if (!collide) { kept.push(n); tree.add(n); }
+      }
+      return kept;
+    }
+
+    // Deterministic shuffle of an array using seeded RNG
+    function seededShuffle(arr, seedStr) {
+      const rng = NameGen.seededRNG('style|' + seedStr);
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    // Build a style array for K regions using STYLE_PACKS keys
+    function buildRegionStyles(k, seedStr) {
+      const keys = Object.keys(NameGen.STYLE_PACKS);
+      if (!keys.length) throw new Error('No STYLE_PACKS defined');
+      const shuffled = seededShuffle(keys, seedStr);
+      const out = [];
+      for (let i = 0; i < k; i++) out.push(NameGen.STYLE_PACKS[shuffled[i % shuffled.length]]);
+      return out;
+    }
+
+    // Number of macro-regions. You can set this anywhere before generation, e.g. __state.macroRegionCount = 6;
+    function getMacroRegionCount() {
+      return Math.max(1, +(window.__state?.macroRegionCount ?? 3));
+    }
+
+    // -------------------- MACRO-REGIONS (K) --------------------
+    function chooseMacroCapitals(k = null) {
+      if (k === null) k = getMacroRegionCount();
+      // Use flagged capitals if available; otherwise farthest-first among burgs
+      const burgs = (window.__state?.burgs || []).filter(b => !b.removed);
+      const caps = burgs.filter(b => b.capital || b.type === 'capital');
+      
+      if (caps.length >= k) {
+        return caps.slice(0, k);
+      }
+
+      // Farthest-first seeding for diversity
+      const chosen = [];
+      if (burgs.length === 0) return chosen;
+      chosen.push(burgs[Math.floor(Math.random() * burgs.length)]);
+      
+      while (chosen.length < k && chosen.length < burgs.length) {
+        let best = null, bestD = -1;
+        for (const b of burgs) {
+          if (chosen.includes(b)) continue;
+          let mind = Infinity;
+          for (const c of chosen) {
+            const dx = b.x - c.x, dy = b.y - c.y;
+            const d2 = dx*dx + dy*dy;
+            if (d2 < mind) mind = d2;
+          }
+          if (mind > bestD) { bestD = mind; best = b; }
+        }
+        if (best) {
+          chosen.push(best);
+        } else break;
+      }
+      
+      return chosen;
+    }
+
+    function assignMacroRegions(capitals) {
+      const burgs = (window.__state?.burgs || []).filter(b => !b.removed);
+      const caps = capitals.map((c, i) => ({...c, regionId: i}));
+      
+      // Nearest-capital assignment by Euclidean distance in map coords
+      for (const b of burgs) {
+        let best = 0, bestD = Infinity;
+        for (let i = 0; i < caps.length; i++) {
+          const c = caps[i];
+          const dx = b.x - c.x, dy = b.y - c.y, d2 = dx*dx + dy*dy;
+          if (d2 < bestD) { bestD = d2; best = i; }
+        }
+        b.regionId = best;
+      }
+      window.__state.macroCapitals = caps;
+    }
+
+    // -------------------- REGIONAL STYLES + NAME ASSIGNMENT --------------------
+    // Optional knobs (set near your config)
+    // Tweak variety
+    const NAME_TEMPERATURE = 1.0; // >1 = wilder, <1 = safer
+
+    function generateRegionalNames({renameAll = false} = {}) {
+      const burgs = (window.__state?.burgs || []).filter(b => !b.removed);
+      if (!burgs.length) return;
+
+      // K regions
+      const K = getMacroRegionCount();
+
+      // Capitals: use existing or choose K
+      let caps = window.__state.macroCapitals;
+      if (!caps || caps.length !== K) {
+        caps = chooseMacroCapitals(K);
+        assignMacroRegions(caps); // assigns b.regionId
+      } else {
+        assignMacroRegions(caps); // re-assign if burgs changed
+      }
+
+      // Styles: deterministic selection for this map
+      const mapSeed = String(window.__state?.seed ?? 'mapseed');
+      const regionStyles = buildRegionStyles(K, mapSeed);
+
+      // Prepare models per region style (deduplicate models by style to reuse)
+      const modelCache = new Map();
+      const models = regionStyles.map((style) => {
+        const key = JSON.stringify(style.corpus) + '|' + style.order;
+        if (!modelCache.has(key)) modelCache.set(key, NameGen.makeModel(style));
+        return modelCache.get(key);
+      });
+
+      // Used-name set (lowercased)
+      const used = NameGen.uniqueSetFromExisting(burgs);
+
+      // Generate per burg (deterministic RNG + optional stylization)
+      for (const b of burgs) {
+        if (b.lockName === true) continue;
+        if (!renameAll && b.name && b.name !== 'Unnamed') continue;
+
+        const style  = regionStyles[b.regionId % regionStyles.length];
+        const model  = models[b.regionId % models.length];
+        const seedStr = `${mapSeed}|region:${b.regionId}|burg:${b.id}`;
+        const rng = NameGen.seededRNG(seedStr);
+
+        let nm = NameGen.generateUnique(model, used, {min: style.min, max: style.max, rng, temp: 1});
+        nm = NameGen.stylizeName ? NameGen.stylizeName(nm, findStyleKey(style), rng) : nm; // optional stylization
+        b.name = nm;
+      }
+    }
+
+    // Helper: find the key for a style object (for stylizeName)
+    function findStyleKey(styleObj) {
+      for (const [k, v] of Object.entries(NameGen.STYLE_PACKS)) {
+        if (v === styleObj) return k;
+      }
+      return 'default';
+    }
+
+    // Burg label dataset (capitals vs towns)
+    function computeBurgLabelData() {
+      const burgs = (window.__state?.burgs || []).filter(b => !b.removed);
+      return burgs.map(b => ({
+        id: b.id, name: b.name, x: b.x, y: b.y,
+        isCapital: !!b.capital || b.type === 'capital',
+        // optional persisted manual offsets / positions:
+        ox: b.label?.ox || 0, oy: b.label?.oy || -8,
+        px: b.label?.px, py: b.label?.py // "pinned" screen coords if user dragged
+      }));
+    }
+
+    // Generate region names using the same style system as burgs
+    function generateRegionNames() {
+      const K = getMacroRegionCount();
+      const mapSeed = String(window.__state?.seed ?? 'mapseed');
+      const regionStyles = buildRegionStyles(K, mapSeed);
+      
+      // Prepare models per region style (deduplicate models by style to reuse)
+      const modelCache = new Map();
+      const models = regionStyles.map((style) => {
+        const key = JSON.stringify(style.corpus) + '|' + style.order;
+        if (!modelCache.has(key)) modelCache.set(key, NameGen.makeModel(style));
+        return modelCache.get(key);
+      });
+      
+      // Used-name set (lowercased) - include existing burg names
+      const used = NameGen.uniqueSetFromExisting(window.__state?.burgs || []);
+      
+      // Generate names for each region
+      const regionNames = [];
+      for (let i = 0; i < K; i++) {
+        const style = regionStyles[i];
+        const model = models[i];
+        const seedStr = `${mapSeed}|region:${i}|name`;
+        const rng = NameGen.seededRNG(seedStr);
+        
+        let nm = NameGen.generateUnique(model, used, {min: style.min, max: style.max, rng, temp: 1});
+        nm = NameGen.stylizeName ? NameGen.stylizeName(nm, findStyleKey(style), rng) : nm;
+        regionNames.push(nm);
+        used.add(nm.toLowerCase()); // Add to used set to avoid conflicts
+      }
+      
+      return regionNames;
+    }
+
+    // Build region polygons in GeoJSON-ish format: [ [ [x,y], ... ] , ... ]
+    // Now uses macro-regions with proper naming
+    function getStatePolys() {
+      // Use macro-regions if available, otherwise fall back to cell clusters
+      const caps = window.__state?.macroCapitals;
+      if (caps && caps.length > 0) {
+        // Use macro-regions with proper names
+        const regionNames = generateRegionNames();
+        const cells = window.__state?.cells || [];
+        const isWater = window.__state?.isWater || [];
+        
+        // Create region polygons based on nearest capital assignment
+        const regionCells = new Array(caps.length).fill().map(() => []);
+        
+        // Assign each land cell to nearest capital
+        for (let i = 0; i < cells.length; i++) {
+          if (isWater[i]) continue;
+          
+          let bestRegion = 0;
+          let bestDist = Infinity;
+          
+          for (let j = 0; j < caps.length; j++) {
+            const cap = caps[j];
+            const dx = cells[i].cx - cap.x;
+            const dy = cells[i].cy - cap.y;
+            const dist = dx*dx + dy*dy;
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestRegion = j;
+            }
+          }
+          
+          regionCells[bestRegion].push(cells[i]);
+        }
+        
+        // Create polygons for each region
+        return caps.map((cap, i) => {
+          const cells = regionCells[i];
+          if (cells.length === 0) {
+            // Fallback to simple point representation
+            return {
+              id: i,
+              name: regionNames[i] || `Region ${i + 1}`,
+              rings: [[[cap.x, cap.y]]],
+              capital: cap
+            };
+          }
+          
+          // Create a polygon from the cell centroids
+          const points = cells.map(c => [c.cx, c.cy]);
+          
+          // Simple convex hull approximation (for now)
+          // In a more sophisticated version, you could use proper polygon simplification
+          const rings = [points];
+          
+          return {
+            id: i,
+            name: regionNames[i] || `Region ${i + 1}`,
+            rings: rings,
+            capital: cap
+          };
+        });
+      }
+      
+      // Fallback: Create regions based on cell clusters (original logic)
+      const cells = window.__state?.cells || [];
+      const isWater = window.__state?.isWater || [];
+      
+      // Create regions based on connected land cell clusters
+      const visited = new Set();
+      const regions = [];
+      
+      for (let i = 0; i < cells.length; i++) {
+        if (visited.has(i) || isWater[i]) continue;
+        
+        // Flood fill to find connected land region
+        const region = [];
+        const queue = [i];
+        visited.add(i);
+        
+        while (queue.length > 0) {
+          const cellIdx = queue.shift();
+          const cell = cells[cellIdx];
+          region.push(cellIdx);
+          
+          // Add unvisited land neighbors
+          for (const neighborIdx of cell.neighbors) {
+            if (!visited.has(neighborIdx) && !isWater[neighborIdx]) {
+              visited.add(neighborIdx);
+              queue.push(neighborIdx);
+            }
+          }
+        }
+        
+        // Only create regions with significant size
+        if (region.length > 50) {
+          const regionCells = region.map(idx => cells[idx]);
+          const rings = [regionCells.map(c => [c.cx, c.cy])];
+          regions.push({
+            id: regions.length,
+            name: `Region ${regions.length + 1}`,
+            rings: rings
+          });
+        }
+      }
+      
+      return regions;
+    }
+
+    // Region label dataset via pole of inaccessibility (polylabel)
+    function computeRegionLabelData() {
+      const states = getStatePolys();
+      return states.map(s => {
+        // polylabel expects MultiPolygon-like: [rings], choose the ring set with max area
+        const rings = s.rings.sort((a,b)=>Math.abs(d3.polygonArea(b))-Math.abs(d3.polygonArea(a)))[0];
+        if (!rings) return null;
+        
+        try {
+          // polylabel input is array of rings, each ring is array of [x,y]
+          if (typeof polylabel === 'function') {
+            const p = polylabel([rings], 1.5); // precision in pixels
+            return { id: s.id, name: s.name, x: p[0], y: p[1] };
+          } else {
+            // Fallback to centroid if polylabel is not available
+            const centroid = d3.polygonCentroid(rings);
+            return { id: s.id, name: s.name, x: centroid[0], y: centroid[1] };
+          }
+        } catch (error) {
+          console.warn('Error computing polylabel for region', s.id, error);
+          // Fallback to centroid
+          const centroid = d3.polygonCentroid(rings);
+          return { id: s.id, name: s.name, x: centroid[0], y: centroid[1] };
+        }
+      }).filter(Boolean);
+    }
 
     // Call this inside buildLandGraph after you compute nodes & edges
     function finalizeLandGraph(nodesCount, edges) {
@@ -1227,6 +1840,26 @@
               console.log('ServiceWorker registration failed: ', err);
             });
         }
+        
+        // Add event listener for regenerate names button
+        document.getElementById('regenNamesBtn')?.addEventListener('click', () => {
+          window.__state.generateRegionalNames({ renameAll: true });
+          window.__state.renderBurgLabels();
+        });
+
+        // Add event listener for apply region count button
+        document.getElementById('applyRegionCount')?.addEventListener('click', () => {
+          const k = +document.getElementById('regionCount').value || 3;
+          window.__state.macroRegionCount = Math.max(1, Math.min(20, k));
+          // Re-pick capitals & regenerate names
+          const K = window.__state.getMacroRegionCount();
+          const caps = window.__state.chooseMacroCapitals(K);
+          window.__state.assignMacroRegions(caps);
+          window.__state.generateRegionalNames({ renameAll: true });
+          window.__state.renderBurgLabels();
+          window.__state.renderRegionLabels();
+          updateLabelPositions(currentTransform);
+        });
       });
       
       // Also try to init immediately in case DOM is already loaded
@@ -1272,7 +1905,7 @@
     }
 
     // State we expose for tests/debugging
-    window.__state = { cells: null, delaunay: null, voronoi: null, svg: null, add: null, recolor: null, autoSeed: null, drawCoastlines: null, applyBorder: null, borderPx: 0, generate: generate, burgs: [] };
+    window.__state = { cells: null, delaunay: null, voronoi: null, svg: null, add: null, recolor: null, autoSeed: null, drawCoastlines: null, applyBorder: null, borderPx: 0, generate: generate, burgs: [], chooseMacroCapitals: null, assignMacroRegions: null, getMacroRegionCount: null, buildRegionStyles: null, generateRegionNames: null };
 
     // Export functions (will be defined later)
     window.saveSVG = null;
@@ -1377,6 +2010,11 @@
       // Create zoomable wrapper group
       const zoomRoot = svg.append('g').attr('id', 'zoomRoot');
       
+      // Labels live outside zoomRoot so text size stays constant
+      const labelsG = svg.append('g').attr('id', 'labels');
+      const regionLabelsG = labelsG.append('g').attr('class', 'labels-regions');
+      const burgLabelsG = labelsG.append('g').attr('class', 'labels-burgs');
+      
       // Solid ocean backdrop to eliminate water seam artifacts (anti-aliasing between polygons)
       zoomRoot.select('rect.ocean').remove();
       zoomRoot.append('rect')
@@ -1404,7 +2042,7 @@
       const height = +svg.attr('height');
       const n = sizeInput.valueAsNumber;
 
-      // Keep the current zoom transform so we can position burgs after (re)draws
+      // Keep the current zoom transform so we can position burgs and labels after (re)draws
       window.currentTransform = d3.zoomIdentity;
 
       // Throttled for smoothness
@@ -1437,10 +2075,15 @@
         .extent([[0, 0], [width, height]])
         .on('zoom', (event) => {
           zoomRoot.attr('transform', event.transform);   // map (land/sea/routes) zooms
+          window.currentTransform = event.transform;
           window.updateBurgPositions(event.transform);          // burgs reproject to screen coords
+          updateLabelPositions(event.transform);                // labels reproject to screen coords
         });
 
       svg.call(zoom).call(zoom.transform, d3.zoomIdentity); // initial
+      
+      // Initial label positioning
+      updateLabelPositions(window.currentTransform);
 
       // Double-tap zoom for one-hand use on mobile
       let lastTap = 0;
@@ -1600,7 +2243,15 @@
       window.__state.computeRivers = computeRivers;
       window.__state.generateBurgs = generateBurgs;
       window.__state.renderBurgs = renderBurgs;
+      window.__state.renderBurgLabels = renderBurgLabels;
+      window.__state.renderRegionLabels = renderRegionLabels;
+      window.__state.generateRegionalNames = generateRegionalNames;
       window.__state.computeRoutes = computeRoutes;
+      window.__state.chooseMacroCapitals = chooseMacroCapitals;
+      window.__state.assignMacroRegions = assignMacroRegions;
+      window.__state.getMacroRegionCount = getMacroRegionCount;
+      window.__state.buildRegionStyles = buildRegionStyles;
+      window.__state.generateRegionNames = generateRegionNames;
 
           // Initialize reusable typed arrays for performance
     window.__state.tmp = {
@@ -4447,9 +5098,6 @@
         population = 1500; // River towns are moderately prosperous
       }
 
-      // Generate name
-      const name = BURG_NAMES[id % BURG_NAMES.length] + (id > BURG_NAMES.length - 1 ? ` ${Math.floor(id / BURG_NAMES.length) + 1}` : '');
-
       return {
         id: id,
         x: cell.cx,
@@ -4462,7 +5110,7 @@
         port: isPort,
         isSignificantPort: false, // Capitals are not significant ports (ports should be cities)
         onRiver: onRiver,
-        name: name
+        name: 'Unnamed' // Will be replaced by generateRegionalNames
       };
     }
 
@@ -4490,7 +5138,10 @@
       if (landCells.length === 0) {
         console.log('No suitable land cells for burgs');
         window.__state.burgs = [];
+        generateRegionalNames({ renameAll: false });
         renderBurgs();
+        renderRegionLabels();
+        renderBurgLabels();
         return;
       }
 
@@ -4510,7 +5161,10 @@
       if (goodCapitalCandidates.length === 0) {
         console.log('No suitable cells found for capitals');
         window.__state.burgs = [];
+        generateRegionalNames({ renameAll: false });
         renderBurgs();
+        renderRegionLabels();
+        renderBurgLabels();
         return;
       }
 
@@ -4587,8 +5241,15 @@
         if (DEBUG) console.log('Sample village:', villages[0]);
       }
       
+      // Generate regional names for burgs
+      generateRegionalNames({ renameAll: false });
+      
       // Render the burgs
       renderBurgs();
+      
+      // Render the labels
+      renderRegionLabels();
+      renderBurgLabels();
     }
 
     /**
@@ -4721,6 +5382,153 @@
         window.updateBurgPositions(window.currentTransform);
       } else if (DEBUG) {
         console.warn('updateBurgPositions not available');
+      }
+    }
+
+    // Draggable burg labels; store screen-pinned px/py on drag, clear on double-click (to unpin)
+    const burgDrag = d3.drag()
+      .on('start', function (event, d) { d3.select(this).classed('dragging', true); })
+      .on('drag',  function (event, d) {
+        d.px = event.x; d.py = event.y; // pin to screen coords
+        d3.select(this).attr('x', d.px).attr('y', d.py);
+      })
+      .on('end',   function (event, d) {
+        d3.select(this).classed('dragging', false);
+        // persist to model if you want:
+        const b = (window.__state?.burgs || []).find(x => x.id === d.id);
+        if (b) b.label = Object.assign({}, b.label, { px:d.px, py:d.py });
+      });
+
+    function renderBurgLabels() {
+      try {
+        const data = computeBurgLabelData();
+        const burgLabelsG = d3.select('.labels-burgs');
+        if (burgLabelsG.empty()) {
+          console.warn('Burg labels group not found');
+          return;
+        }
+        
+        const sel = burgLabelsG.selectAll('text').data(data, d => d.id);
+        sel.exit().remove();
+
+        const ent = sel.enter().append('text')
+          .attr('class', d => d.isCapital ? 'capital' : null)
+          .attr('text-anchor', 'middle')
+          .text(d => d.name)
+          .on('dblclick', (event, d) => {
+            const name = prompt('Rename settlement:', d.name);
+            if (name) {
+              d.name = name;
+              const b = (window.__state?.burgs || []).find(x => x.id === d.id);
+              if (b) { 
+                b.name = name; 
+                b.lockName = true; // Lock the name so regeneration won't override it
+              }
+              d3.select(event.currentTarget).text(name);
+            }
+            // double-click toggles unpin
+            if (d.px != null || d.py != null) { d.px = d.py = null; }
+            updateLabelPositions();
+          })
+          .call(burgDrag);
+
+        ent.merge(sel)
+          .classed('capital', d => d.isCapital)
+          .text(d => d.name);
+
+        updateLabelPositions(); // place them
+        
+        if (DEBUG) console.log(`Rendered ${data.length} burg labels`);
+      } catch (error) {
+        console.error('Error rendering burg labels:', error);
+      }
+    }
+
+    function renderRegionLabels() {
+      try {
+        const data = computeRegionLabelData();
+        const regionLabelsG = d3.select('.labels-regions');
+        if (regionLabelsG.empty()) {
+          console.warn('Region labels group not found');
+          return;
+        }
+        
+        const sel = regionLabelsG.selectAll('text').data(data, d => d.id);
+        sel.exit().remove();
+        sel.enter().append('text')
+          .attr('text-anchor', 'middle')
+          .classed('region', true)
+          .text(d => d.name)
+        .merge(sel)
+          .text(d => d.name);
+
+        updateLabelPositions();
+        
+        if (DEBUG) console.log(`Rendered ${data.length} region labels`);
+      } catch (error) {
+        console.error('Error rendering region labels:', error);
+      }
+    }
+
+    // Re-project labels each zoom (screen coords)
+    function updateLabelPositions(t = window.currentTransform) {
+      try {
+        const k = t.k;
+
+        // capitals and towns split
+        const caps = [];
+        const towns = [];
+
+        const burgLabelsG = d3.select('.labels-burgs');
+        if (!burgLabelsG.empty()) {
+          burgLabelsG.selectAll('text')
+            .each(function(d) {
+              // screen coords (respect pinned px/py if you have them)
+              const sx = d.px != null ? d.px : t.applyX(d.x) + (d.ox || 0);
+              const sy = d.py != null ? d.py : t.applyY(d.y) + (d.oy || 0);
+              const isCap = !!d.isCapital;
+              const priority = isCap ? 2 : 1;
+
+              // quick measure (approximate; for better accuracy, use getBBox() once on enter)
+              const text = d.name || '';
+              const width = 7 * Math.min(text.length, 16) + 6; // crude width estimate
+              const height = isCap ? 18 : 14;
+
+              (isCap ? caps : towns).push({ x:sx, y:sy, text, width, height, priority, sel: this, datum:d });
+            });
+
+          // Zoom thresholds
+          const visibleCaps  = k >= LabelRules.capitalMinK ? caps  : [];
+          const visibleTowns = k >= LabelRules.townMinK    ? towns : [];
+
+          // Cull overlaps (capitals first)
+          visibleCaps.sort((a,b)=>b.priority-a.priority);
+          const keptCaps = cullOverlappingLabels(visibleCaps);
+
+          // Hide all initially
+          burgLabelsG.selectAll('text').style('display','none');
+
+          keptCaps.forEach(n => d3.select(n.sel).style('display',''));
+
+          // Now towns, but allow overlaps only if they don't collide with kept caps or prior towns
+          const keptTowns = cullOverlappingLabels(keptCaps.concat(visibleTowns.sort((a,b)=>b.priority-a.priority)));
+          keptTowns.filter(n => !keptCaps.includes(n)).forEach(n => d3.select(n.sel).style('display',''));
+
+          // Finally, position everyone (those hidden just won't show)
+          burgLabelsG.selectAll('text')
+            .attr('x', d => d.px != null ? d.px : t.applyX(d.x) + (d.ox || 0))
+            .attr('y', d => d.py != null ? d.py : t.applyY(d.y) + (d.oy || 0));
+        }
+
+        // Regions: always from map coords (no drag here)
+        const regionLabelsG = d3.select('.labels-regions');
+        if (!regionLabelsG.empty()) {
+          regionLabelsG.selectAll('text')
+            .attr('x', d => t.applyX(d.x))
+            .attr('y', d => t.applyY(d.y));
+        }
+      } catch (error) {
+        console.error('Error updating label positions:', error);
       }
     }
 
@@ -5035,8 +5843,7 @@
 
         // Generate name if not provided
         if (!city.name) {
-          city.name = BURG_NAMES[city.id % BURG_NAMES.length] + 
-                     (city.id > BURG_NAMES.length - 1 ? ` ${Math.floor(city.id / BURG_NAMES.length) + 1}` : '');
+          city.name = 'Unnamed';
         }
 
         cities.push(city);
@@ -5120,8 +5927,7 @@
 
         // Generate name if not provided
         if (!village.name) {
-          village.name = BURG_NAMES[village.id % BURG_NAMES.length] + 
-                        (village.id > BURG_NAMES.length - 1 ? ` ${Math.floor(village.id / BURG_NAMES.length) + 1}` : '');
+          village.name = 'Unnamed';
         }
 
         villages.push(village);
@@ -5371,8 +6177,7 @@
 
         // Generate name if not provided
         if (!town.name) {
-          town.name = BURG_NAMES[town.id % BURG_NAMES.length] + 
-                     (town.id > BURG_NAMES.length - 1 ? ` ${Math.floor(town.id / BURG_NAMES.length) + 1}` : '');
+          town.name = 'Unnamed';
         }
 
         towns.push(town);
