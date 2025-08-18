@@ -5235,11 +5235,12 @@
           // Draw a top sea overlay masked by oceanMask to hide any underlying seams in water
           const zr = d3.select('#zoomRoot');
           zr.select('#seaOverlay').remove();
+          const svgForSea = window.__state.svg || d3.select('svg');
           zr.append('rect')
             .attr('id', 'seaOverlay')
             .attr('x', 0).attr('y', 0)
-            .attr('width', +svg.attr('width'))
-            .attr('height', +svg.attr('height'))
+            .attr('width', +svgForSea.attr('width'))
+            .attr('height', +svgForSea.attr('height'))
             .attr('fill', WATER_COLOR)
             .attr('mask', 'url(#oceanMask)')
             .attr('pointer-events', 'none');
