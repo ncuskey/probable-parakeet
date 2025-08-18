@@ -1079,7 +1079,7 @@
       idx.sort((a,b) => score[b] - score[a]);
       const chosen = [];
       for (const i of idx) {
-        const p = { x: cells[i].cx, y: cells[i].cy, cell: i, type: "capital", capital: true, port: false };
+        const p = { x: cells[i].cx, y: cells[i].cy, cell: i, type: "capital", capital: true, port: false, population: 50000 };
         if (chosen.every(c => Math.hypot(c.x - p.x, c.y - p.y) >= CONFIG.settlements.capitalMinSpacing)) {
           chosen.push(p);
           if (chosen.length === want) break;
@@ -6541,7 +6541,7 @@
       idx.sort((a,b) => score[b] - score[a]);
       const chosen = [];
       for (const i of idx) {
-        const p = { x: cells[i].cx, y: cells[i].cy, cell: i, type: "town", port: false };
+        const p = { x: cells[i].cx, y: cells[i].cy, cell: i, type: "town", port: false, population: 3000 };
         if (
           capitals.every(c => Math.hypot(c.x - p.x, c.y - p.y) >= CONFIG.settlements.townMinSpacing) &&
           chosen.every(t => Math.hypot(t.x - p.x, t.y - p.y) >= CONFIG.settlements.townMinSpacing)
