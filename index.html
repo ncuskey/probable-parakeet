@@ -634,7 +634,9 @@
       },
       regions: {
         allowNeutral: true,
-        maxManorDistance: 140
+        maxManorDistance: 140,
+        disbalance: 0.35,
+        overseasMultiplier: 2.0
       }
     };
 
@@ -1183,6 +1185,16 @@
       // draw power in [1 - d, 1 + d]; smaller -> more attractive
       return capitals.map(() => (1 - disbalance) + rng() * (2 * disbalance));
     }
+    // Seeded capital power assignment (Azgaar "power/disbalance")
+    function assignCapitalPowers(capitals) {
+      const rng = rngFromMapSeed("capital-power");
+      const d = CONFIG.regions.disbalance ?? 0.35;
+      for (const cap of capitals) {
+        const v = (rng() - 0.5) * 2 * d; // [-d, d]
+        const p = 1 + v;                 // ~ [1-d, 1+d]
+        cap.power = Math.max(0.5, p);
+      }
+    }
 
     // distance with island penalty + power
     function effectiveCapitalDist(ax, ay, cap, capPower, cellCompId, burgCompId, overseasPenalty) {
@@ -1280,7 +1292,7 @@
       }
 
       // 2) Assign land cells to nearest manor (town) with max distance threshold,
-      //    else FALL BACK to nearest capital so every land cell gets a region.
+      //    else FALL BACK to nearest capital using power + overseas.
       const manors = burgs.map(b => ({
         x: b.x, y: b.y, regionId: b.regionId,
         comp: landComp[b.cellIndex ?? nearestCellIndex(cells, b.x, b.y)]
@@ -1306,13 +1318,25 @@
 
         // Fallback to capital (ensures coverage for small islands / remote cells)
         if (regionId === -1) {
-          let bestI = 0, bestD = Infinity;
-          for (let k = 0; k < capitals.length; k++) {
-            const cap = capitals[k];
-            const capComp = landComp[cap.cellIndex ?? nearestCellIndex(cells, cap.x, cap.y)];
-            const d = effectiveCapitalDist(c.cx, c.cy, cap, capPowers[k], compId, capComp, overseasPenalty);
-            if (d < bestD) { bestD = d; bestI = k; }
-          }
+          const islandOf = landComp; // reuse component id as island marker
+          const best = (() => {
+            let b = null, bd = Infinity;
+            for (const cap of capitals) {
+              const d = (() => {
+                const ci = i;
+                const capIdx = cap.cellIndex ?? nearestCellIndex(cells, cap.x, cap.y);
+                let d0 = Math.hypot(cells[ci].cx - cap.x, cells[ci].cy - cap.y);
+                if (islandOf && islandOf[ci] != null && islandOf[capIdx] != null && islandOf[ci] !== islandOf[capIdx]) {
+                  d0 *= (CONFIG.regions.overseasMultiplier ?? 2.0);
+                }
+                const power = cap.power ?? 1.0;
+                return d0 * power;
+              })();
+              if (d < bd) { bd = d; b = cap; }
+            }
+            return b;
+          })();
+          const bestI = capitals.indexOf(best);
           // Distance guard for neutrals
           if (CONFIG.regions.allowNeutral) {
             // Euclidean distance to chosen capital
@@ -3582,6 +3606,7 @@
                 const baseScore = computeCellSuitability(cells, isWater);
                 // 2) Place capitals
                 const capitals = placeCapitals(baseScore, cells);
+                assignCapitalPowers(capitals);
                 window.__state.macroCapitals = capitals;
                 // 3) Connect capitals with primary roads (MST + A*)
                 const primaryRoads = connectCapitalsWithRoads(capitals, cells, isWater);
