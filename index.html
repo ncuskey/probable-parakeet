@@ -29,8 +29,6 @@
 #routes .trails { stroke: #9b7b3a; stroke-width: 1.0px; fill: none; stroke-dasharray: 3 3; stroke-linecap: round; }
 #routes .searoutes { stroke: #ff0000; stroke-width: 5px; fill: none; stroke-dasharray: 6 4; opacity: 1.0; z-index: 1000; }
 #routes .primary-road { stroke: #8B4513; stroke-width: 3px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-    /* ensure export-friendly */
-    #routes path { vector-effect: non-scaling-stroke; }
 
     /* Label styling */
     .labels-burgs text, .labels-regions text {
@@ -64,31 +62,20 @@
       margin-left: 8px;
     }
     
-    /* Regions view: hide raster & overlay; show only region fills; remove borders */
+    /* Regions: hide raster & overlay; remove borders */
     body.view-mode-regions #mapCells image { display: none; }
     body.view-mode-regions #regions .overlay { display: none; }
-    body.view-mode-regions #regions .mapCell {
-      stroke: none;            /* remove stained-glass/voronoi lines */
-      shape-rendering: geometricPrecision; /* reduce aliasing seams */
-    }
+    body.view-mode-regions #mapCells .mapCell { stroke: none; shape-rendering: geometricPrecision; }
 
-    /* Terrain view: show raster & overlay; keep overlay subtle */
+    /* Terrain: show raster & overlay */
     body.view-mode-terrain #mapCells image { display: block; }
     body.view-mode-terrain #regions .overlay { display: block; }
-    body.view-mode-terrain #regions .mapCell {
-      stroke: none;            /* ensure no cell borders in terrain view */
-    }
 
-    /* Overlay tint is subtle and non-interactive */
-    #regions .overlay path {
-      fill-opacity: 0.15;      /* reduce from ~0.25 to ~0.15 to avoid muted colors */
-      pointer-events: none;    /* don't block interactions */
-    }
+    /* Overlay tint: subtle, non-interactive */
+    #regions .overlay path { fill-opacity: 0.15; pointer-events: none; }
 
-    /* Routes stay crisp regardless of zoom */
-    #routes path {
-      vector-effect: non-scaling-stroke;
-    }
+    /* Routes crisp at all zooms */
+    #routes path { vector-effect: non-scaling-stroke; }
 
     /* Progress overlay styling */
     .progress-overlay {
@@ -541,115 +528,14 @@
         <!-- Settlements Tab -->
         <div id="settlements-tab" class="tab-content">
           <div class="row">
-            <label>Burgs Count:</label>
-            <input id="burgsCountInput" value="25" type="range" min="0" max="50" step="1" oninput="burgsCountOutput.value = burgsCountInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-<output id="burgsCountOutput">25</output>
-          </div>
-
-    <div class="row">
-            <label>Burg Spacing (px):</label>
-            <input id="burgSpacingInput" value="12" type="range" min="8" max="20" step="1" oninput="burgSpacingOutput.value = burgSpacingInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-            <output id="burgSpacingOutput">12</output>
-          </div>
-
-          <div class="row">
-            <label>River Weight:</label>
-            <input id="riverWeightInput" value="0.4" type="range" min="0" max="1" step="0.1" oninput="riverWeightOutput.value = riverWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-            <output id="riverWeightOutput">0.4</output>
-          </div>
-
-          <div class="row">
-            <label>Coast Weight:</label>
-            <input id="coastWeightInput" value="0.3" type="range" min="0" max="1" step="0.1" oninput="coastWeightOutput.value = coastWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-            <output id="coastWeightOutput">0.3</output>
-          </div>
-
-          <div class="row">
-            <label>Flatness Weight:</label>
-            <input id="flatnessWeightInput" value="0.2" type="range" min="0" max="1" step="0.1" oninput="flatnessWeightOutput.value = flatnessWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-            <output id="flatnessWeightOutput">0.2</output>
-          </div>
-
-          <div class="row">
-            <label>Fertility Weight:</label>
-            <input id="fertilityWeightInput" value="0.1" type="range" min="0" max="1" step="0.1" oninput="fertilityWeightOutput.value = fertilityWeightInput.valueAsNumber; __state.generateBurgs && __state.generateBurgs();">
-            <output id="fertilityWeightOutput">0.1</output>
-          </div>
-
-          <div class="row">
             <label>Regions:</label>
             <input id="regionCount" type="number" min="1" max="20" value="3" style="width:4rem">
             <button id="applyRegionCount">Apply</button>
           </div>
-
-          <div class="row">
-            <label>Disbalance:</label>
-            <input id="disbalanceInput" value="0.35" type="range" min="0" max="1" step="0.05"
-                   oninput="disbalanceOutput.value = disbalanceInput.valueAsNumber; computeAndDrawRegions();">
-            <output id="disbalanceOutput">0.35</output>
-            <span class="hint">higher = more unequal region sizes</span>
-          </div>
-
-          <div class="row">
-            <label>Overseas Penalty:</label>
-            <input id="overseasPenaltyInput" value="2.0" type="range" min="1" max="3" step="0.1"
-                   oninput="overseasPenaltyOutput.value = overseasPenaltyInput.valueAsNumber; computeAndDrawRegions();">
-            <output id="overseasPenaltyOutput">2.0</output>
-          </div>
-
-          <div class="row">
-            <label>Max Manor Distance (px):</label>
-            <input id="maxManorDistInput" value="120" type="range" min="40" max="300" step="5"
-                   oninput="maxManorDistOutput.value = maxManorDistInput.valueAsNumber; computeAndDrawRegions();">
-            <output id="maxManorDistOutput">120</output>
-            <span class="hint">beyond this = neutral land</span>
-          </div>
         </div>
 
         <!-- Routes Tab -->
-        <div id="routes-tab" class="tab-content">
-          <div class="row">
-            <label>Road Density (Primary):</label>
-            <input id="roadDensityInput" value="0.6" type="range" min="0" max="1" step="0.05" oninput="roadDensityOutput.value = roadDensityInput.valueAsNumber; debouncedComputeRoutes();">
-            <output id="roadDensityOutput">0.6</output>
-          </div>
-
-          <div class="row">
-            <label>Trail Density (Local):</label>
-            <input id="trailDensityInput" value="0.5" type="range" min="0" max="1" step="0.05" oninput="trailDensityOutput.value = trailDensityInput.valueAsNumber; debouncedComputeRoutes();">
-            <output id="trailDensityOutput">0.5</output>
-          </div>
-
-          <div class="row">
-            <label>Slope Penalty:</label>
-            <input id="slopePenaltyInput" value="1.2" type="range" min="0" max="3" step="0.1" oninput="slopePenaltyOutput.value = slopePenaltyInput.valueAsNumber; debouncedComputeRoutes();">
-            <output id="slopePenaltyOutput">1.2</output>
-          </div>
-
-          <div class="row">
-            <label>River Crossing Penalty:</label>
-            <input id="riverPenaltyInput" value="1.0" type="range" min="0" max="3" step="0.1" oninput="riverPenaltyOutput.value = riverPenaltyInput.valueAsNumber; debouncedComputeRoutes();">
-            <output id="riverPenaltyOutput">1.0</output>
-          </div>
-
-          <div class="row">
-            <label>Roads:</label>
-            <input id="roadsOnInput" type="checkbox" checked onchange="toggleRoutes('roads', this.checked);">
-            <span style="margin-left: 8px;">Enable primary roads</span>
-          </div>
-
-          <div class="row">
-            <label>Trails:</label>
-            <input id="trailsOnInput" type="checkbox" checked onchange="toggleRoutes('trails', this.checked);">
-            <span style="margin-left: 8px;">Enable local trails</span>
-          </div>
-
-          <div class="row">
-            <label>Sea Routes:</label>
-            <input id="seaRoutesOnInput" type="checkbox" checked onchange="toggleRoutes('searoutes', this.checked);">
-            <span style="margin-left: 8px;">Enable sea routes</span>
-          </div>
-        </div>
+        <div id="routes-tab" class="tab-content"></div>
       </div>
     </div>
   </div>
@@ -723,6 +609,33 @@
 
     // Debug flag for performance
     const DEBUG = false;
+
+    // === CONFIG (deterministic, no UI) ===
+    const CONFIG = {
+      settlements: {
+        capitalsCount: 8,      // target number of capitals
+        townsCount: 80,        // target number of towns
+        capitalMinSpacing: 80, // px
+        townMinSpacing: 18,    // px
+      },
+      scoring: {
+        wCoast: 0.35, wRiver: 0.35, wFlat: 0.20, wFertile: 0.10,
+        riverConfluenceBonus: 0.30,
+        shelteredHarborBonus: 0.25,
+        elevationPenaltyK: 0.50,
+      },
+      roads: {
+        connectStrategy: "mst", // "mst" + A* for edges (capitals network)
+        slopePenalty: 1.2,
+        riverCrossPenalty: 1.0,
+      }
+    };
+
+    // Deterministic RNG from current map seed
+    function rngFromMapSeed(suffix = "") {
+      const mapSeed = String(window.__state?.seed ?? "mapseed");
+      return NameGen.seededRNG(mapSeed + "|" + suffix);
+    }
 
     // === utils/heap: MinHeap for A* open set ===
     class MinHeap {
@@ -1133,6 +1046,48 @@
       }
     }
 
+    // === Azgaar-style cell suitability scoring (not wired yet) ===
+    function computeCellSuitability(cells, isWater) {
+      const score = new Float32Array(cells.length);
+      for (let i = 0; i < cells.length; i++) {
+        if (isWater[i]) { score[i] = -Infinity; continue; }
+        const c = cells[i];
+        // Heuristics: these properties can be derived/augmented elsewhere
+        const isCoast = c.neighbors?.some(n => isWater[n]) ? 1 : 0;
+        const nearRiver = c.hasRiver ? 1 : 0;               // set during river gen if available
+        const confluence = (c.riverDegree ?? 0) >= 2 ? 1 : 0;
+        const flat = 1 - (c.localSlope ?? 0);               // 0..1 where 1 is flattest
+        const fertile = c.biomeFertility ?? 0.5;            // fallback if not computed
+        const elevPenalty = (c.elev ?? 0) * CONFIG.scoring.elevationPenaltyK;
+
+        const coastTerm = isCoast ? CONFIG.scoring.wCoast : 0;
+        const shelteredBonus = c.isShelteredHarbor ? CONFIG.scoring.shelteredHarborBonus : 0;
+        const riverTerm = nearRiver ? CONFIG.scoring.wRiver : 0;
+        const riverBump = confluence ? CONFIG.scoring.riverConfluenceBonus : 0;
+        const flatTerm = CONFIG.scoring.wFlat * flat;
+        const fertTerm = CONFIG.scoring.wFertile * fertile;
+
+        score[i] = coastTerm + shelteredBonus + riverTerm + riverBump + flatTerm + fertTerm - elevPenalty;
+      }
+      return score;
+    }
+
+    // === Capital placement with min spacing (not wired yet) ===
+    function placeCapitals(score, cells) {
+      const want = CONFIG.settlements.capitalsCount;
+      const idx = Array.from(score.keys()).filter(i => Number.isFinite(score[i]));
+      idx.sort((a,b) => score[b] - score[a]);
+      const chosen = [];
+      for (const i of idx) {
+        const p = { x: cells[i].cx, y: cells[i].cy, cell: i, type: "capital", capital: true, port: false };
+        if (chosen.every(c => Math.hypot(c.x - p.x, c.y - p.y) >= CONFIG.settlements.capitalMinSpacing)) {
+          chosen.push(p);
+          if (chosen.length === want) break;
+        }
+      }
+      return chosen;
+    }
+
     // --- Build region boundary segments from labeled cells ---------------------
     function buildRegionSegments(cells, isWater, regionOfCell) {
       const segsByRegion = new Map(); // region -> segments [{a:[x,y], b:[x,y]}]
@@ -1283,7 +1238,6 @@
       }
       window.__state.macroCapitals = caps;
     }
-
     // --- Azgaar-style region assignment ---------------------------------------
     function assignRegionsAzgaar({ K, disbalance, overseasPenalty, maxManorDistPx }) {
       const cells = window.__state.cells || [];
@@ -1552,8 +1506,6 @@
           .attr('fill', color)
           .attr('fill-rule', 'evenodd')
           .attr('opacity', 0.25)
-          .attr('stroke', 'rgba(0,0,0,0.15)')
-          .attr('stroke-width', 0.8)
           .attr('vector-effect','non-scaling-stroke');
       });
       
@@ -1802,18 +1754,11 @@
     const isCoarse = window.matchMedia('(pointer: coarse)').matches;
     const HEAVY_DELAY = isCoarse ? 400 : 200;
 
-    const debouncedComputeRoutes = heavyDebounce(() => {
-      // Invalidate route caches when route settings change
-      GraphCache.invalidate('land');
-      if (window.__state.computeRoutes) {
-        window.__state.computeRoutes();
-      }
-    }, HEAVY_DELAY);
+    // debouncedComputeRoutes removed with fixed pipeline
 
     // Cached DOM elements for performance
     const DOM = {
       seaLevelInput: document.getElementById('seaLevelInput'),
-      seaRoutesOnInput: document.getElementById('seaRoutesOnInput'),
       sizeInput: document.getElementById('sizeInput')
     };
 
@@ -2043,7 +1988,6 @@
         this.needsRecolor = false;
       }
     };
-
     // Progress management system
     const ProgressManager = {
       overlay: null,
@@ -2219,21 +2163,7 @@
     // Expose generate() globally for the button
     window.generate = generate;
     
-    /**
-     * Fast toggle for route visibility without recomputation
-     * @param {string} routeType - Type of route ('roads', 'trails', 'searoutes')
-     * @param {boolean} visible - Whether to show or hide
-     */
-    function toggleRoutes(routeType, visible) {
-      const selector = `#routes .${routeType}`;
-      const group = d3.select(selector);
-      if (group.size() > 0) {
-        group.style('display', visible ? null : 'none');
-      }
-      
-      // Only recompute if density/slope settings changed
-      // For now, just do fast toggle - can be enhanced later
-    }
+    // toggleRoutes removed with fixed pipeline
 
     // State we expose for tests/debugging
     window.__state = { cells: null, delaunay: null, voronoi: null, svg: null, add: null, recolor: null, autoSeed: null, drawCoastlines: null, applyBorder: null, borderPx: 0, generate: generate, burgs: [], regenerationCount: 0, chooseMacroCapitals: null, assignMacroRegions: null, getMacroRegionCount: null, buildRegionStyles: null, generateRegionNames: null, logCurrentStyles: null, assignRegionsAzgaar: null, computeAndDrawRegions: null };
@@ -2275,19 +2205,16 @@
     talusOutput.value = talusInput.valueAsNumber;
     thermalStrengthOutput.value = thermalStrengthInput.valueAsNumber;
     smoothAlphaOutput.value = smoothAlphaInput.valueAsNumber;
-    burgsCountOutput.value = burgsCountInput.valueAsNumber;
-    burgSpacingOutput.value = burgSpacingInput.valueAsNumber;
-    riverWeightOutput.value = riverWeightInput.valueAsNumber;
-    coastWeightOutput.value = coastWeightInput.valueAsNumber;
-    flatnessWeightOutput.value = flatnessWeightInput.valueAsNumber;
-    fertilityWeightOutput.value = fertilityWeightInput.valueAsNumber;
-    roadDensityOutput.value = roadDensityInput.valueAsNumber;
-    trailDensityOutput.value = trailDensityInput.valueAsNumber;
-    slopePenaltyOutput.value = slopePenaltyInput.valueAsNumber;
-    riverPenaltyOutput.value = riverPenaltyInput.valueAsNumber;
-    disbalanceOutput.value = disbalanceInput.valueAsNumber;
-    overseasPenaltyOutput.value = overseasPenaltyInput.valueAsNumber;
-    maxManorDistOutput.value = maxManorDistInput.valueAsNumber;
+    // Removed settlement/route tunables (guarded)
+    const disbalanceOutput = document.getElementById('disbalanceOutput');
+    const disbalanceInput = document.getElementById('disbalanceInput');
+    const overseasPenaltyOutput = document.getElementById('overseasPenaltyOutput');
+    const overseasPenaltyInput = document.getElementById('overseasPenaltyInput');
+    const maxManorDistOutput = document.getElementById('maxManorDistOutput');
+    const maxManorDistInput = document.getElementById('maxManorDistInput');
+    if (disbalanceOutput && disbalanceInput) disbalanceOutput.value = disbalanceInput.valueAsNumber;
+    if (overseasPenaltyOutput && overseasPenaltyInput) overseasPenaltyOutput.value = overseasPenaltyInput.valueAsNumber;
+    if (maxManorDistOutput && maxManorDistInput) maxManorDistOutput.value = maxManorDistInput.valueAsNumber;
 
     generate();
 
@@ -2299,6 +2226,7 @@
       svg.select('.rivers').remove();
       svg.select('#routes').remove();
       svg.select('#burgs').remove();
+      svg.select('#labels').remove();
       svg.select('rect.ocean').remove();
       svg.select('defs #landClip').remove();
 
@@ -2348,6 +2276,9 @@
       const labelsG = svg.append('g').attr('id', 'labels');
       const regionLabelsG = labelsG.append('g').attr('class', 'labels-regions');
       const burgLabelsG = labelsG.append('g').attr('class', 'labels-burgs');
+      // Rebind label renderers to new groups
+      window.__state.renderRegionLabels = renderRegionLabels;
+      window.__state.renderBurgLabels = renderBurgLabels;
       
       // Solid ocean backdrop to eliminate water seam artifacts (anti-aliasing between polygons)
       zoomRoot.select('rect.ocean').remove();
@@ -2368,7 +2299,7 @@
       const burgsG = svg.append('g').attr('id', 'burgs');
       const roadsG = routesG.append('g').attr('class', 'roads');
       const trailsG = routesG.append('g').attr('class', 'trails');
-      const seaG = routesG.append('g').attr('class', 'searoutes').attr('mask', 'url(#oceanMask)');
+      const seaG = routesG.append('g').attr('class', 'searoutes');
       
       // Create defs for clip paths
       const defs = svg.append('defs');
@@ -2577,7 +2508,6 @@
       window.__state.drawCoastlines = drawCoastlines;
       window.__state.applyBorder = applyBorderMask;
       window.__state.computeRivers = computeRivers;
-      window.__state.generateBurgs = generateBurgs;
       window.__state.renderBurgs = renderBurgs;
       window.__state.renderBurgLabels = renderBurgLabels;
       window.__state.renderRegionLabels = renderRegionLabels;
@@ -2610,38 +2540,41 @@
       // View mode functionality
       window.__state.currentViewMode = 'terrain'; // 'terrain' | 'regions'
 
-      window.__state.setViewMode = function(mode){
-        window.__state.currentViewMode = mode;
+      // BEGIN CANONICAL setViewMode
+      function setViewMode(mode) {
         const isRegions = mode === 'regions';
         document.body.classList.toggle('view-mode-regions', isRegions);
         document.body.classList.toggle('view-mode-terrain', !isRegions);
 
-        const raster = document.querySelector('#mapCells image');
+        const raster  = document.getElementById('raster') || document.querySelector('#mapCells image');
         const overlay = document.querySelector('#regions .overlay');
-        if (raster) raster.hidden = isRegions;
-        if (overlay) overlay.hidden = isRegions;
+        if (raster)  raster.hidden  = isRegions;  // hide raster in Regions
+        if (overlay) overlay.hidden = isRegions;  // hide overlay in Regions
 
-        const btn = document.getElementById('viewToggleBtn');
-        if (btn) btn.textContent = (mode === 'regions') ? 'Show Height Map' : 'Show Regions';
-
+        if (window.__state) window.__state.currentViewMode = mode;
         repaintCellsForMode(mode);
       }
+      // END CANONICAL setViewMode
 
+      // Keep backward-compatible alias
+      if (window.__state) window.__state.setViewMode = setViewMode;
+
+      // BEGIN CANONICAL repaintCellsForMode
       function repaintCellsForMode(mode) {
         const isRegions = mode === 'regions';
-        document.querySelectorAll('#regions .mapCell').forEach(cell => {
+        document.querySelectorAll('#mapCells .mapCell').forEach(cell => {
           const fill = isRegions ? cell.dataset.regionFill : cell.dataset.terrainFill;
           if (fill) cell.setAttribute('fill', fill);
-          // Remove strokes in both modes to prevent cell borders
-          cell.setAttribute('stroke', 'none');
+          cell.setAttribute('stroke', isRegions ? 'none' : (cell.dataset.stroke || 'none'));
         });
       }
+      // END CANONICAL repaintCellsForMode
 
       // initial state
-      window.__state.setViewMode('terrain');
+      setViewMode('terrain');
 
       document.getElementById('viewToggleBtn')?.addEventListener('click', () => {
-        window.__state.setViewMode(window.__state.currentViewMode === 'regions' ? 'terrain' : 'regions');
+        setViewMode(window.__state.currentViewMode === 'regions' ? 'terrain' : 'regions');
       });
 
       // Simple region label renderer
@@ -2716,6 +2649,8 @@
         } else {
           me.attr('data-region-fill', null);
         }
+        // Ensure no cell borders in both modes
+        me.attr('stroke', 'none');
       });
     };
 
@@ -2774,7 +2709,6 @@
         this.uint32.push(arr);
       }
     };
-
       // --- Template System ---
       const templates = {
         volcanicIsland: {
@@ -3448,7 +3382,6 @@
         window.__state.isWater = isWater;
         return { isLake, lakeId, lakes, isWater };
       }
-
       function recolor() {
         const sea = +document.getElementById('seaLevelInput').value;
         const renderMode = document.getElementById('renderMode').value;
@@ -3591,18 +3524,44 @@
             ProgressManager.update(80, 'Placing settlements...', 'Scoring and placing burgs...');
             
             setTimeout(() => {
-              generateBurgs();
-              
-              // Compute and draw regions after burgs are generated
-              // Note: These functions will be called after they're defined and assigned to window.__state
-              
+              // === Azgaar-style pipeline start ===
+              const cells = window.__state.cells || [];
+              const isWater = window.__state.isWater || [];
+              if (cells.length && isWater.length) {
+                // 1) Score land cells
+                const baseScore = computeCellSuitability(cells, isWater);
+                // 2) Place capitals
+                const capitals = placeCapitals(baseScore, cells);
+                window.__state.macroCapitals = capitals;
+                // 3) Connect capitals with primary roads (MST + A*)
+                const primaryRoads = connectCapitalsWithRoads(capitals, cells, isWater);
+                drawPrimaryRoads(primaryRoads);
+                // 4) Rescore near roads & place towns
+                const roadIndex = indexCellsNearPolylines(cells, primaryRoads, 8);
+                const rescored = rescoreWithRoads(baseScore, cells, roadIndex);
+                const towns = placeTowns(rescored, cells, capitals);
+                // 5) Publish burgs
+                window.__state.burgs = capitals.concat(towns);
+                // 6) Regions & labels (reuse your existing machinery)
+                generateRegionalNames({renameAll: false});
+                assignMacroRegions(capitals);
+                computeAndDrawRegions();
+                if (typeof drawBurgLabels === "function") drawBurgLabels();
+                // Render visuals
+                renderBurgs();
+                renderRegionLabels();
+                if (typeof renderBurgLabels === 'function') renderBurgLabels();
+              }
+              // === Azgaar-style pipeline end ===
+
               ProgressManager.setPhase('routes');
               ProgressManager.update(90, 'Building routes...', 'Computing road and sea networks...');
               
-              setTimeout(() => {
-                // Use debounced route computation to prevent double execution
-                debouncedComputeRoutes();
-              }, 100);
+              // Kick off routes in fixed pipeline
+              if (window.__state.computeRoutes) {
+                window.__state.computeRoutes();
+              }
+              // Fixed pipeline: no separate route recomputation toggles
             }, 100);
           }, 100);
         }, 100);
@@ -3962,15 +3921,7 @@
         // Debug: Check if burgs exist before export
         const originalBurgs = svgNode.querySelectorAll('#burgs g.burg');
         console.log(`Original burgs before export: ${originalBurgs.length} burgs`);
-        if (originalBurgs.length === 0) {
-          console.log('No burgs found! Computing burgs...');
-          if (window.__state.generateBurgs) {
-            window.__state.generateBurgs();
-            // Check again after computing
-            const newBurgs = svgNode.querySelectorAll('#burgs g.burg');
-            console.log(`Burgs after computing: ${newBurgs.length} burgs`);
-          }
-        }
+        // Fixed pipeline handles burg creation; skip legacy generateBurgs
         
         // Debug: Check if routes exist before export
         const originalRoutes = svgNode.querySelectorAll('#routes path');
@@ -4100,15 +4051,7 @@
         // Debug: Check if burgs exist before export
         const originalBurgs = svgNode.querySelectorAll('#burgs g.burg');
         console.log(`Original burgs before PNG export: ${originalBurgs.length} burgs`);
-        if (originalBurgs.length === 0) {
-          console.log('No burgs found! Computing burgs...');
-          if (window.__state.generateBurgs) {
-            window.__state.generateBurgs();
-            // Check again after computing
-            const newBurgs = svgNode.querySelectorAll('#burgs g.burg');
-            console.log(`Burgs after computing: ${newBurgs.length} burgs`);
-          }
-        }
+        // Fixed pipeline handles burg creation; skip legacy generateBurgs
         
         // Debug: Check if routes exist before export
         const originalRoutes = svgNode.querySelectorAll('#routes path');
@@ -4209,7 +4152,6 @@
       // Expose export functions globally
       window.saveSVG = saveSVG;
       window.savePNG = savePNG;
-
       // --- Climate and Biome System ---
       function computeClimate(sea) {
         const baseTempF = +document.getElementById('baseTempInput').value;
@@ -4952,7 +4894,6 @@
         
         return inside;
       }
-
       // --- Coastline builder (Azgaar-style: boundary between land and water) --- (Azgaar-style: boundary between land and water) --- (Azgaar-style: boundary between land and water) ---
       function drawCoastlines() {
         coastG.selectAll('path.coast').remove();
@@ -5160,7 +5101,7 @@
 
           cp.selectAll('path').remove();
           closedLoops.forEach(loop => {
-            const d = islandToPathD(chaikin(loop, 2));
+            const d = islandToPathD(chaikin(loop, 1));
             cp.append('path').attr('d', d);
           });
 
@@ -5183,7 +5124,7 @@
           
           // punch land holes (black hides)
           closedLoops.forEach(loop => {
-            const d = islandToPathD(chaikin(loop, 2));
+            const d = islandToPathD(chaikin(loop, 1));
             oceanMask.append('path').attr('d', d).attr('fill', 'black');
           });
           
@@ -5200,7 +5141,7 @@
         // Create unified land paths for masking and underlay
         if (closedLoops.length > 0) {
           window.__state.unifiedLandPaths = closedLoops.map(loop => {
-            const smoothedLoop = chaikin(loop, 2);
+            const smoothedLoop = chaikin(loop, 1);
             return smoothedLoop;
           });
         }
@@ -5208,7 +5149,7 @@
         // Save coastline path data for seam stroke
         if (closedLoops.length > 0) {
           const coastD = closedLoops.map(loop => {
-            const smoothedLoop = chaikin(loop, 2);
+            const smoothedLoop = chaikin(loop, 1);
             return islandToPathD(smoothedLoop);
           }).join('');
           window.__state.coastD = coastD;
@@ -5585,144 +5526,7 @@
       };
     }
 
-    /**
-     * Generate burgs using Azgaar's economic approach
-     */
-    function generateBurgs() {
-      const totalCount = +document.getElementById('burgsCountInput').value || 25;
-      const capitalCount = Math.max(2, Math.floor(totalCount * 0.12)); // 12% capitals
-      const cityCount = Math.floor(totalCount * 0.28); // 28% cities/ports
-      const villageCount = totalCount - capitalCount - cityCount; // 60% villages
-      const sea = +document.getElementById('seaLevelInput').value;
-      const cells = window.__state.cells;
-      
-      if (DEBUG) console.log(`Generating ${capitalCount} capitals + ${cityCount} cities + ${villageCount} villages using economic approach`);
-      
-      // Update progress during burg generation
-      ProgressManager.update(82, 'Placing settlements...', 'Scoring land cells for capitals...');
-
-      // Get land cells (use same logic as water detection)
-      const isWater = window.__state.isWater || [];
-      const landCells = cells.filter((c, i) => !isWater[i] && c.high <= 0.8);
-      if (DEBUG) console.log(`Found ${landCells.length} land cells suitable for burgs`);
-      
-      if (landCells.length === 0) {
-        // console.log('No suitable land cells for burgs');
-        window.__state.burgs = [];
-        generateRegionalNames({ renameAll: false });
-        renderBurgs();
-        renderRegionLabels();
-        renderBurgLabels();
-        return;
-      }
-
-      // === PHASE 1: Place Capitals (keep existing approach for now) ===
-      ProgressManager.update(83, 'Placing settlements...', 'Placing capital cities...');
-      
-      // Score all land cells for capitals (emphasize strategic locations)
-      const capitalCandidates = landCells.map(cell => ({
-        cell: cell,
-        score: scoreCellForCapital(cell, cells, sea)
-      }));
-
-      // Filter out low-scoring cells
-      const goodCapitalCandidates = capitalCandidates.filter(c => c.score > 0.15);
-      if (DEBUG) console.log(`Found ${goodCapitalCandidates.length} cells with good capital scores (>0.15)`);
-      
-      if (goodCapitalCandidates.length === 0) {
-        // console.log('No suitable cells found for capitals');
-        window.__state.burgs = [];
-        generateRegionalNames({ renameAll: false });
-        renderBurgs();
-        renderRegionLabels();
-        renderBurgLabels();
-        return;
-      }
-
-      // Apply Poisson disk sampling for capitals
-      const capitalSpacing = +document.getElementById('burgSpacingInput').value * 2 || 24;
-      const spacedCapitals = poissonSample(goodCapitalCandidates, capitalSpacing);
-      if (DEBUG) console.log(`After capital spacing, ${spacedCapitals.length} candidates remain`);
-      
-      // Take top N capitals by score
-      const pickedCapitals = spacedCapitals.slice(0, capitalCount);
-      if (DEBUG) console.log(`Selected ${pickedCapitals.length} capitals from candidates`);
-      
-      // Create capital burg objects
-      const capitals = pickedCapitals.map((p, index) => placeBurg(p.cell, cells, sea, index, 'capital'));
-      
-      // === PHASE 2: Build Roads First (for economic scoring) ===
-      ProgressManager.update(84, 'Placing settlements...', 'Building road network for economic scoring...');
-      
-      // Build land graph and roads between capitals
-      const landGraph = buildLandGraph(cells, isWater);
-      window.__state.landGraph = landGraph; // Store for later use
-      
-      // Build roads between capitals (this will be used for town scoring)
-      buildCapitalRoads(capitals);
-      
-      // === PHASE 3: Place Cities (coastal/river focused) ===
-      ProgressManager.update(85, 'Placing settlements...', 'Placing cities with coastal/river focus...');
-      
-      // Generate cities using coastal/river economic scoring
-      const cities = generateCities(cells, capitals, cityCount, null);
-      
-      // === PHASE 4: Place Villages (inland/road focused) ===
-      ProgressManager.update(86, 'Placing settlements...', 'Placing villages with inland/road focus...');
-      
-      // Generate villages using inland/road economic scoring
-      const villages = generateVillages(cells, [...capitals, ...cities], villageCount, null);
-      
-      // === PHASE 5: Ensure Island Ports ===
-      ProgressManager.update(87, 'Placing settlements...', 'Ensuring each island has ports...');
-      
-      // Combine all settlement types
-      let allBurgs = [...capitals, ...cities, ...villages];
-      
-      // Ensure each island has at least one significant port
-      allBurgs = ensureIslandPorts(cells, allBurgs, isWater);
-      
-      // === PHASE 6: Connect Capitals to Ports ===
-      ProgressManager.update(88, 'Placing settlements...', 'Connecting capitals to ports...');
-      
-      // Connect non-port capitals to nearest ports
-      connectCapitalsToPorts(allBurgs, cells, isWater);
-      
-      // === PHASE 7: Add Spur Roads to Settlements ===
-      ProgressManager.update(89, 'Placing settlements...', 'Adding spur roads to settlements...');
-      
-      // Add spur roads to cities and villages that aren't on existing routes
-      [...cities, ...villages].forEach(settlement => {
-        ensureSpurToRoad(settlement, isRouteCell, nearestRouteCell, addSpurRoad);
-      });
-      
-      // Store final burgs
-      window.__state.burgs = allBurgs;
-      
-      if (DEBUG) console.log(`Generated ${capitals.length} capitals + ${cities.length} cities + ${villages.length} villages = ${window.__state.burgs.length} total burgs`);
-      
-      // Debug: Log sample burgs
-      if (capitals.length > 0) {
-        if (DEBUG) console.log('Sample capital:', capitals[0]);
-      }
-      if (cities.length > 0) {
-        if (DEBUG) console.log('Sample city:', cities[0]);
-      }
-      if (villages.length > 0) {
-        if (DEBUG) console.log('Sample village:', villages[0]);
-      }
-      
-      // Generate regional names for burgs
-      generateRegionalNames({ renameAll: false });
-      
-      // Render the burgs
-      renderBurgs();
-      
-      // Render the labels
-      renderRegionLabels();
-      renderBurgLabels();
-    }
-
+    // generateBurgs removed; fixed pipeline replaces it
     /**
      * Render burgs using D3 data-join
      */
@@ -6474,7 +6278,6 @@
       
       return allBurgs;
     }
-
     /**
      * Connect capitals to nearest ports with primary roads
      * @param {Array} allBurgs - Array of all burgs
@@ -6572,6 +6375,166 @@
         .attr('stroke-linecap', 'round')
         .attr('stroke-linejoin', 'round')
         .attr('vector-effect', 'non-scaling-stroke');
+    }
+
+    // Ensure routes layer exists under #map
+    function ensureRoutesLayer() {
+      const svg = d3.select("#map");
+      let g = svg.select("#routes");
+      if (g.empty()) g = svg.append("g").attr("id", "routes");
+      return g;
+    }
+
+    // Draw primary road polylines
+    function drawPrimaryRoads(polylines) {
+      const g = ensureRoutesLayer();
+      // Clear only primary roads, keep trails/sea routes if any
+      g.selectAll("path.primary-road").remove();
+      const line = d3.line().x(d => d.x).y(d => d.y);
+      g.selectAll(null)
+        .data(polylines)
+        .enter()
+        .append("path")
+        .attr("class", "primary-road")
+        .attr("d", d => line(d));
+    }
+
+    // === Graph building & pathfinding scaffolds (to be refined) ===
+    function buildLandGraphSimple(cells, isWater) {
+      // neighbors: array of arrays; cost: function(u,v)
+      // For now, just expose neighbors from Voronoi adjacency.
+      return {
+        neighbors(i) { return cells[i].neighbors?.filter(j => !isWater[j]) || []; }
+      };
+    }
+
+    function cellMoveCost(u, v, cells) {
+      // TODO: refine with slope & river crossing penalties
+      // For now Euclidean center distance
+      const ax = cells[u].cx, ay = cells[u].cy;
+      const bx = cells[v].cx, by = cells[v].cy;
+      return Math.hypot(ax - bx, ay - by);
+    }
+
+    function aStarCells(start, goal, graph, cells) {
+      const open = new MinHeap(n => n.f); // you already have MinHeap
+      const g = new Map(), f = new Map(), came = new Map();
+      g.set(start, 0);
+      const h = (i) => {
+        const dx = cells[i].cx - cells[goal].cx, dy = cells[i].cy - cells[goal].cy;
+        return Math.hypot(dx, dy);
+      };
+      f.set(start, h(start));
+      open.push({i: start, f: f.get(start)});
+      const closed = new Set();
+      while (open.size) {
+        const cur = open.pop().i;
+        if (cur === goal) break;
+        if (closed.has(cur)) continue;
+        closed.add(cur);
+        for (const nb of graph.neighbors(cur)) {
+          const tentative = g.get(cur) + cellMoveCost(cur, nb, cells);
+          if (tentative < (g.get(nb) ?? Infinity)) {
+            came.set(nb, cur);
+            g.set(nb, tentative);
+            const fn = tentative + h(nb);
+            f.set(nb, fn);
+            open.push({i: nb, f: fn});
+          }
+        }
+      }
+      // Reconstruct
+      const path = [];
+      let p = goal;
+      if (!came.has(goal) && start !== goal) return [];
+      while (p !== undefined) {
+        path.push(p);
+        p = came.get(p);
+      }
+      path.reverse();
+      return path;
+    }
+
+    function mstOverPoints(points) {
+      // Prim’s MST on complete graph in geometric space
+      const n = points.length;
+      if (n <= 1) return [];
+      const inTree = new Array(n).fill(false);
+      const dist = new Array(n).fill(Infinity);
+      const parent = new Array(n).fill(-1);
+      dist[0] = 0;
+      for (let k = 0; k < n; k++) {
+        // pick min dist not in tree
+        let u = -1, best = Infinity;
+        for (let i = 0; i < n; i++) if (!inTree[i] && dist[i] < best) { best = dist[i]; u = i; }
+        inTree[u] = true;
+        for (let v = 0; v < n; v++) if (!inTree[v]) {
+          const dx = points[u].x - points[v].x, dy = points[u].y - points[v].y;
+          const d = dx*dx + dy*dy;
+          if (d < dist[v]) { dist[v] = d; parent[v] = u; }
+        }
+      }
+      const edges = [];
+      for (let i = 1; i < n; i++) edges.push([parent[i], i]);
+      return edges;
+    }
+
+    function pathToPolyline(path, cells) {
+      return path.map(i => ({x: cells[i].cx, y: cells[i].cy}));
+    }
+
+    function connectCapitalsWithRoads(capitals, cells, isWater) {
+      if (!capitals.length) return [];
+      const edges = mstOverPoints(capitals);
+      const graph = buildLandGraphSimple(cells, isWater);
+      const polylines = [];
+      for (const [ai, bi] of edges) {
+        const A = capitals[ai], B = capitals[bi];
+        const start = A.cell, goal = B.cell;
+        const path = aStarCells(start, goal, graph, cells);
+        const line = pathToPolyline(path, cells);
+        if (line.length) polylines.push(line);
+      }
+      return polylines;
+    }
+
+    // === Road proximity bump + town placement (not wired) ===
+    function indexCellsNearPolylines(cells, polylines, radiusPx = 8) {
+      const r2 = radiusPx * radiusPx;
+      const mark = new Array(cells.length).fill(false);
+      for (const line of polylines) {
+        for (const pt of line) {
+          for (let i = 0; i < cells.length; i++) {
+            const dx = cells[i].cx - pt.x, dy = cells[i].cy - pt.y;
+            if (dx*dx + dy*dy <= r2) mark[i] = true;
+          }
+        }
+      }
+      return mark;
+    }
+
+    function rescoreWithRoads(baseScore, cells, roadIndex) {
+      const out = baseScore.slice();
+      for (let i = 0; i < out.length; i++) if (roadIndex[i]) out[i] += 0.15;
+      return out;
+    }
+
+    function placeTowns(score, cells, capitals) {
+      const want = CONFIG.settlements.townsCount;
+      const idx = Array.from(score.keys()).filter(i => Number.isFinite(score[i]));
+      idx.sort((a,b) => score[b] - score[a]);
+      const chosen = [];
+      for (const i of idx) {
+        const p = { x: cells[i].cx, y: cells[i].cy, cell: i, type: "town", port: false };
+        if (
+          capitals.every(c => Math.hypot(c.x - p.x, c.y - p.y) >= CONFIG.settlements.townMinSpacing) &&
+          chosen.every(t => Math.hypot(t.x - p.x, t.y - p.y) >= CONFIG.settlements.townMinSpacing)
+        ) {
+          chosen.push(p);
+          if (chosen.length === want) break;
+        }
+      }
+      return chosen;
     }
 
     /**
@@ -6798,8 +6761,8 @@
             const slope = Math.abs(cell.high - neighbor.high);
             const riverCross = crossesRiverSegment(cell, neighbor) ? 1 : 0;
             
-            const slopePenalty = +document.getElementById('slopePenaltyInput').value || 1.2;
-            const riverPenalty = +document.getElementById('riverPenaltyInput').value || 1.0;
+            const slopePenalty = 1.2;
+            const riverPenalty = 1.0;
             
             const w = dist * (1 + slope * slopePenalty + riverCross * riverPenalty);
             
@@ -7245,7 +7208,6 @@
       
       return path;
     }
-    
     /**
      * Build a compressed port graph for efficient gap detection
      * @param {Array} portsWithSeaIndex - Array of ports with their sea indices
@@ -7755,7 +7717,7 @@
     function buildBackboneRoads(burgs, landGraph) {
       if (burgs.length < 2) return [];
       
-      const roadDensity = +document.getElementById('roadDensityInput').value || 0.6;
+      const roadDensity = 0.6;
       const hubCount = Math.max(2, Math.round(burgs.length * (0.35 + 0.5 * roadDensity)));
       
       // Create sets for tracking used edges and burg cells
@@ -7860,26 +7822,7 @@
           };
         });
         
-        if (!MERGE_LAND_ROUTES) {
-          // Batch add all paths at once using optimized drawing
-          const roadSegments = roadPaths.map(p => {
-            // Extract points from the SVG path data
-            const pathData = p.d;
-            // For now, use the original D3 approach since the data structure is complex
-            return p;
-          });
-          
-          // Use original D3 approach for now since path data is already in SVG format
-          roadsG.selectAll('path')
-            .data(roadSegments)
-            .enter()
-            .append('path')
-            .each(function(d) {
-              Object.entries(d).forEach(([attr, value]) => {
-                d3.select(this).attr(attr, value);
-              });
-            });
-        }
+        // deduped: roads rendering handled by merged polylines implementation
         
         if (DEBUG) console.log(`Component ${componentIndex}: ${mstEdges.length} roads between ${componentHubs.length} hubs`);
       });
@@ -7895,7 +7838,7 @@
     function buildLocalTrails(burgs, landGraph) {
       if (burgs.length < 2) return [];
       
-      const trailDensity = +document.getElementById('trailDensityInput').value || 0.5;
+      const trailDensity = 0.5;
       const maxDistance = 160 + (trailDensity * 80); // 160-240px range
       const maxConnections = Math.max(1, Math.round(1 + trailDensity * 2)); // 1-3 connections
       
@@ -7969,21 +7912,7 @@
         if (DEBUG) console.log(`Component ${componentIndex}: ${existingTrails.length} trails built`);
       });
       
-      if (!MERGE_LAND_ROUTES) {
-        // Batch add all trail paths at once using optimized drawing
-        const trailsG = d3.select('#routes .trails');
-        
-        // Use original D3 approach for now since path data is already in SVG format
-        trailsG.selectAll('path')
-          .data(trailPaths)
-          .enter()
-          .append('path')
-          .each(function(d) {
-            Object.entries(d).forEach(([attr, value]) => {
-              d3.select(this).attr(attr, value);
-            });
-          });
-      }
+      // deduped: trails rendering handled by merged polylines implementation
       
       if (DEBUG) console.log(`Total trails built: ${existingTrails.length}`);
       
@@ -8044,7 +7973,6 @@
       }
       return hubs;
     }
-
     function buildSeaTransitNetwork({ kHubs } = {}) {
       const G = GraphCache.sea;
       if (!G) return;
@@ -8282,6 +8210,7 @@
       const connSel = g.selectAll('path.port-connector').data(connectors);
       connSel.join('path')
         .attr('class', 'port-connector')
+        .attr('mask', 'url(#oceanMask)')
         .attr('d', d => `M${d.x1},${d.y1}L${d.x2},${d.y2}`)
         .attr('fill', 'none')
         .attr('stroke', '#ffffff')
@@ -8518,7 +8447,6 @@
       
       return segments;
     }
-    
     /**
      * Build sea route backbone using Azgaar-style single-source approach
      * @param {Array} portBurgs - Array of port burgs
@@ -8958,8 +8886,8 @@
       // Collect route data for economic town placement
       const routeData = { routes: [], trails: [] };
       
-      // Build primary roads (only if enabled)
-      if (document.getElementById('roadsOnInput') && document.getElementById('roadsOnInput').checked) {
+      // Build primary roads (fixed pipeline)
+      if (true) {
         ProgressManager.update(93, 'Building routes...', 'Computing primary roads...');
         
         // Add timeout to prevent hanging on roads computation
@@ -8975,8 +8903,8 @@
         }
       }
       
-      // Build local trails (only if enabled)
-      if (document.getElementById('trailsOnInput') && document.getElementById('trailsOnInput').checked) {
+      // Build local trails (disabled in fixed pipeline)
+      if (false) {
         ProgressManager.update(94, 'Building routes...', 'Computing local trails...');
         
         // Add timeout to prevent hanging on trails computation
@@ -8997,8 +8925,8 @@
         buildRoadUsage(routeData, cells);
       }
       
-      // Build sea routes if enabled
-      if (DOM.seaRoutesOnInput.checked) {
+      // Build sea routes (enabled in fixed pipeline)
+      if (true) {
         ProgressManager.update(95, 'Building routes...', 'Computing sea networks...');
         if (DEBUG) console.log('Sea routes enabled, building sea graph...');
         
@@ -9083,6 +9011,13 @@
         renderMergedLandNetwork(window.__state.cells);
       }
       
+      // Ensure labels for this run
+      try {
+        renderRegionLabels();
+        renderBurgLabels();
+        updateLabelPositions(window.currentTransform || d3.zoomIdentity);
+      } catch (e) { /* ignore */ }
+      
       } catch (error) {
         console.error('Error in computeRoutes:', error);
         // Update progress to show error
@@ -9135,7 +9070,6 @@
         }
       }
     }
-
     // --- Test harness --- (kept original tests and added border checks)
     document.getElementById('runTests').addEventListener('click', runTests);
 
