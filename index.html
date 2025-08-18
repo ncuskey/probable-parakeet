@@ -5231,6 +5231,18 @@
           mapCells.selectAll('path.mapCell')
             .filter(d => isWater[d.index])
             .remove();
+
+          // Draw a top sea overlay masked by oceanMask to hide any underlying seams in water
+          const zr = d3.select('#zoomRoot');
+          zr.select('#seaOverlay').remove();
+          zr.append('rect')
+            .attr('id', 'seaOverlay')
+            .attr('x', 0).attr('y', 0)
+            .attr('width', +svg.attr('width'))
+            .attr('height', +svg.attr('height'))
+            .attr('fill', WATER_COLOR)
+            .attr('mask', 'url(#oceanMask)')
+            .attr('pointer-events', 'none');
         }
 
         // Create unified land paths for masking and underlay
