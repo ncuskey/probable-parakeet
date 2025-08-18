@@ -3590,12 +3590,26 @@
                 const towns = placeTowns(rescored, cells, capitals);
                 // 5) Publish burgs
                 window.__state.burgs = capitals.concat(towns);
+                // Tag ports from sheltered harbors, ensure one per island
+                const islandOf = window.__state.islandOf || null;
+                const oceanIdOf = window.__state.oceanIdOf || null;
+                tagPortsOnBurgs(window.__state.burgs, cells, isWater, oceanIdOf);
+                ensureIslandPorts(window.__state.burgs, cells, isWater, islandOf, baseScore);
                 // Ensure unique IDs for downstream algorithms (routes, rendering)
                 window.__state.burgs.forEach((b, idx) => { if (b.id == null) b.id = idx; });
                 // 6) Regions & labels (reuse your existing machinery)
                 generateRegionalNames({renameAll: false});
                 assignMacroRegions(capitals);
                 computeAndDrawRegions();
+                // Connect non-port capitals to nearest regional ports with primary roads
+                const extraPortLinks = [];
+                for (const cap of window.__state.burgs.filter(b => b.capital)) {
+                  if (!cap.isPort) {
+                    const pl = connectCapitalToNearestRegionalPort(cap, window.__state.burgs, cells, isWater);
+                    if (pl && pl.length) extraPortLinks.push(pl);
+                  }
+                }
+                if (extraPortLinks.length) drawPrimaryRoads(extraPortLinks);
                 if (typeof drawBurgLabels === "function") drawBurgLabels();
                 // Render visuals
                 renderBurgs();
@@ -7781,8 +7795,8 @@
         // console.log(`Component ${i}:`, component.map(b => `burg ${b.id} (cell ${b.cell})`));
       });
       
-              // Debug: show burg positions to verify they're on different landmasses
-        // console.log('Burg positions:', burgs.map(b => ({ id: b.id, cell: b.cell, x: cells[b.cell].cx, y: cells[b.cell].cy })));
+      // Debug: show burg positions to verify they're on different landmasses
+      // console.log('Burg positions:', burgs.map(b => ({ id: b.id, cell: b.cell, x: cells[b.cell].cx, y: cells[b.cell].cy })));
       
       return components;
     }
@@ -9203,7 +9217,7 @@
 
         // T8: Azgaar palette produces a gradient (many unique fills)
         const fills = new Set(Array.from(document.querySelectorAll('path.mapCell')).slice(0, 200).map(p => p.getAttribute('fill')));
-        assert('Azgaar palette -> gradient (many unique fills)', fills.size > 5);
+        assert('Azgaar palette -> gradient (many unique fills)', fills.length > 5);
 
         // T9: Center area is significant after autoSeed (center-biased island)
         const svgSel = st.svg;
