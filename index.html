@@ -3535,9 +3535,9 @@
                 window.__state.macroCapitals = capitals;
                 // 3) Connect capitals with primary roads (MST + A*)
                 const primaryRoads = connectCapitalsWithRoads(capitals, cells, isWater);
-                // 4) Rescore near roads & place towns
-                const roadIndex = indexCellsNearPolylines(cells, primaryRoads, 8);
-                const rescored = rescoreWithRoads(baseScore, cells, roadIndex);
+                // 4) Rescore by road usage/crossroads & place towns
+                const roadIndex = indexCellsNearPolylines(cells, primaryRoads, 8); // retained if used elsewhere
+                const rescored = rescoreWithRoads(baseScore, cells);
                 const towns = placeTowns(rescored, cells, capitals);
                 // 5) Publish burgs
                 window.__state.burgs = capitals.concat(towns);
@@ -6534,12 +6534,20 @@
       return mark;
     }
 
-    function rescoreWithRoads(baseScore, cells, roadIndex) {
+    function rescoreWithRoads(baseScore, cells /* roadIndex unused now */) {
       const out = baseScore.slice();
-      for (let i = 0; i < out.length; i++) if (roadIndex[i]) {
-        // Add a randomized bump between 0.25 and 0.35
-        const bump = 0.25 + Math.random() * 0.10;
-        out[i] += bump;
+      const rng = rngFromMapSeed("towns-jitter");
+      for (let i = 0; i < out.length; i++) {
+        const used = cells[i].pathUsed ?? 0;      // road repetition
+        if (used > 0) {
+          // Base road bonus + small extra per additional reuse (capped)
+          const extra = Math.min(used - 1, 3) * 0.03; // max +0.09
+          out[i] += 0.12 + extra;
+        }
+        // Simple crossroads bump if many reuses hit this cell
+        if (used >= 2) out[i] += 0.05;
+        // Tiny randomness to prevent clumping bias
+        out[i] += (rng() - 0.5) * 0.02; // ±0.01
       }
       return out;
     }
