@@ -29,6 +29,7 @@
 #routes .trails { stroke: #9b7b3a; stroke-width: 1.0px; fill: none; stroke-dasharray: 3 3; stroke-linecap: round; }
 #routes .searoutes { stroke: #ff0000; stroke-width: 5px; fill: none; stroke-dasharray: 6 4; opacity: 1.0; z-index: 1000; }
 #routes .primary-road { stroke: #8B4513; stroke-width: 3px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+#routes path.secondary-road { fill: none; stroke: currentColor; opacity: 0.35; stroke-width: 0.7; }
 
     /* Label styling */
     .labels-burgs text, .labels-regions text {
@@ -3610,6 +3611,9 @@
                   }
                 }
                 if (extraPortLinks.length) drawPrimaryRoads(extraPortLinks);
+                // Secondary connectors from unserved towns to nearest corridor/capital
+                const sec = connectSecondaryRoads(window.__state.burgs, cells, isWater, 220);
+                if (sec.length) drawSecondaryRoads(sec);
                 if (typeof drawBurgLabels === "function") drawBurgLabels();
                 // Render visuals
                 renderBurgs();
@@ -6459,6 +6463,23 @@
         .attr("d", d => line(d));
     }
 
+    function ensureSecondaryRoadsLayer() {
+      const g = d3.select("#routes");
+      let s = g.select("g.secondary-roads");
+      if (s.empty()) s = g.append("g").attr("class", "secondary-roads");
+      return s;
+    }
+    function drawSecondaryRoads(polylines) {
+      const g = ensureSecondaryRoadsLayer();
+      const line = d3.line().x(d => d.x).y(d => d.y);
+      g.selectAll(null)
+        .data(polylines)
+        .enter()
+        .append("path")
+        .attr("class", "secondary-road")
+        .attr("d", d => line(d));
+    }
+
     // === Graph building & pathfinding scaffolds (to be refined) ===
     function buildLandGraphSimple(cells, isWater) {
       // neighbors: array of arrays; cost: function(u,v)
@@ -6638,6 +6659,50 @@
         return pathToPolyline(path, cells);
       }
       return null;
+    }
+
+    function buildServedIndex(cells) {
+      const served = new Set();
+      for (let i = 0; i < cells.length; i++) if ((cells[i].pathUsed ?? 0) > 0) served.add(i);
+      return served;
+    }
+    function nearestServedOrCapitalCell(town, capitals, cells, served) {
+      const ti = (town.cell !== undefined ? town.cell : town.cellIndex);
+      let best = null, bestD = Infinity;
+      for (const cap of capitals) {
+        const ci = (cap.cell !== undefined ? cap.cell : cap.cellIndex);
+        const d = Math.hypot(cells[ci].cx - cells[ti].cx, cells[ci].cy - cells[ti].cy);
+        if (d < bestD) { bestD = d; best = ci; }
+      }
+      const servedArr = Array.from(served);
+      const step = Math.max(1, Math.floor(servedArr.length / 200));
+      for (let k = 0; k < servedArr.length; k += step) {
+        const i = servedArr[k];
+        const d = Math.hypot(cells[i].cx - cells[ti].cx, cells[i].cy - cells[ti].cy);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      return best;
+    }
+    function connectSecondaryRoads(burgs, cells, isWater, maxLenPx = 220) {
+      const towns = burgs.filter(b => !b.capital);
+      const capitals = burgs.filter(b => b.capital);
+      const served = buildServedIndex(cells);
+      const graph = buildLandGraphSimple(cells, isWater);
+      const polylines = [];
+      for (const t of towns) {
+        const ti = (t.cell !== undefined ? t.cell : t.cellIndex);
+        if ((cells[ti].pathUsed ?? 0) > 0) continue;
+        const target = nearestServedOrCapitalCell(t, capitals, cells, served);
+        if (target == null) continue;
+        const path = aStarCells(ti, target, graph, cells);
+        if (!path.length) continue;
+        const A = cells[path[0]], Z = cells[path[path.length-1]];
+        const geomLen = Math.hypot(A.cx - Z.cx, A.cy - Z.cy);
+        if (geomLen > maxLenPx) continue;
+        for (const i of path) cells[i].pathUsed = (cells[i].pathUsed ?? 0) + 1;
+        polylines.push(pathToPolyline(path, cells));
+      }
+      return polylines;
     }
 
     // === Road proximity bump + town placement (not wired) ===
