@@ -6515,7 +6515,11 @@
 
     function rescoreWithRoads(baseScore, cells, roadIndex) {
       const out = baseScore.slice();
-      for (let i = 0; i < out.length; i++) if (roadIndex[i]) out[i] += 0.15;
+      for (let i = 0; i < out.length; i++) if (roadIndex[i]) {
+        // Add a randomized bump between 0.25 and 0.35
+        const bump = 0.25 + Math.random() * 0.10;
+        out[i] += bump;
+      }
       return out;
     }
 
