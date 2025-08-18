@@ -2559,13 +2559,13 @@
       } else {
         // SVG-based rendering for smaller maps
       mapCells.selectAll('path.mapCell')
-        .data(cells.filter(c => c.high >= sea))
+        .data(cells)
         .enter()
         .append('path')
         .attr('class', 'mapCell')
         .attr('id', d => d.index)
         .attr('d', d => 'M' + d.poly.map(p => p.join(',')).join('L') + 'Z')
-        .attr('fill', '#000')
+        .attr('fill', d => d.high >= sea ? '#000' : 'none')
         .attr('fill-rule', 'nonzero')
         .attr('stroke', 'none'); // Ensure no cell borders from initial creation
       }
@@ -5232,18 +5232,7 @@
             .filter(d => isWater[d.index])
             .remove();
 
-          // Draw a top sea overlay masked by oceanMask to hide any underlying seams in water
-          const zr = d3.select('#zoomRoot');
-          zr.select('#seaOverlay').remove();
-          const svgForSea = window.__state.svg || d3.select('svg');
-          zr.append('rect')
-            .attr('id', 'seaOverlay')
-            .attr('x', 0).attr('y', 0)
-            .attr('width', +svgForSea.attr('width'))
-            .attr('height', +svgForSea.attr('height'))
-            .attr('fill', WATER_COLOR)
-            .attr('mask', 'url(#oceanMask)')
-            .attr('pointer-events', 'none');
+          // Note: avoid adding a sea overlay above routes to prevent hiding sea routes
         }
 
         // Create unified land paths for masking and underlay
