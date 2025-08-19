@@ -26,7 +26,7 @@
     
     /* Route styling */
     #routes .roads { stroke: #6b4e16; stroke-width: 1.4px; fill: none; stroke-linecap: round; }
-#routes .trails { stroke: #9b7b3a; stroke-width: 1.0px; fill: none; stroke-dasharray: 3 3; stroke-linecap: round; }
+#routes .trails { stroke: #d2b48c; stroke-width: 1.0px; fill: none; stroke-dasharray: 3 3; stroke-linecap: round; }
 #routes .searoutes { stroke: #ff0000; stroke-width: 5px; fill: none; stroke-dasharray: 6 4; opacity: 1.0; z-index: 1000; }
 #routes .primary-road { stroke: #8B4513; stroke-width: 3px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 #routes path.secondary-road { fill: none; stroke: currentColor; opacity: 0.35; stroke-width: 0.7; }
@@ -66,7 +66,12 @@
     /* Regions: hide raster & overlay; remove borders */
     body.view-mode-regions #mapCells image { display: none; }
     body.view-mode-regions #regions .overlay { display: none; }
-    body.view-mode-regions #mapCells .mapCell { stroke: none; shape-rendering: geometricPrecision; }
+    body.view-mode-regions #mapCells .mapCell { stroke: none !important; stroke-width: 0 !important; shape-rendering: geometricPrecision; }
+    /* Ensure ocean cells never show borders if water class is used */
+    #mapCells .mapCell.water { stroke: none !important; stroke-width: 0 !important; }
+    /* Hide neutral region outlines in Region view (prevents ocean Voronoi seams) */
+    body.view-mode-regions #regions-neutral,
+    body.view-mode-regions .region-neutral { display: none !important; }
 
     /* Terrain: show raster & overlay */
     body.view-mode-terrain #mapCells image { display: block; }
@@ -1562,7 +1567,7 @@
       d3.select('#regions-neutral').remove();
       d3.select('#map').append('g').attr('id', 'regions-neutral')
         .selectAll('path')
-        .data(cells.map((c, i) => ({ c, i })).filter(o => regionOfCell[o.i] === -1))
+        .data(cells.map((c, i) => ({ c, i })).filter(o => regionOfCell[o.i] === -1 && !isWater[o.i]))
         .enter().append('path')
         .attr('class', 'region-neutral')
         .attr('d', o => 'M' + o.c.poly.map(p => p.join(',')).join('L') + 'Z');
@@ -3930,7 +3935,7 @@
               }
             } else if (routeType === 'trails') {
               if (!el.hasAttribute('stroke') && !el.style.stroke) {
-                el.setAttribute('stroke', '#9b7b3a');
+                el.setAttribute('stroke', '#d2b48c');
               }
               if (!el.hasAttribute('stroke-width') && !el.style.strokeWidth) {
                 el.setAttribute('stroke-width', '0.8px');
@@ -6965,7 +6970,7 @@
       trailsG.append('path')
         .attr('d', line(smoothed))
         .attr('fill', 'none')
-        .attr('stroke', '#9b7b3a')
+        .attr('stroke', '#d2b48c')
         .attr('stroke-width', '0.8px')
         .attr('stroke-dasharray', '2 2')
         .attr('stroke-linecap', 'round')
@@ -8147,7 +8152,7 @@
                 trailPaths.push({
                   d: line(smoothed),
                   fill: 'none',
-                  stroke: '#9b7b3a',
+                  stroke: '#d2b48c',
                   'stroke-width': '1px',
                   'stroke-dasharray': '3 3',
                   'stroke-linecap': 'round',
@@ -8425,7 +8430,7 @@
       trailsG.selectAll('path').data(trailsPolys).join('path')
         .attr('d', poly => lineGen(poly))
         .attr('fill', 'none')
-        .attr('stroke', '#9b7b3a')
+        .attr('stroke', '#d2b48c')
         .attr('stroke-width', '1px')
         .attr('stroke-dasharray', '3 3')
         .attr('stroke-linecap', 'round')
