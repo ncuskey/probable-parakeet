@@ -26,7 +26,8 @@
     
     /* Route styling */
     #routes .roads { stroke: #6b4e16; stroke-width: 1.4px; fill: none; stroke-linecap: round; }
-#routes .trails { stroke: #d2b48c; stroke-width: 1.0px; fill: none; stroke-dasharray: 3 3; stroke-linecap: round; }
+#routes .trails { stroke: #9b7b3a; stroke-width: 1.0px; fill: none; stroke-dasharray: 4 3; stroke-linecap: round; stroke-linejoin: round; }
+#routes path.trails { stroke: #9b7b3a !important; }
 #routes .searoutes { stroke: #ff0000; stroke-width: 5px; fill: none; stroke-dasharray: 6 4; opacity: 1.0; z-index: 1000; }
 #routes .primary-road { stroke: #8B4513; stroke-width: 3px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 #routes path.secondary-road { fill: none; stroke: currentColor; opacity: 0.35; stroke-width: 0.7; }
@@ -3931,17 +3932,17 @@
                 el.setAttribute('stroke', '#6b4e16');
               }
               if (!el.hasAttribute('stroke-width') && !el.style.strokeWidth) {
-                el.setAttribute('stroke-width', '1.2px');
+                el.setAttribute('stroke-width', '1.4px');
               }
             } else if (routeType === 'trails') {
               if (!el.hasAttribute('stroke') && !el.style.stroke) {
-                el.setAttribute('stroke', '#d2b48c');
+                el.setAttribute('stroke', '#9b7b3a');
               }
               if (!el.hasAttribute('stroke-width') && !el.style.strokeWidth) {
-                el.setAttribute('stroke-width', '0.8px');
+                el.setAttribute('stroke-width', '1.0px');
               }
               if (!el.hasAttribute('stroke-dasharray') && !el.style.strokeDasharray) {
-                el.setAttribute('stroke-dasharray', '3 3');
+                el.setAttribute('stroke-dasharray', '4 3');
               }
             } else if (routeType === 'searoutes') {
               if (!el.hasAttribute('stroke') && !el.style.stroke) {
@@ -6465,7 +6466,7 @@
       const line = d3.line()
         .x(d => d[0])
         .y(d => d[1])
-        .curve(d3.curveBasis);
+        .curve(d3.curveCatmullRom.alpha(0.5));
       
       roadsG.append('path')
         .attr('class', 'primary-road')
@@ -6508,13 +6509,14 @@
     }
     function drawSecondaryRoads(polylines) {
       const g = ensureSecondaryRoadsLayer();
-      const line = d3.line().x(d => d.x).y(d => d.y);
+      const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveCatmullRom.alpha(0.5));
       g.selectAll(null)
         .data(polylines)
         .enter()
         .append("path")
-        .attr("class", "secondary-road")
-        .attr("d", d => line(d));
+        .attr("class", "roads")
+        .attr("d", d => line(d))
+        .attr("fill", "none");
     }
 
     // === Graph building & pathfinding scaffolds (to be refined) ===
@@ -6962,19 +6964,15 @@
       const cells = window.__state.cells;
       const points = pathCells.map(cellId => [cells[cellId].cx, cells[cellId].cy]);
       
-      const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBasis);
+      const line = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveCatmullRom.alpha(0.5));
       const smoothed = smoothLine(points, 1);
       
       // Add to trails (spurs are local connections)
       const trailsG = d3.select('#routes .trails');
       trailsG.append('path')
+        .attr('class', 'trails')
         .attr('d', line(smoothed))
         .attr('fill', 'none')
-        .attr('stroke', '#d2b48c')
-        .attr('stroke-width', '0.8px')
-        .attr('stroke-dasharray', '2 2')
-        .attr('stroke-linecap', 'round')
-        .attr('stroke-linejoin', 'round')
         .attr('vector-effect', 'non-scaling-stroke');
       
       console.log(`Added spur road with ${pathCells.length} cells`);
@@ -8414,27 +8412,20 @@
       const roadsG  = routesG.select('.roads');
       const trailsG = routesG.select('.trails');
 
-      const lineGen = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
+      const lineGen = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveCatmullRom.alpha(0.5));
 
       // roads (solid, thicker)
       roadsG.selectAll('path').data(roadsPolys).join('path')
+        .attr('class', 'roads')
         .attr('d', poly => lineGen(poly))
         .attr('fill', 'none')
-        .attr('stroke', '#6b4e16')
-        .attr('stroke-width', '1.5px')
-        .attr('stroke-linecap', 'round')
-        .attr('stroke-linejoin', 'round')
         .attr('vector-effect', 'non-scaling-stroke');
 
       // trails (thin, dashed) — only where there isn't a road
       trailsG.selectAll('path').data(trailsPolys).join('path')
+        .attr('class', 'trails')
         .attr('d', poly => lineGen(poly))
         .attr('fill', 'none')
-        .attr('stroke', '#d2b48c')
-        .attr('stroke-width', '1px')
-        .attr('stroke-dasharray', '3 3')
-        .attr('stroke-linecap', 'round')
-        .attr('stroke-linejoin', 'round')
         .attr('vector-effect', 'non-scaling-stroke');
     }
 
