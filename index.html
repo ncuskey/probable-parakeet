@@ -29,8 +29,8 @@
 #routes .trails { stroke: #9b7b3a; stroke-width: 1.0px; fill: none; stroke-dasharray: 4 3; stroke-linecap: round; stroke-linejoin: round; }
 #routes path.trails { stroke: #9b7b3a !important; }
 #routes .searoutes { stroke: #ff0000; stroke-width: 5px; fill: none; stroke-dasharray: 6 4; opacity: 1.0; z-index: 1000; }
-#routes .primary-road { stroke: #8B4513; stroke-width: 3px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-#routes path.secondary-road { fill: none; stroke: currentColor; opacity: 0.35; stroke-width: 0.7; }
+#routes .primary-road { stroke: #8B4513; stroke-width: 2.2px; fill: none; stroke-linecap: round; stroke-linejoin: round; opacity: 0.95; }
+#routes path.secondary-road { fill: none; stroke: #7f6732; opacity: 0.95; stroke-width: 1.7px; stroke-linecap: round; stroke-linejoin: round; }
 
     /* Label styling */
     .labels-burgs text, .labels-regions text {
@@ -3706,8 +3706,22 @@
                 }
                 if (extraPortLinks.length) drawPrimaryRoads(extraPortLinks);
                 // Secondary connectors from unserved towns to nearest corridor/capital
-                const sec = connectSecondaryRoads(window.__state.burgs, cells, isWater, 220);
-                if (sec.length) drawSecondaryRoads(sec);
+                const secondaries = connectSecondaryRoads(window.__state.burgs, cells, isWater, 260);
+                
+                // Optional: Second pass for any remaining unserved towns with higher maxLenPx
+                const { inNet } = buildRoadNetworkIndex(window.__state.cells);
+                const unservedTowns = window.__state.burgs.filter(b => !b.capital && !inNet.has(b.cellIndex ?? b.cell));
+                if (unservedTowns.length > 0) {
+                  console.log(`Second pass: connecting ${unservedTowns.length} remaining unserved towns`);
+                  connectSecondaryRoads(unservedTowns, cells, isWater, 300);
+                }
+                
+                rebuildAndDrawSecondary(cells);
+                
+                // Ensure proper layering: primaries on top, secondaries below
+                const routes = d3.select('#routes');
+                routes.select('g.secondary-roads').lower();
+                routes.selectAll('path.primary-road').raise();
                 if (typeof drawBurgLabels === "function") drawBurgLabels();
                 // Render visuals
                 renderBurgs();
@@ -6600,7 +6614,7 @@
         .data(polylines)
         .enter()
         .append("path")
-        .attr("class", "roads")
+        .attr("class", "secondary-road")
         .attr("d", d => line(d))
         .attr("fill", "none");
     }
@@ -6680,6 +6694,46 @@
       }
       path.reverse();
       return path;
+    }
+
+    // --- Road Network Index Utilities ---
+    function canonicalEdgeKey(u, v) { 
+      return u < v ? `${u}-${v}` : `${v}-${u}`; 
+    }
+
+    function buildRoadNetworkIndex(cells) {
+      const inNet = new Set();
+      const edgeSet = new Set();
+
+      // Any cell touched by primary or secondary usage is "in network"
+      for (let i = 0; i < cells.length; i++) {
+        if ((cells[i].pathPrimaryUsed ?? 0) > 0 || (cells[i].pathSecondaryUsed ?? 0) > 0) {
+          inNet.add(i);
+        }
+      }
+
+      // Reconstruct edges between in-network neighbors (cheap, local)
+      for (let i = 0; i < cells.length; i++) {
+        if (!inNet.has(i)) continue;
+        const ns = cells[i].neighbors || [];
+        for (const j of ns) {
+          if (inNet.has(j)) edgeSet.add(canonicalEdgeKey(i, j));
+        }
+      }
+      return { inNet, edgeSet };
+    }
+
+    function addPathToNetwork(path, cells, markPrimary = false) {
+      for (let t = 0; t < path.length; t++) {
+        const i = path[t];
+        // mark usage
+        if (markPrimary) {
+          cells[i].pathPrimaryUsed = (cells[i].pathPrimaryUsed ?? 0) + 1;
+        } else {
+          cells[i].pathSecondaryUsed = (cells[i].pathSecondaryUsed ?? 0) + 1;
+        }
+        cells[i].pathUsed = (cells[i].pathUsed ?? 0) + 1;
+      }
     }
 
     function mstOverPoints(points) {
@@ -6815,26 +6869,202 @@
       }
       return best;
     }
+
+    // --- Helpers: anchors & snapping ---
+
+    function buildAnchorSet(cells, burgs) {
+      // Anchors are: (a) any capital cell, (b) any cell already used by PRIMARY roads
+      const anchor = new Set();
+      for (const b of burgs) if (b.capital || b.type === "capital" || b.isCapital) {
+        const cellIdx = (b.cell !== undefined ? b.cell : b.cellIndex);
+        anchor.add(cellIdx);
+      }
+      for (let i = 0; i < cells.length; i++) {
+        if ((cells[i].pathPrimaryUsed ?? 0) > 0) anchor.add(i);
+      }
+      return anchor;
+    }
+
+    function snapEndpointToAnchor(path, anchorSet, cells) {
+      // Ensure the last cell in `path` is an anchor; if not but a neighbor is, append it.
+      if (!path.length) return path;
+      const last = path[path.length - 1];
+      if (anchorSet.has(last)) return path;
+      const ns = cells[last].neighbors || [];
+      for (const n of ns) {
+        if (anchorSet.has(n)) {
+          path.push(n);
+          return path;
+        }
+      }
+      return path; // no change if no adjacent anchor
+    }
+
+    // --- Replacement: robust secondary connectors ---
     function connectSecondaryRoads(burgs, cells, isWater, maxLenPx = 220) {
       const towns = burgs.filter(b => !b.capital);
-      const capitals = burgs.filter(b => b.capital);
-      const served = buildServedIndex(cells);
       const graph = buildLandGraphSimple(cells, isWater);
       const polylines = [];
+      const pathsCells = [];
+
+      // Build live network index (primary + any existing secondary)
+      let { inNet, edgeSet } = buildRoadNetworkIndex(cells);
+
+      // Helper: stop search once we touch ANY network cell
+      function aStarToNetwork(start) {
+        // Standard A*, but goal is "first time we pop a node that is inNet"
+        const open = new MinHeap(n => n.f);
+        const g = new Map(), f = new Map(), came = new Map();
+        g.set(start, 0);
+        f.set(start, 0);
+        open.push({i:start, f:0});
+
+        const visited = new Set();
+
+        while (open.size) {
+          const cur = open.pop().i;
+          if (visited.has(cur)) continue;
+          visited.add(cur);
+
+          if (inNet.has(cur) && cur !== start) {
+            // Reconstruct path start -> cur
+            const path = [];
+            let x = cur;
+            while (x !== undefined) { path.push(x); x = came.get(x); }
+            path.reverse();
+            return path;
+          }
+
+          const neigh = graph.neighbors(cur) || [];
+          for (const nb of neigh) {
+            const tentative = g.get(cur) + cellMoveCost(cur, nb, cells); // reuse favors
+            if (tentative < (g.get(nb) ?? Infinity)) {
+              came.set(nb, cur);
+              g.set(nb, tentative);
+              const heur = 0; // unknown "nearest inNet" — zero is admissible since goal is any inNet
+              const F = tentative + heur;
+              f.set(nb, F);
+              open.push({i:nb, f:F});
+            }
+          }
+        }
+        return null;
+      }
+
+      function snapToNetwork(path) {
+        if (!path || path.length < 2) return path;
+        let last = path[path.length - 1];
+        if (inNet.has(last)) return path;
+        // 1-hop
+        for (const n of (cells[last].neighbors || [])) if (inNet.has(n)) { path.push(n); return path; }
+        // 2-hop
+        for (const n of (cells[last].neighbors || [])) {
+          for (const m of (cells[n].neighbors || [])) if (inNet.has(m)) { path.push(n, m); return path; }
+        }
+        return path;
+      }
+
+      function pathToEdges(path) {
+        const out = [];
+        for (let i = 1; i < path.length; i++) out.push(canonicalEdgeKey(path[i-1], path[i]));
+        return out;
+      }
+
+      // Reset secondary paths cells array
+      window.__state.secondaryPathsCells = [];
+      
+      // PASS 1: connect each unserved town
+      let connectedCount = 0;
+      let skippedCount = 0;
       for (const t of towns) {
-        const ti = (t.cell !== undefined ? t.cell : t.cellIndex);
-        if ((cells[ti].pathUsed ?? 0) > 0) continue;
-        const target = nearestServedOrCapitalCell(t, capitals, cells, served);
-        if (target == null) continue;
-        const path = aStarCells(ti, target, graph, cells);
-        if (!path.length) continue;
-        const A = cells[path[0]], Z = cells[path[path.length-1]];
+        const ti = t.cellIndex ?? t.cell;
+        if (inNet.has(ti)) {
+          skippedCount++;
+          continue; // already on the network
+        }
+        const path = aStarToNetwork(ti);
+        if (!path || path.length < 2) continue;
+
+        // Early clip: if the path touches the network earlier, cut at first inNet cell
+        let cut = path.length;
+        for (let k = 1; k < path.length; k++) { if (inNet.has(path[k])) { cut = k; break; } }
+        const clipped = path.slice(0, cut + 1);
+
+        // Snap last step if we're one cell short
+        const snapped = snapToNetwork(clipped);
+
+        // Length guard
+        const A = cells[snapped[0]], Z = cells[snapped[snapped.length - 1]];
         const geomLen = Math.hypot(A.cx - Z.cx, A.cy - Z.cy);
         if (geomLen > maxLenPx) continue;
-        for (const i of path) cells[i].pathUsed = (cells[i].pathUsed ?? 0) + 1;
-        polylines.push(pathToPolyline(path, cells));
+
+        // Dedup guard: if all edges already exist, skip drawing
+        const edges = pathToEdges(snapped);
+        const allKnown = edges.every(e => edgeSet.has(e));
+        if (allKnown) {
+          // Already in logical network; still record for this render pass
+          pathsCells.push(snapped);
+          polylines.push(pathToPolyline(snapped, cells));
+          continue;
+        }
+
+        // Commit: mark usage (secondary), update network + edgeSet, store for viz
+        addPathToNetwork(snapped, cells, /*primary?*/ false);
+        for (const e of edges) edgeSet.add(e);
+        for (const i of snapped) inNet.add(i);
+
+        pathsCells.push(snapped);
+        polylines.push(pathToPolyline(snapped, cells));
+        connectedCount++;
       }
+
+      // expose for later tools
+      if (!window.__state.secondaryPathsCells) {
+        window.__state.secondaryPathsCells = [];
+      }
+      window.__state.secondaryPathsCells.push(...pathsCells);
+
       return polylines;
+    }
+
+    function edgesFromPath(path, cells) {
+      const segs = [];
+      for (let i = 1; i < path.length; i++) {
+        const u = cells[path[i-1]], v = cells[path[i]];
+        segs.push({ a:{x:u.cx, y:u.cy}, b:{x:v.cx, y:v.cy} });
+      }
+      return segs;
+    }
+
+    function rebuildAndDrawSecondary(cells) {
+      const allPaths = window.__state.secondaryPathsCells || [];
+      // 1) Build a unique edge set in cell-index space
+      const uniq = new Set();
+      for (const p of allPaths) {
+        for (let i = 1; i < p.length; i++) {
+          const a = p[i-1], b = p[i];
+          const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+          uniq.add(key);
+        }
+      }
+      // 2) Convert back to segments in XY space
+      const segs = [];
+      for (const key of uniq) {
+        const [a,b] = key.split('-').map(Number);
+        const A = cells[a], B = cells[b];
+        segs.push({a:{x:A.cx,y:A.cy}, b:{x:B.cx,y:B.cy}});
+      }
+      // 3) Merge and draw
+      const merged = segmentsToPolylines(segs);
+      const secondaryG = d3.select("#routes").select("g.secondary-roads");
+      if (secondaryG.empty()) d3.select("#routes").append("g").attr("class","secondary-roads");
+      d3.select("#routes").select("g.secondary-roads").selectAll("*").remove();
+      const secondaryLine = d3.line().x(d=>d.x).y(d=>d.y).curve(d3.curveCatmullRom.alpha(0.5));
+      d3.select("#routes").select("g.secondary-roads")
+        .selectAll(null).data(merged).enter()
+        .append("path").attr("class","secondary-road")
+        .attr("d", d => secondaryLine(d))
+        .attr("vector-effect", "non-scaling-stroke");
     }
 
     // === Road proximity bump + town placement (not wired) ===
@@ -9472,6 +9702,9 @@
               // 2) Render as primary-road overlay
               const basePrimaries = routeData.routes.map(path => pathToPolyline(path, cells));
               appendPrimaryRoads(basePrimaries);
+              
+              // Store primary paths for merging
+              window.__state.primaryPathsCells = routeData.routes;
             }
           } catch (e) {
             console.warn('Primary backbone promotion failed:', e);
@@ -9488,13 +9721,35 @@
               console.log('Island values in mapping:', Array.from(islandValues).sort((a, b) => a - b));
             }
           }
+          // Capture additional primary roads from connectivity
+          const additionalPrimaryPaths = [];
+          const captureDrawFn = (polylines) => {
+            appendPrimaryRoads(polylines);
+            // Convert polylines back to cell paths for storage
+            for (const polyline of polylines) {
+              const cellPath = polyline.map(point => {
+                return window.__state.cells.findIndex(c => 
+                  Math.abs(c.cx - point.x) < 0.1 && Math.abs(c.cy - point.y) < 0.1
+                );
+              }).filter(i => i !== -1);
+              if (cellPath.length >= 2) {
+                additionalPrimaryPaths.push(cellPath);
+              }
+            }
+          };
+          
           ensureCapitalPrimaryConnectivity(
             window.__state.cells,
             window.__state.isWater,
             window.__state.islandOf,
             window.__state.burgs,
-            appendPrimaryRoads // appends new primary polylines
+            captureDrawFn
           );
+          
+          // Add additional primary paths to storage
+          if (additionalPrimaryPaths.length > 0) {
+            window.__state.primaryPathsCells = (window.__state.primaryPathsCells || []).concat(additionalPrimaryPaths);
+          }
         } finally {
           clearTimeout(roadsTimeout);
         }
