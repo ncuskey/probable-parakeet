@@ -628,15 +628,17 @@
         townMinSpacing: 18,    // px
       },
       scoring: {
-        wCoast: 0.35, wRiver: 0.35, wFlat: 0.20, wFertile: 0.10,
+        wCoast: 0.18, wRiver: 0.35, wFlat: 0.28, wFertile: 0.19,
         riverConfluenceBonus: 0.30,
-        shelteredHarborBonus: 0.25,
+        shelteredHarborBonus: 0.10,
         elevationPenaltyK: 0.50,
+        coastDecaySteps: 2,
       },
       roads: {
         connectStrategy: "mst", // "mst" + A* for edges (capitals network)
         slopePenalty: 1.2,
         riverCrossPenalty: 1.0,
+        coastAversion: 0.12, // mild surcharge when stepping onto a shoreline cell
       },
       regions: {
         allowNeutral: true,
@@ -650,6 +652,45 @@
     function rngFromMapSeed(suffix = "") {
       const mapSeed = String(window.__state?.seed ?? "mapseed");
       return NameGen.seededRNG(mapSeed + "|" + suffix);
+    }
+
+    // Precompute coastal distance in cell steps (multi-source BFS)
+    function computeCoastSteps(cells, isWater) {
+      const N = cells.length;
+      const steps = new Int16Array(N).fill(32767);
+      const q = [];
+      for (let i = 0; i < N; i++) {
+        if (isWater[i]) continue;
+        const coastal = (cells[i].neighbors||[]).some(n => isWater[n]);
+        if (coastal) { steps[i] = 0; q.push(i); }
+      }
+      for (let qi = 0; qi < q.length; qi++) {
+        const u = q[qi];
+        const ns = cells[u].neighbors||[];
+        for (const v of ns) {
+          if (isWater[v]) continue;
+          if (steps[v] > steps[u] + 1) { steps[v] = steps[u] + 1; q.push(v); }
+        }
+      }
+      return steps; // 0 = coast, 1.. = inland rings
+    }
+
+    // Precompute river distance (multi-source BFS from river cells)
+    function computeRiverSteps(cells) {
+      const N = cells.length;
+      const steps = new Int16Array(N).fill(32767);
+      const q = [];
+      for (let i = 0; i < N; i++) {
+        if (cells[i].hasRiver) { steps[i] = 0; q.push(i); }
+      }
+      for (let qi = 0; qi < q.length; qi++) {
+        const u = q[qi];
+        const ns = cells[u].neighbors||[];
+        for (const v of ns) {
+          if (steps[v] > steps[u] + 1) { steps[v] = steps[u] + 1; q.push(v); }
+        }
+      }
+      return steps;
     }
 
     // === utils/heap: MinHeap for A* open set ===
@@ -1064,21 +1105,43 @@
     // === Azgaar-style cell suitability scoring (not wired yet) ===
     function computeCellSuitability(cells, isWater) {
       const score = new Float32Array(cells.length);
+      
+      // Get (or compute once & stash) coast steps
+      if (!window.__state.coastSteps) {
+        window.__state.coastSteps = computeCoastSteps(cells, isWater);
+      }
+      
+      // Get (or compute once & stash) river steps
+      if (!window.__state.riverSteps) {
+        window.__state.riverSteps = computeRiverSteps(cells);
+      }
+      
       for (let i = 0; i < cells.length; i++) {
         if (isWater[i]) { score[i] = -Infinity; continue; }
         const c = cells[i];
         // Heuristics: these properties can be derived/augmented elsewhere
-        const isCoast = c.neighbors?.some(n => isWater[n]) ? 1 : 0;
-        const nearRiver = c.hasRiver ? 1 : 0;               // set during river gen if available
-        const confluence = (c.riverDegree ?? 0) >= 2 ? 1 : 0;
         const flat = 1 - (c.localSlope ?? 0);               // 0..1 where 1 is flattest
         const fertile = c.biomeFertility ?? 0.5;            // fallback if not computed
         const elevPenalty = (c.elev ?? 0) * CONFIG.scoring.elevationPenaltyK;
 
-        const coastTerm = isCoast ? CONFIG.scoring.wCoast : 0;
+        // Coastal decay system
+        const cs = window.__state.coastSteps[i]; // 0..32767
+        let coastTerm = 0;
+        if (cs === 0) {
+          coastTerm = CONFIG.scoring.wCoast;
+        } else if (cs <= (CONFIG.scoring.coastDecaySteps ?? 2)) {
+          coastTerm = CONFIG.scoring.wCoast * 0.5; // near-shore band still OK
+        } // else 0 inland
+        
+        // River proximity system
+        const rs = window.__state.riverSteps[i]; // steps from river
+        // Linear falloff over 0..5 steps (tweakable)
+        const riverProx = rs <= 5 ? (1 - rs / 5) : 0;
+        const riverTerm = CONFIG.scoring.wRiver * riverProx;
+        // Keep confluence & estuary bump as-is:
+        const riverBump = (c.riverDegree ?? 0) >= 2 ? CONFIG.scoring.riverConfluenceBonus : 0;
+        
         const shelteredBonus = c.isShelteredHarbor ? CONFIG.scoring.shelteredHarborBonus : 0;
-        const riverTerm = nearRiver ? CONFIG.scoring.wRiver : 0;
-        const riverBump = confluence ? CONFIG.scoring.riverConfluenceBonus : 0;
         const flatTerm = CONFIG.scoring.wFlat * flat;
         const fertTerm = CONFIG.scoring.wFertile * fertile;
 
@@ -6528,7 +6591,7 @@
       };
     }
 
-    function cellMoveCost(u, v, cells) {
+    function cellMoveCost(u, v, cells, opts = {}) {
       // Base Euclidean step
       const ax = cells[u].cx, ay = cells[u].cy;
       const bx = cells[v].cx, by = cells[v].cy;
@@ -6548,9 +6611,16 @@
       const used = cells[v].pathUsed ?? 0;
       const reuseMult = used > 0 ? 0.15 : 1;
 
-      return dist * slopeMult * riverMult * reuseMult;
+      // NEW: Coastal aversion (only if enabled and we know coastSteps)
+      let coastMult = 1;
+      const cs = window.__state?.coastSteps;
+      if (opts.coastPenalty !== false && cs && cs[v] === 0) {
+        coastMult += (CONFIG.roads.coastAversion ?? 0);
+      }
+
+      return dist * slopeMult * riverMult * reuseMult * coastMult;
     }
-    function aStarCells(start, goal, graph, cells) {
+    function aStarCells(start, goal, graph, cells, opts = {}) {
       const open = new MinHeap(n => n.f); // you already have MinHeap
       const g = new Map(), f = new Map(), came = new Map();
       g.set(start, 0);
@@ -6567,7 +6637,7 @@
         if (closed.has(cur)) continue;
         closed.add(cur);
         for (const nb of graph.neighbors(cur)) {
-          const tentative = g.get(cur) + cellMoveCost(cur, nb, cells);
+          const tentative = g.get(cur) + cellMoveCost(cur, nb, cells, opts);
           if (tentative < (g.get(nb) ?? Infinity)) {
             came.set(nb, cur);
             g.set(nb, tentative);
@@ -6692,7 +6762,7 @@
       // Use simple neighbor graph that aStarCells expects
       const graph = buildLandGraphSimple(cells, isWater);
       const goalIdx = (best.cell !== undefined ? best.cell : best.cellIndex);
-      const path = aStarCells(capIdx, goalIdx, graph, cells);
+      const path = aStarCells(capIdx, goalIdx, graph, cells, { coastPenalty: false });
       if (path && path.length) {
         for (const i of path) cells[i].pathUsed = (cells[i].pathUsed ?? 0) + 1;
         return pathToPolyline(path, cells);
@@ -6762,15 +6832,20 @@
     function rescoreWithRoads(baseScore, cells /* roadIndex unused now */) {
       const out = baseScore.slice();
       const rng = rngFromMapSeed("towns-jitter");
+      const coastSteps = window.__state.coastSteps; // from coastal decay system
+      
       for (let i = 0; i < out.length; i++) {
         const used = cells[i].pathUsed ?? 0;      // road repetition
         if (used > 0) {
           // Base road bonus + small extra per additional reuse (capped)
           const extra = Math.min(used - 1, 3) * 0.03; // max +0.09
           out[i] += 0.12 + extra;
+          if (used >= 2) out[i] += 0.05; // crossroads
+          // NEW: slightly prefer inland nodes over immediate coastline
+          const cs = coastSteps ? coastSteps[i] : 9999;
+          if (cs >= 3) out[i] += 0.04;     // more than ~2 rings inland
+          else if (cs === 0) out[i] -= 0.04; // on-the-beach gets less econ bump
         }
-        // Simple crossroads bump if many reuses hit this cell
-        if (used >= 2) out[i] += 0.05;
         // Tiny randomness to prevent clumping bias
         out[i] += (rng() - 0.5) * 0.02; // ±0.01
       }
@@ -6781,15 +6856,30 @@
       const want = CONFIG.settlements.townsCount;
       const idx = Array.from(score.keys()).filter(i => Number.isFinite(score[i]));
       idx.sort((a,b) => score[b] - score[a]);
+
       const chosen = [];
+      const suppress = new Float32Array(cells.length); // coastal suppression
+
+      const isCoastal = i => (cells[i].neighbors||[]).some(n => window.__state.isWater[n]);
+
       for (const i of idx) {
+        const sEff = score[i] - suppress[i];
         const p = { x: cells[i].cx, y: cells[i].cy, cell: i, type: "town", port: false, population: 3000 };
         if (
           capitals.every(c => Math.hypot(c.x - p.x, c.y - p.y) >= CONFIG.settlements.townMinSpacing) &&
           chosen.every(t => Math.hypot(t.x - p.x, t.y - p.y) >= CONFIG.settlements.townMinSpacing)
         ) {
+          // Re-evaluate with suppression threshold to avoid too many beach picks
+          if (sEff < (score[i] * 0.85)) continue; // if heavily suppressed, skip for now
           chosen.push(p);
           if (chosen.length === want) break;
+          // If coastal, suppress neighboring coast cells
+          if (isCoastal(i)) {
+            const ns = cells[i].neighbors||[];
+            for (const v of ns) {
+              if (!window.__state.isWater[v] && isCoastal(v)) suppress[v] += 0.18;
+            }
+          }
         }
       }
       return chosen;
