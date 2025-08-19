@@ -26,9 +26,20 @@
     
     /* Route styling */
     #routes .roads { stroke: #6b4e16; stroke-width: 1.4px; fill: none; stroke-linecap: round; }
+    /* Subtle baseline for merged network so layered primaries/secondaries still stand out */
+    #routes .roads path { stroke: #6f5530; stroke-width: 1.2px; opacity: 0.5; vector-effect: non-scaling-stroke; }
 #routes .trails { stroke: #9b7b3a; stroke-width: 1.0px; fill: none; stroke-dasharray: 4 3; stroke-linecap: round; stroke-linejoin: round; }
 #routes path.trails { stroke: #9b7b3a !important; }
-#routes .searoutes { stroke: #ff0000; stroke-width: 5px; fill: none; stroke-dasharray: 6 4; opacity: 1.0; z-index: 1000; }
+#routes .searoutes { stroke: none; fill: none; }
+#routes .searoutes path.route {
+  stroke: #ffffff;
+  stroke-width: 1.6px;
+  stroke-dasharray: 6 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.8;
+  vector-effect: non-scaling-stroke;
+}
 #routes .primary-road { stroke: #8B4513; stroke-width: 2.2px; fill: none; stroke-linecap: round; stroke-linejoin: round; opacity: 0.95; }
 #routes path.secondary-road { fill: none; stroke: #7f6732; opacity: 0.95; stroke-width: 1.7px; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -1077,7 +1088,7 @@
       const comp = new Int32Array(cells.length); comp.fill(-1);
       let id = 0;
       for (let i = 0; i < cells.length; i++) {
-        if (isWater[i] || comp[i] !== -1) continue;
+        if (isWater[i]) continue;
         const q = [i]; comp[i] = id;
         for (let qi = 0; qi < q.length; qi++) {
           const u = q[qi];
@@ -1101,7 +1112,6 @@
         cells[i].poly = poly ? poly.map(p => [p[0], p[1]]) : [[cells[i].cx, cells[i].cy]];
       }
     }
-
     // === Azgaar-style cell suitability scoring (not wired yet) ===
     function computeCellSuitability(cells, isWater) {
       const score = new Float32Array(cells.length);
@@ -1336,6 +1346,7 @@
 
       ensureCellPolys(cells, width, height);
       const landComp = labelLandComponents(cells, isWater);
+      window.__state.landComp = landComp; // Store for later use
 
       // Capitals (use flagged if present; else farthest-first you already have)
       let capitals = window.__state.macroCapitals;
@@ -1897,7 +1908,6 @@
         markClean: () => { terrainDirty = false; }
       };
     })();
-
     // Precipitation caching
     let PRECIP = null;
     function recomputePrecip() { 
@@ -2221,7 +2231,6 @@
         this.update(phaseInfo.percent, phaseInfo.text);
       }
     };
-
   (function () {
     'use strict';
 
@@ -3706,7 +3715,7 @@
                 }
                 if (extraPortLinks.length) drawPrimaryRoads(extraPortLinks);
                 // Secondary connectors from unserved towns to nearest corridor/capital
-                const secondaries = connectSecondaryRoads(window.__state.burgs, cells, isWater, 260);
+                const secondaries = connectSecondaryRoads(window.__state.burgs, cells, isWater, 300);
                 
                 // Optional: Second pass for any remaining unserved towns with higher maxLenPx
                 const { inNet } = buildRoadNetworkIndex(window.__state.cells);
@@ -3722,6 +3731,18 @@
                 const routes = d3.select('#routes');
                 routes.select('g.secondary-roads').lower();
                 routes.selectAll('path.primary-road').raise();
+                
+                // Defer backfill and island connects until after DOM paths exist
+                requestAnimationFrame(() => {
+                  // Backfill: connect any remaining orphan towns to network
+                  backfillTownsToNetwork();
+                  
+                  // Island connections: handle towns on separate land components
+                  connectIslandTowns();
+                  
+                  // Audit connectivity
+                  finalConnectivityAudit();
+                });
                 if (typeof drawBurgLabels === "function") drawBurgLabels();
                 // Render visuals
                 renderBurgs();
@@ -4202,7 +4223,6 @@
         a.click();
         URL.revokeObjectURL(a.href);
       }
-
       async function savePNG(svgNode, w, h, filename = 'map.png') {
         // Ensure the map is properly colored before export
         if (window.__state.recolor) {
@@ -4947,7 +4967,6 @@
         // outer then holes; evenodd fill will subtract the holes
         return ringToPathD(outer) + holes.map(ringToPathD).join("");
       }
-
       // --- Land Mask and Underlay Helper ---
       function ensureLandUnderlay(svg, zoomRoot, width, height) {
         const defs = svg.select('defs');
@@ -5705,7 +5724,6 @@
         name: 'Unnamed' // Will be replaced by generateRegionalNames
       };
     }
-
     // generateBurgs removed; fixed pipeline replaces it
     /**
      * Render burgs using D3 data-join
@@ -6564,6 +6582,21 @@
       return g;
     }
 
+    function ensureRouteGroups() {
+      const g = d3.select('#routes');
+      if (g.select('.primary-roads').empty()) g.append('g').attr('class', 'primary-roads');
+      if (g.select('.secondary-roads').empty()) g.append('g').attr('class', 'secondary-roads');
+      if (g.select('.searoutes').empty()) g.append('g').attr('class', 'searoutes');
+    }
+
+    function clearRoutes() {
+      const g = d3.select('#routes');
+      g.selectAll('.primary-roads > path').remove();
+      g.selectAll('.secondary-roads > path').remove();
+      g.selectAll('.searoutes > path').remove();
+      g.selectAll('.roads > path').remove();
+    }
+
     // Draw primary road polylines
     function drawPrimaryRoads(polylines) {
       const g = ensureRoutesLayer();
@@ -6627,6 +6660,32 @@
         neighbors(i) { return cells[i].neighbors?.filter(j => !isWater[j]) || []; }
       };
     }
+    
+    function simpleBFS(start, goal, graph) {
+      // Simple BFS to check if there's any path between two nodes
+      const visited = new Set();
+      const queue = [{node: start, path: [start]}];
+      
+      while (queue.length > 0) {
+        const {node, path} = queue.shift();
+        
+        if (node === goal) {
+          return path;
+        }
+        
+        if (visited.has(node)) continue;
+        visited.add(node);
+        
+        const neighbors = graph.neighbors(node) || [];
+        for (const neighbor of neighbors) {
+          if (!visited.has(neighbor)) {
+            queue.push({node: neighbor, path: [...path, neighbor]});
+          }
+        }
+      }
+      
+      return null; // No path found
+    }
 
     function cellMoveCost(u, v, cells, opts = {}) {
       // Base Euclidean step
@@ -6668,7 +6727,13 @@
       f.set(start, h(start));
       open.push({i: start, f: f.get(start)});
       const closed = new Set();
-      while (open.size) {
+      
+      // Add safety timeout to prevent infinite loops
+      let iterations = 0;
+      const maxIterations = opts.maxIterations || 10000;
+      
+      while (open.size && iterations < maxIterations) {
+        iterations++;
         const cur = open.pop().i;
         if (cur === goal) break;
         if (closed.has(cur)) continue;
@@ -6676,6 +6741,8 @@
         for (const nb of graph.neighbors(cur)) {
           const tentative = g.get(cur) + cellMoveCost(cur, nb, cells, opts);
           if (tentative < (g.get(nb) ?? Infinity)) {
+            // Check maxCost limit
+            if (opts.maxCost && tentative > opts.maxCost) continue;
             came.set(nb, cur);
             g.set(nb, tentative);
             const fn = tentative + h(nb);
@@ -6684,6 +6751,12 @@
           }
         }
       }
+      
+      if (iterations >= maxIterations) {
+        console.warn(`A* timeout after ${maxIterations} iterations for path from ${start} to ${goal}`);
+        return [];
+      }
+      
       // Reconstruct
       const path = [];
       let p = goal;
@@ -7065,6 +7138,476 @@
         .append("path").attr("class","secondary-road")
         .attr("d", d => secondaryLine(d))
         .attr("vector-effect", "non-scaling-stroke");
+    }
+
+    // === Backfill system: ensure every town connects to network ===
+    function sampleRoadPolylines(roadPaths, step = 10) {
+      // DOM-based sampling to correctly handle curved paths (C commands)
+      const roadNodes = [];
+      const cells = window.__state.cells;
+      for (const el of roadPaths) {
+        try {
+          const len = el.getTotalLength();
+          for (let s = 0; s <= len; s += step) {
+            const pt = el.getPointAtLength(s);
+            const cell = findNearestCell(pt.x, pt.y, cells);
+            if (cell !== -1) roadNodes.push({x: pt.x, y: pt.y, cell});
+          }
+        } catch (e) {
+          // Fallback: skip elements that don't support path length APIs
+          continue;
+        }
+      }
+      return roadNodes;
+    }
+
+    function parseSVGPath(d) {
+      // Simple SVG path parser for M/L commands
+      const points = [];
+      const commands = d.match(/[ML]\s*([^ML]+)/g) || [];
+      for (const cmd of commands) {
+        const coords = cmd.match(/[ML]\s*([-\d.]+)\s*,\s*([-\d.]+)/);
+        if (coords) {
+          points.push({x: parseFloat(coords[1]), y: parseFloat(coords[2])});
+        }
+      }
+      return points;
+    }
+
+    function findNearestCell(x, y, cells) {
+      let nearest = -1;
+      let minDist = Infinity;
+      for (let i = 0; i < cells.length; i++) {
+        const dist = Math.hypot(cells[i].cx - x, cells[i].cy - y);
+        if (dist < minDist) {
+          minDist = dist;
+          nearest = i;
+        }
+      }
+      return nearest;
+    }
+
+    function isNearAnyRoad(town, roadPaths, threshold = 6) {
+      // DOM-based sampling to check proximity to any curved road path
+      const townCell = window.__state.cells[town.cellIndex ?? town.cell];
+      for (const el of roadPaths) {
+        try {
+          const len = el.getTotalLength();
+          for (let s = 0; s <= len; s += Math.max(2, threshold)) {
+            const pt = el.getPointAtLength(s);
+            if (Math.hypot(townCell.cx - pt.x, townCell.cy - pt.y) <= threshold) return true;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+      return false;
+    }
+
+    function nearestByEuclid(roadNodes, town) {
+      if (!roadNodes || roadNodes.length === 0) return null;
+      
+      const townCell = window.__state.cells[town.cellIndex ?? town.cell];
+      let nearest = roadNodes[0];
+      let minDist = Infinity;
+      
+      for (const node of roadNodes) {
+        const dist = Math.hypot(townCell.cx - node.x, townCell.cy - node.y);
+        if (dist < minDist) {
+          minDist = dist;
+          nearest = node;
+        }
+      }
+      return nearest;
+    }
+    function backfillTownsToNetwork() {
+      const roadPaths = d3.select('#routes')
+        .selectAll('path.primary-road, path.secondary-road, .roads path')
+        .nodes();
+
+      // 1) Spatial index of existing road vertices
+      const roadNodes = sampleRoadPolylines(roadPaths, 10);
+      
+      // Skip if no roads exist yet
+      if (!roadNodes || roadNodes.length === 0) {
+        console.log('Backfill: No existing roads found, skipping backfill');
+        return;
+      }
+
+      // 2) For each town not already near a road, A* to nearest roadNode
+      const cells = window.__state.cells;
+      const isWater = window.__state.isWater || [];
+      const graph = buildLandGraphSimple(cells, isWater);
+      const backfillPaths = [];
+
+      for (const town of window.__state.burgs.filter(b => !b.capital && !b.removed)) {
+        if (isNearAnyRoad(town, roadPaths, 6)) continue; // 6px snap threshold
+        
+        // Skip if town is on water
+        if (isWater[town.cellIndex ?? town.cell]) {
+          console.log(`Backfill: Skipping water town ${town.id} (cell ${town.cellIndex ?? town.cell})`);
+          continue;
+        }
+        
+        const target = nearestByEuclid(roadNodes, town);
+        if (!target) continue; // Skip if no road nodes found
+        
+        // Skip if target is on water
+        if (isWater[target.cell]) {
+          console.log(`Backfill: Skipping water target for town ${town.id} (target cell ${target.cell} is water)`);
+          continue;
+        }
+        
+        // Check if town has valid neighbors
+        const townNeighbors = graph.neighbors(town.cellIndex ?? town.cell);
+        if (!townNeighbors || townNeighbors.length === 0) {
+          console.log(`Backfill: Town ${town.id} (cell ${town.cellIndex ?? town.cell}) has no valid neighbors`);
+          continue;
+        }
+        
+        // Check if target has valid neighbors
+        const targetNeighbors = graph.neighbors(target.cell);
+        if (!targetNeighbors || targetNeighbors.length === 0) {
+          console.log(`Backfill: Target for town ${town.id} (cell ${target.cell}) has no valid neighbors`);
+          continue;
+        }
+        
+        // Try with relaxed coast penalty first
+        let path = aStarCells(town.cellIndex ?? town.cell, target.cell, graph, cells, { 
+          maxCost: 5e9,
+          maxIterations: 20000, // Higher limit for backfill
+          coastPenalty: false // Relaxed for backfill
+        });
+        
+        // If no path found, try with even more relaxed settings
+        if (!path || path.length < 2) {
+          path = aStarCells(town.cellIndex ?? town.cell, target.cell, graph, cells, { 
+            maxCost: 1e10, // Much higher cost limit
+            maxIterations: 30000, // Even higher limit for difficult cases
+            coastPenalty: false
+          });
+        }
+        
+        // Final attempt with extremely relaxed settings
+        if (!path || path.length < 2) {
+          path = aStarCells(town.cellIndex ?? town.cell, target.cell, graph, cells, { 
+            maxCost: 1e11, // Extremely high cost limit for difficult cases
+            maxIterations: 50000, // Very high limit for final attempt
+            coastPenalty: false
+          });
+        }
+        
+        // If still no path, try a simple BFS to see if there's any connectivity at all
+        if (!path || path.length < 2) {
+          const bfsPath = simpleBFS(town.cellIndex ?? town.cell, target.cell, graph);
+          if (bfsPath && bfsPath.length > 1) {
+            console.log(`Backfill: Found BFS path for town ${town.id} but A* failed - this suggests a cost calculation issue`);
+          }
+        }
+        
+        if (path && path.length > 1) {
+          backfillPaths.push(path);
+          // Mark usage for this backfill path
+          for (const i of path) cells[i].pathUsed = (cells[i].pathUsed ?? 0) + 1;
+        } else {
+          // Calculate the straight-line distance to understand why pathfinding failed
+          const townCell = cells[town.cellIndex ?? town.cell];
+          const targetCell = cells[target.cell];
+          const straightLineDist = Math.hypot(townCell.cx - targetCell.cx, townCell.cy - targetCell.cy);
+          
+          // Check if the target cell is actually reachable (not water)
+          const targetIsWater = isWater[target.cell];
+          const townIsWater = isWater[town.cellIndex ?? town.cell];
+          
+          console.log(`Backfill failed for town ${town.id} (cell ${town.cellIndex ?? town.cell}) - straight line distance: ${straightLineDist.toFixed(1)}px, town is water: ${townIsWater}, target is water: ${targetIsWater}`);
+        }
+      }
+
+      // Draw backfill paths as secondary roads
+      if (backfillPaths.length > 0) {
+        for (const path of backfillPaths) {
+          const polyline = pathToPolyline(path, cells);
+          d3.select("#routes").select("g.secondary-roads")
+            .append("path")
+            .attr("class", "secondary-road")
+            .attr("d", d3.line().x(d=>d.x).y(d=>d.y).curve(d3.curveCatmullRom.alpha(0.5))(polyline))
+            .attr("vector-effect", "non-scaling-stroke");
+        }
+        console.log(`Backfill: connected ${backfillPaths.length} orphan towns`);
+      }
+    }
+
+    function auditTownConnectivity(px = 6) {
+      const orphanIds = [];
+      const roadPaths = d3.select('#routes')
+        .selectAll('path.primary-road, path.secondary-road, .roads path').nodes();
+      
+      // Skip if no burgs or roads
+      if (!window.__state.burgs || !roadPaths || roadPaths.length === 0) {
+        console.log('Connectivity audit: No burgs or roads to audit');
+        return orphanIds;
+      }
+      
+      for (const t of window.__state.burgs.filter(b => !b.capital && !b.removed)) {
+        if (!isNearAnyRoad(t, roadPaths, px)) {
+          orphanIds.push(t.id);
+        }
+      }
+      
+      if (orphanIds.length > 0) {
+        console.warn(`Connectivity audit: ${orphanIds.length} orphan towns found:`, orphanIds);
+      } else {
+        console.log('Connectivity audit: All towns connected ✓');
+      }
+      
+      return orphanIds;
+    }
+
+    function finalConnectivityAudit() {
+      const routes = d3.select('#routes');
+      const primCount = routes.selectAll('path.primary-road').size();
+      const secCount  = routes.selectAll('path.secondary-road').size();
+      const merged    = routes.selectAll('.roads path').size();
+
+      console.log(`primary-road count: ${primCount}`);
+      console.log(`secondary-road count: ${secCount}`);
+      console.log(`merged paths (aesthetic): ${merged}`);
+
+      const orphanIds = auditTownConnectivity(6);
+      if (orphanIds.length) {
+        console.warn(`Still orphaned: ${orphanIds.length}`, orphanIds);
+      }
+    }
+
+    function lastResortConnectOrphans(orphanIds) {
+      if (orphanIds.length === 0) return;
+      
+      console.log(`Last resort: attempting to connect ${orphanIds.length} remaining orphan towns to nearest capital`);
+      
+      const cells = window.__state.cells;
+      const isWater = window.__state.isWater || [];
+      const graph = buildLandGraphSimple(cells, isWater);
+      const capitals = window.__state.burgs.filter(b => b.capital);
+      
+      if (capitals.length === 0) {
+        console.log('Last resort: No capitals available for connection');
+        return;
+      }
+      
+      for (const orphanId of orphanIds) {
+        const town = window.__state.burgs.find(b => b.id === orphanId);
+        if (!town) continue;
+        
+        // Find nearest capital
+        let nearestCapital = capitals[0];
+        let minDist = Infinity;
+        for (const cap of capitals) {
+          const dist = Math.hypot(
+            cells[town.cellIndex ?? town.cell].cx - cells[cap.cellIndex ?? cap.cell].cx,
+            cells[town.cellIndex ?? town.cell].cy - cells[cap.cellIndex ?? cap.cell].cy
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            nearestCapital = cap;
+          }
+        }
+        
+        // Try to connect to nearest capital with very relaxed settings
+        let path = aStarCells(town.cellIndex ?? town.cell, nearestCapital.cellIndex ?? nearestCapital.cell, graph, cells, {
+          maxCost: 1e10, // Very high cost limit
+          maxIterations: 20000, // Higher limit for last resort
+          coastPenalty: false
+        });
+        
+        // If still no path, try with even higher cost limit
+        if (!path || path.length < 2) {
+          path = aStarCells(town.cellIndex ?? town.cell, nearestCapital.cellIndex ?? nearestCapital.cell, graph, cells, {
+            maxCost: 1e11, // Extremely high cost limit
+            maxIterations: 50000, // Very high limit for final attempt
+            coastPenalty: false
+          });
+        }
+        
+        if (path && path.length > 1) {
+          const polyline = pathToPolyline(path, cells);
+          d3.select("#routes").select("g.secondary-roads")
+            .append("path")
+            .attr("class", "secondary-road")
+            .attr("d", d3.line().x(d=>d.x).y(d=>d.y).curve(d3.curveCatmullRom.alpha(0.5))(polyline))
+            .attr("vector-effect", "non-scaling-stroke");
+          
+          console.log(`Last resort: Connected town ${town.id} to capital ${nearestCapital.id} (secondary)`);
+        } else {
+          // Calculate the straight-line distance to understand why pathfinding failed
+          const townCell = cells[town.cellIndex ?? town.cell];
+          const capitalCell = cells[nearestCapital.cellIndex ?? nearestCapital.cell];
+          const straightLineDist = Math.hypot(townCell.cx - capitalCell.cx, townCell.cy - capitalCell.cy);
+          console.log(`Last resort: Failed to connect town ${town.id} to capital ${nearestCapital.id} - straight line distance: ${straightLineDist.toFixed(1)}px`);
+        }
+      }
+    }
+
+    function canReachAnyRoad(town, landComp, roadPaths) {
+      const townComponent = landComp[town.cellIndex ?? town.cell];
+      for (const el of roadPaths) {
+        try {
+          const len = el.getTotalLength();
+          for (let s = 0; s <= len; s += 8) { // coarse is fine for component check
+            const pt = el.getPointAtLength(s);
+            const cell = findNearestCell(pt.x, pt.y, window.__state.cells);
+            if (cell !== -1 && landComp[cell] === townComponent) return true;
+          }
+        } catch (e) { continue; }
+      }
+      return false;
+    }
+
+    function pickBestCoastalTown(component, landComp) {
+      const cells = window.__state.cells;
+      const isWater = window.__state.isWater || [];
+      let best = null;
+      let bestScore = -Infinity;
+      
+      for (const burg of window.__state.burgs) {
+        const cellIdx = burg.cellIndex ?? burg.cell;
+        if (landComp[cellIdx] !== component) continue;
+        
+        // Check if coastal
+        const coastal = (cells[cellIdx].neighbors || []).some(n => isWater[n]);
+        if (!coastal) continue;
+        
+        // Score based on sheltered harbor status and existing port status
+        let score = 0;
+        if (burg.isPort) score += 10; // Already a port
+        if (cells[cellIdx].isShelteredHarbor) score += 5; // Sheltered harbor
+        score += Math.random() * 2; // Small random factor
+        
+        if (score > bestScore) {
+          bestScore = score;
+          best = burg;
+        }
+      }
+      
+      return best;
+    }
+
+    function nearestMainlandPort() {
+      // Find the nearest port or capital that's on the mainland (component 0)
+      const cells = window.__state.cells;
+      const landComp = window.__state.landComp || labelLandComponents(cells, window.__state.isWater);
+      
+      let nearest = null;
+      let minDist = Infinity;
+      
+      for (const burg of window.__state.burgs) {
+        const cellIdx = burg.cellIndex ?? burg.cell;
+        if (landComp[cellIdx] !== 0) continue; // Not mainland
+        
+        if (burg.capital || burg.isPort) {
+          const dist = Math.hypot(cells[cellIdx].cx, cells[cellIdx].cy);
+          if (dist < minDist) {
+            minDist = dist;
+            nearest = burg;
+          }
+        }
+      }
+      
+      return nearest;
+    }
+
+    function connectIslandTowns() {
+      const cells = window.__state.cells;
+      const isWater = window.__state.isWater || [];
+      const landComp = window.__state.landComp || labelLandComponents(cells, isWater);
+      const roadPaths = d3.select('#routes')
+        .selectAll('path.primary-road, path.secondary-road, .roads path')
+        .nodes();
+      
+      // Skip if no land component data
+      if (!landComp) {
+        console.log('Island connections: No land component data available');
+        return;
+      }
+
+      // Group towns by land component
+      const townsByComponent = new Map();
+      for (const town of window.__state.burgs.filter(b => !b.capital && !b.removed)) {
+        const component = landComp[town.cellIndex ?? town.cell];
+        if (component === -1) continue; // Water
+        
+        if (!townsByComponent.has(component)) {
+          townsByComponent.set(component, []);
+        }
+        townsByComponent.get(component).push(town);
+      }
+
+      // Check each component
+      for (const [component, towns] of townsByComponent) {
+        if (component === 0) continue; // Mainland
+        
+        if (!canReachAnyRoad(towns[0], landComp, roadPaths)) {
+          // This island has no road connection - promote best coastal town to port
+          const port = pickBestCoastalTown(component, landComp);
+          if (port) {
+            port.isPort = true;
+            
+            // Find nearest mainland port/capital
+            const mainlandPort = nearestMainlandPort();
+            if (mainlandPort) {
+              // Draw sea route
+              const portCell = cells[port.cellIndex ?? port.cell];
+              const mainlandCell = cells[mainlandPort.cellIndex ?? mainlandPort.cell];
+              
+              d3.select("#routes .searoutes")
+                .append("path")
+                .attr("class", "route")
+                .attr("d", `M ${portCell.cx} ${portCell.cy} L ${mainlandCell.cx} ${mainlandCell.cy}`)
+                .attr("fill","none")
+                .attr("stroke","#ffffff")
+                .attr("stroke-width","1.6px")
+                .attr("stroke-dasharray","6 4")
+                .attr("opacity",0.8)
+                .attr("vector-effect", "non-scaling-stroke");
+              
+              console.log(`Island connection: ${port.id} → ${mainlandPort.id} via sea route`);
+            }
+            
+            // Connect port to inland towns on same island
+            const graph = buildLandGraphSimple(cells, isWater);
+            for (const town of towns) {
+              if (town.id === port.id) continue;
+              
+              let path = aStarCells(town.cellIndex ?? town.cell, port.cellIndex ?? port.cell, graph, cells, {
+                maxCost: 1e10,
+                maxIterations: 20000, // Higher limit for island connections
+                coastPenalty: false // Relaxed for island connections
+              });
+              
+              // If no path found, try with higher cost limit
+              if (!path || path.length < 2) {
+                path = aStarCells(town.cellIndex ?? town.cell, port.cellIndex ?? port.cell, graph, cells, {
+                  maxCost: 1e11,
+                  maxIterations: 50000, // Very high limit for final attempt
+                  coastPenalty: false
+                });
+              }
+              
+              if (path && path.length > 1) {
+                const polyline = pathToPolyline(path, cells);
+                d3.select("#routes").select("g.secondary-roads")
+                  .append("path")
+                  .attr("class", "secondary-road")
+                  .attr("d", d3.line().x(d=>d.x).y(d=>d.y).curve(d3.curveCatmullRom.alpha(0.5))(polyline))
+                  .attr("vector-effect", "non-scaling-stroke");
+              } else {
+                console.log(`Island connection failed for town ${town.id} to port ${port.id}`);
+              }
+            }
+          } else {
+            console.log(`No suitable coastal town found for component ${component}`);
+          }
+        }
+      }
     }
 
     // === Road proximity bump + town placement (not wired) ===
@@ -7490,7 +8033,6 @@
       // Fallback BFS (unweighted) for robustness
       return bfsFallback(startIndex, endIndex, neighbors);
     }
-
     function reconstructPath(cameFrom, cur){
       const out = [cur];
       while (cameFrom[cur] !== -1) { cur = cameFrom[cur]; out.push(cur); }
@@ -8258,7 +8800,6 @@
         cells[i].pathUsed = (cells[i].pathUsed ?? 0) + 1;
       }
     }
-
     // Given current primary usage, compute which capitals are connected via PRIMARY cells only
     function capitalPrimaryComponents(capitals, cells) {
       const compId = new Map(); // capital.id -> component number
@@ -9010,7 +9551,6 @@
         .attr('opacity', 0.8)
         .attr('vector-effect', 'non-scaling-stroke');
     }
-
     /**
      * Build sea navigation graph
      * @param {Array} cells - All cells array
@@ -9603,7 +10143,6 @@
       }
       ProgressManager.update(100, 'Routes done');
     }
-
     // Guard against multiple simultaneous executions
     let isComputingRoutes = false;
     
