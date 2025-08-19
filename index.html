@@ -6553,15 +6553,38 @@
     // Draw primary road polylines
     function drawPrimaryRoads(polylines) {
       const g = ensureRoutesLayer();
-      // Clear only primary roads, keep trails/sea routes if any
       g.selectAll("path.primary-road").remove();
-      const line = d3.line().x(d => d.x).y(d => d.y);
+      const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveCatmullRom.alpha(0.5));
       g.selectAll(null)
         .data(polylines)
         .enter()
         .append("path")
         .attr("class", "primary-road")
-        .attr("d", d => line(d));
+        .attr("d", d => line(d))
+        .attr("fill", "none")
+        .attr("stroke", "#8B4513")
+        .attr("stroke-width", "3px")
+        .attr("stroke-linecap", "round")
+        .attr("stroke-linejoin", "round")
+        .attr("vector-effect", "non-scaling-stroke");
+    }
+
+    // Append primary road polylines (doesn't clear existing)
+    function appendPrimaryRoads(polylines) {
+      const g = ensureRoutesLayer();
+      const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveCatmullRom.alpha(0.5));
+      g.selectAll(null)
+        .data(polylines)
+        .enter()
+        .append("path")
+        .attr("class", "primary-road")
+        .attr("d", d => line(d))
+        .attr("fill", "none")
+        .attr("stroke", "#8B4513")
+        .attr("stroke-width", "3px")
+        .attr("stroke-linecap", "round")
+        .attr("stroke-linejoin", "round")
+        .attr("vector-effect", "non-scaling-stroke");
     }
 
     function ensureSecondaryRoadsLayer() {
@@ -6854,8 +6877,14 @@
 
     function placeTowns(score, cells, capitals) {
       const want = CONFIG.settlements.townsCount;
+      
+      // Seeded jitter so ranks aren't too monotonous
+      const rng = rngFromMapSeed("town-rank-jitter");
+      const jitter = new Float32Array(score.length);
+      for (let i = 0; i < score.length; i++) jitter[i] = (rng() - 0.5) * 0.02; // ±0.01
+      
       const idx = Array.from(score.keys()).filter(i => Number.isFinite(score[i]));
-      idx.sort((a,b) => score[b] - score[a]);
+      idx.sort((a, b) => (score[b] + jitter[b]) - (score[a] + jitter[a]));
 
       const chosen = [];
       const suppress = new Float32Array(cells.length); // coastal suppression
@@ -6863,7 +6892,7 @@
       const isCoastal = i => (cells[i].neighbors||[]).some(n => window.__state.isWater[n]);
 
       for (const i of idx) {
-        const sEff = score[i] - suppress[i];
+        const sEff = (score[i] + jitter[i]) - suppress[i];
         const p = { x: cells[i].cx, y: cells[i].cy, cell: i, type: "town", port: false, population: 3000 };
         if (
           capitals.every(c => Math.hypot(c.x - p.x, c.y - p.y) >= CONFIG.settlements.townMinSpacing) &&
@@ -7979,6 +8008,159 @@
       return group;
     }
     
+    // Group capitals by island id
+    function groupCapitalsByIsland(capitals, islandOf) {
+      const byIsl = new Map();
+      if (DEBUG) console.log('groupCapitalsByIsland: islandOf mapping available:', islandOf !== undefined);
+      for (const cap of capitals) {
+        const isl = islandOf?.[cap.cell] ?? -1;
+        if (DEBUG) console.log(`Capital ${cap.id} (cell ${cap.cell}): island ${isl}`);
+        if (!byIsl.has(isl)) byIsl.set(isl, []);
+        byIsl.get(isl).push(cap);
+      }
+      return byIsl;
+    }
+
+    // Track primary vs any-road usage separately
+    function markPrimaryUsage(path, cells) {
+      for (const i of path) {
+        cells[i].pathPrimaryUsed = (cells[i].pathPrimaryUsed ?? 0) + 1;
+        cells[i].pathUsed = (cells[i].pathUsed ?? 0) + 1;
+      }
+    }
+
+    // Given current primary usage, compute which capitals are connected via PRIMARY cells only
+    function capitalPrimaryComponents(capitals, cells) {
+      const compId = new Map(); // capital.id -> component number
+      let comp = 0;
+      const primary = new Set();
+      for (let i = 0; i < cells.length; i++) if ((cells[i].pathPrimaryUsed ?? 0) > 0) primary.add(i);
+      
+      if (DEBUG) {
+        console.log(`capitalPrimaryComponents: found ${primary.size} cells with primary road usage`);
+        console.log('Capitals to check:', capitals.map(c => ({ id: c.id, cell: c.cell })));
+      }
+
+      // BFS from each unassigned capital across primary cells
+      for (const cap of capitals) {
+        if (compId.has(cap.id ?? cap.cell)) continue;
+        comp++;
+        const q = [cap.cell];
+        const seen = new Set(q);
+        // Assign any capital encountered into this component
+        while (q.length) {
+          const u = q.shift();
+          for (const nb of (cells[u].neighbors || [])) {
+            if (!primary.has(nb) || seen.has(nb)) continue;
+            seen.add(nb); q.push(nb);
+          }
+        }
+        for (const c2 of capitals) {
+          if (seen.has(c2.cell)) compId.set(c2.id ?? c2.cell, comp);
+        }
+        // Also ensure the seed capital gets assigned even if isolated
+        if (!compId.has(cap.id ?? cap.cell)) compId.set(cap.id ?? cap.cell, comp);
+      }
+      
+      if (DEBUG) {
+        const comps = new Set(Array.from(compId.values()));
+        console.log(`capitalPrimaryComponents: found ${comps.size} components`);
+        for (const [capId, compNum] of compId) {
+          console.log(`Capital ${capId}: component ${compNum}`);
+        }
+      }
+      
+      return compId;
+    }
+
+    // Find cheapest primary-bridging path between any two components (uses A*)
+    function cheapestBridge(capitals, compId, cells, isWater, islandOf) {
+      const comps = new Map(); // comp -> capital list
+      for (const cap of capitals) {
+        const id = compId.get(cap.id ?? cap.cell);
+        if (!comps.has(id)) comps.set(id, []);
+        comps.get(id).push(cap);
+      }
+      const compKeys = Array.from(comps.keys());
+      if (compKeys.length <= 1) return null;
+
+      try {
+        const graph = buildLandGraphSimple(cells, isWater);
+        let best = null;
+        // Try all pairs of components, but only test a few nearest capital pairs to keep it cheap
+        for (let i = 0; i < compKeys.length; i++) {
+          for (let j = i + 1; j < compKeys.length; j++) {
+            const A = comps.get(compKeys[i]);
+            const B = comps.get(compKeys[j]);
+            // sort by geometric distance to sample nearest pairs first
+            const pairs = [];
+            for (const a of A) for (const b of B) {
+              const dx = cells[a.cell].cx - cells[b.cell].cx;
+              const dy = cells[a.cell].cy - cells[b.cell].cy;
+              pairs.push([a, b, dx*dx + dy*dy]);
+            }
+            pairs.sort((p, q) => p[2] - q[2]);
+            const limit = Math.min(pairs.length, 6); // sample up to 6 nearest pairs
+            for (let k = 0; k < limit; k++) {
+              const [a, b] = pairs[k];
+              // Normal A* cost (coastal penalty ON), reuses existing corridors
+              const path = aStarCells(a.cell, b.cell, graph, cells);
+              if (!path || path.length < 2) continue;
+              // Quick path cost: sum Euclidean segments (good enough here)
+              let cost = 0;
+              for (let t = 1; t < path.length; t++) {
+                const u = path[t-1], v = path[t];
+                cost += Math.hypot(cells[u].cx - cells[v].cx, cells[u].cy - cells[v].cy);
+              }
+              if (!best || cost < best.cost) best = { path, cost };
+            }
+          }
+        }
+        return best; // {path, cost} or null
+      } catch (error) {
+        if (DEBUG) console.error('Error in cheapestBridge:', error);
+        return null;
+      }
+    }
+
+    // Ensure all capitals on each island are primary-connected; add bridges if needed
+    function ensureCapitalPrimaryConnectivity(cells, isWater, islandOf, burgs, drawFn) {
+      const capitals = burgs.filter(b => b.capital || b.type === "capital" || b.isCapital);
+      if (DEBUG) console.log(`ensureCapitalPrimaryConnectivity: found ${capitals.length} capitals`);
+      if (DEBUG && capitals.length > 0) {
+        console.log('Capitals found:', capitals.map(c => ({ id: c.id, cell: c.cell, type: c.type, capital: c.capital, isCapital: c.isCapital })));
+      }
+      if (capitals.length < 2) return;
+      const byIsl = groupCapitalsByIsland(capitals, islandOf);
+      if (DEBUG) console.log('Island grouping:', Array.from(byIsl.entries()).map(([isl, caps]) => `Island ${isl}: ${caps.length} capitals`));
+      const added = [];
+
+      for (const [isl, caps] of byIsl) {
+        if (DEBUG) console.log(`Island ${isl}: ${caps?.length || 0} capitals`);
+        if (!caps || caps.length < 2) continue;
+        // Loop: connect components until only one remains
+        while (true) {
+          const compId = capitalPrimaryComponents(caps, cells);
+          const comps = new Set(Array.from(compId.values()));
+          if (DEBUG) console.log(`Island ${isl}: ${comps.size} capital components`);
+          if (comps.size <= 1) break;
+          const bridge = cheapestBridge(caps, compId, cells, isWater, islandOf);
+          if (!bridge) {
+            if (DEBUG) console.log(`Island ${isl}: no bridge found, giving up`);
+            break; // nothing we can do
+          }
+          if (DEBUG) console.log(`Island ${isl}: adding bridge with ${bridge.path.length} cells`);
+          markPrimaryUsage(bridge.path, cells);
+          const poly = pathToPolyline(bridge.path, cells);
+          added.push(poly);
+        }
+      }
+      if (added.length && typeof drawFn === "function") {
+        if (DEBUG) console.log(`Drawing ${added.length} additional primary road segments`);
+        drawFn(added); // append as primary
+      }
+    }
+    
     /**
      * Find connected components of burgs using flood fill on land cells
      * @param {Array} burgs - Burgs array
@@ -8081,6 +8263,48 @@
                       if (DEBUG) console.log(`Component ${componentIndex} has < 2 burgs, skipping`);
           return;
         }
+        
+        // --- CAPITAL PREPASS: connect capitals inside this land component via MST ---
+        const componentCaps = componentBurgs.filter(b =>
+          b.type === 'capital' || b.capital === true || b.isCapital === true ||
+          (Array.isArray(window.__state?.macroCapitals) && window.__state.macroCapitals.some(c => c.id === b.id))
+        );
+
+        if (DEBUG) console.log(`Component ${componentIndex}: capitals found = ${componentCaps.length}`);
+
+        if (componentCaps.length >= 2) {
+          // Build complete graph of capital-to-capital path costs (land only)
+          const capEdges = [];
+          for (let i = 0; i < componentCaps.length; i++) {
+            for (let j = i + 1; j < componentCaps.length; j++) {
+              const a = componentCaps[i], b = componentCaps[j];
+              const path = shortestPath(a.cell, b.cell, landGraph, usedEdges, burgCells);
+              if (path && path.length > 1) {
+                const cost = calculatePathCost(path, landGraph);
+                capEdges.push({ a: i, b: j, cost, path });
+              }
+            }
+          }
+
+          // Kruskal MST across capitals
+          capEdges.sort((x, y) => x.cost - y.cost);
+          const parent = new Array(componentCaps.length).fill(0).map((_, i) => i);
+          const find = x => (parent[x] === x ? x : (parent[x] = find(parent[x])));
+          const union = (x, y) => { parent[find(x)] = find(y); };
+
+          for (const e of capEdges) {
+            if (find(e.a) !== find(e.b)) {
+              union(e.a, e.b);
+
+              // Mark and accumulate so later roads/trails will prefer reusing this spine
+              markPathEdgesAsUsed(e.path, usedEdges);
+              accumulateLandEdges(e.path, 'road');   // merged renderer will draw it
+              allRouteSegments.push(e.path);
+            }
+          }
+          if (DEBUG) console.log(`Component ${componentIndex}: capital MST edges added = ${componentCaps.length - 1}`);
+        }
+        // --- END CAPITAL PREPASS ---
         
         // Select hubs within this component
         const componentHubs = componentBurgs
@@ -9233,6 +9457,44 @@
         
         try {
           routeData.routes = buildBackboneRoads(burgs, landGraph);
+          
+          // --- Promote backbone to primary roads (render + mark) ---
+          try {
+            const cells = window.__state.cells;
+            if (routeData.routes && routeData.routes.length) {
+              // 1) Mark primary usage so capitalPrimaryComponents can see them
+              for (const path of routeData.routes) {
+                if (path && path.length >= 2) {
+                  markPrimaryUsage(path, cells); // sets pathPrimaryUsed + pathUsed
+                }
+              }
+
+              // 2) Render as primary-road overlay
+              const basePrimaries = routeData.routes.map(path => pathToPolyline(path, cells));
+              appendPrimaryRoads(basePrimaries);
+            }
+          } catch (e) {
+            console.warn('Primary backbone promotion failed:', e);
+          }
+          
+          // Optional: Add a small debug to verify we rendered multiples
+          console.log('primary-road count:', document.querySelectorAll('#routes .primary-road').length);
+          
+          // Ensure all capitals on each landmass are primary-connected
+          if (DEBUG) {
+            console.log('islandOf mapping available:', window.__state.islandOf !== undefined);
+            if (window.__state.islandOf) {
+              const islandValues = new Set(Object.values(window.__state.islandOf));
+              console.log('Island values in mapping:', Array.from(islandValues).sort((a, b) => a - b));
+            }
+          }
+          ensureCapitalPrimaryConnectivity(
+            window.__state.cells,
+            window.__state.isWater,
+            window.__state.islandOf,
+            window.__state.burgs,
+            appendPrimaryRoads // appends new primary polylines
+          );
         } finally {
           clearTimeout(roadsTimeout);
         }
