@@ -1,0 +1,181 @@
+/* === LAYOUT CSS - Page layout, containers, layout === */
+
+/* Layout containers */
+.flex-container {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.map-container {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.map-svg {
+  width: 100%;
+  height: auto;
+  max-width: none;
+}
+
+.biome-legend {
+  display: none;
+  min-width: 200px;
+  background: rgba(255,255,255,0.9);
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+}
+
+.legend-title {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+}
+
+.legend-items {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.region-count-input {
+  width: 4rem;
+}
+
+/* Zoom and pan touch handling */
+#map { 
+  touch-action: none; 
+  cursor: grab; 
+}
+
+#map:active { 
+  cursor: grabbing; 
+}
+
+/* Regions: hide raster & overlay; remove borders */
+body.view-mode-regions #mapCells image { 
+  display: none; 
+}
+
+body.view-mode-regions #regions .overlay { 
+  display: none; 
+}
+
+body.view-mode-regions #mapCells .mapCell { 
+  stroke: none !important; 
+  stroke-width: 0 !important; 
+  shape-rendering: geometricPrecision; 
+}
+
+/* Ensure ocean cells never show borders if water class is used */
+#mapCells .mapCell.water { 
+  stroke: none !important; 
+  stroke-width: 0 !important; 
+}
+
+/* Hide neutral region outlines in Region view (prevents ocean Voronoi seams) */
+body.view-mode-regions #regions-neutral,
+body.view-mode-regions .region-neutral { 
+  display: none !important; 
+}
+
+/* Terrain: show raster & overlay */
+body.view-mode-terrain #mapCells image { 
+  display: block; 
+}
+
+body.view-mode-terrain #regions .overlay { 
+  display: block; 
+}
+
+/* Overlay tint: subtle, non-interactive */
+#regions .overlay path { 
+  fill-opacity: 0.15; 
+  pointer-events: none; 
+}
+
+#regions path { 
+  mix-blend-mode: multiply; 
+  pointer-events: none; 
+}
+
+/* Routes crisp at all zooms */
+#routes path { 
+  vector-effect: non-scaling-stroke; 
+}
+
+/* Progress overlay styling */
+.progress-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+
+.progress-content {
+  background: rgba(255, 255, 255, 0.95);
+  padding: 40px 50px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  min-width: 400px;
+  border: 2px solid #4CAF50;
+}
+
+.progress-title {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 25px;
+  color: #333;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 12px;
+  background: #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 20px;
+  border: 1px solid #ccc;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4CAF50, #45a049);
+  width: 0%;
+  transition: width 0.5s ease;
+  border-radius: 6px;
+  box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+}
+
+.progress-text {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.progress-detail {
+  font-size: 12px;
+  color: #999;
+  font-style: italic;
+}
+
+/* Add pulsing animation to make progress more visible */
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+.progress-overlay {
+  /* Removed pulse animation to keep it static */
+}

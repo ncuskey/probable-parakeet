@@ -1,0 +1,206 @@
+/* === MAP CSS - SVG/map layer styles (terrain, rivers, roads, trails, labels) === */
+
+/* Coastline styling */
+.coast { 
+  fill: none; 
+  stroke: #111; 
+  stroke-width: 0.6px; 
+  stroke-linejoin: round; 
+  vector-effect: non-scaling-stroke; 
+}
+
+.rivers { 
+  stroke: #4D83AE; 
+  stroke-linecap: round; 
+  stroke-linejoin: round; 
+  vector-effect: non-scaling-stroke; 
+}
+
+.riversShade { 
+  stroke: rgba(0,0,0,0.35); 
+  stroke-linecap: round; 
+  stroke-linejoin: round; 
+  vector-effect: non-scaling-stroke; 
+}
+
+/* Route styling */
+#routes .roads { 
+  stroke: #6b4e16; 
+  stroke-width: 1.4px; 
+  fill: none; 
+  stroke-linecap: round; 
+}
+
+/* Subtle baseline for merged network so layered primaries/secondaries still stand out */
+#routes .roads path { 
+  stroke: #6f5530; 
+  stroke-width: 1.2px; 
+  opacity: 0.5; 
+  vector-effect: non-scaling-stroke; 
+}
+
+#routes .trails { 
+  stroke: #9b7b3a; 
+  stroke-width: 1.0px; 
+  fill: none; 
+  stroke-dasharray: 4 3; 
+  stroke-linecap: round; 
+  stroke-linejoin: round; 
+}
+
+#routes path.trails { 
+  stroke: #9b7b3a !important; 
+}
+
+#routes .searoutes { 
+  stroke: none; 
+  fill: none; 
+}
+
+#routes .searoutes path.route {
+  stroke: #ffffff;
+  stroke-width: 1.6px;
+  stroke-dasharray: 6 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.8;
+  vector-effect: non-scaling-stroke;
+}
+
+#routes .primary-road { 
+  stroke: #8B4513; 
+  stroke-width: 2.2px; 
+  fill: none; 
+  stroke-linecap: round; 
+  stroke-linejoin: round; 
+  opacity: 0.95; 
+}
+
+#routes path.secondary-road { 
+  fill: none; 
+  stroke: #7f6732; 
+  opacity: 0.95; 
+  stroke-width: 1.7px; 
+  stroke-linecap: round; 
+  stroke-linejoin: round; 
+}
+
+#routes path.route { 
+  stroke: #8B4513; 
+  stroke-width: 2.2px; 
+  fill: none; 
+  stroke-linecap: round; 
+  stroke-linejoin: round; 
+  opacity: 0.95; 
+}
+
+/* Label styling */
+.labels-burgs text, .labels-regions text {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-size: 13px;
+  fill: #1f2a44;
+  paint-order: stroke fill;
+  stroke: #fff;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.labels-burgs text.capital { 
+  font-weight: 700; 
+  letter-spacing: .5px; 
+}
+
+.labels-regions text { 
+  font-size: 18px; 
+  opacity: .9; 
+}
+
+.region-label { 
+  font-size: 20px; 
+  font-weight: 600; 
+  fill: #2c3e50; 
+  stroke: #fff; 
+  stroke-width: 4px; 
+  opacity: 0.9; 
+}
+
+/* === Settlement symbol styles (type + size) === */
+:root {
+  --cap-r: 9px;      /* capital base radius */
+  --port-r: 6px;
+  --town-r: 5px;
+  --village-r: 4px;
+  --manor-r: 2.5px;
+}
+
+#burgs .burg { 
+  pointer-events: auto; 
+}
+
+#burgs circle.capital { 
+  fill: #d7263d; 
+  stroke: #7f1421; 
+  stroke-width: 1.25px; 
+}
+
+#burgs circle.port { 
+  fill: #2d7dd2; 
+  stroke: #1b4c7a; 
+  stroke-width: 1px; 
+}
+
+#burgs circle.town { 
+  fill: #f4a261; 
+  stroke: #b06b2e; 
+  stroke-width: 1px; 
+}
+
+#burgs circle.village { 
+  fill: #ffd166; 
+  stroke: #b89126; 
+  stroke-width: 0.8px; 
+}
+
+#burgs circle.manor { 
+  fill: #c7c7c7; 
+  stroke: #8f8f8f; 
+  stroke-width: 0.6px; 
+}
+
+#burgs circle.capital { 
+  r: calc(var(--cap-r)); 
+}
+
+#burgs circle.port { 
+  r: calc(var(--port-r)); 
+}
+
+#burgs circle.town { 
+  r: calc(var(--town-r)); 
+}
+
+#burgs circle.village { 
+  r: calc(var(--village-r)); 
+}
+
+#burgs circle.manor { 
+  r: calc(var(--manor-r)); 
+}
+
+#burgs path.capital-star { 
+  fill: #ffd6dc; 
+  stroke: #7f1421; 
+  stroke-width: 0.8px; 
+  vector-effect: non-scaling-stroke; 
+}
+
+#burgs circle.manor, #burgs circle.village { 
+  pointer-events: none; 
+}
+
+.region-neutral { 
+  fill: none; 
+  stroke: currentColor; 
+  opacity: 0.08; 
+}
