@@ -35,7 +35,12 @@ import {
 import {
   ensureHeightsCleared,
   applyTemplate,
-  registerDefaultTemplates
+  registerDefaultTemplates,
+  _debugHeights,
+  normalizeHeights,
+  sinkSmallIslands,
+  normalizeHeightsIfNeeded,
+  sinkOuterMargin
 } from './terrain.js';
 
 import {
@@ -3339,13 +3344,27 @@ window.generate = async function() {
 
       // === TERRAIN FIRST ===
       // Apply selected template (build heights)
-      const tplKey = document.getElementById('worldType')?.value || 'volcanicIsland';
+      const tplKey = document.getElementById('worldType')?.value || 'continents';
       const uiVals = {
         smallCount: +(document.getElementById('smallCountInput')?.value || 0),
         borderPct: +(document.getElementById('borderPctInput')?.value || 8)
       };
+      
+      // Get erosion parameters first
+      const talus = +document.getElementById('talusInput')?.value || 0.02;
+      const thermalStrength = +document.getElementById('thermalStrengthInput')?.value || 0.5;
+      const smoothAlpha = +document.getElementById('smoothAlphaInput')?.value || 0.2;
+
+      // Generation order (Azgaar-style)
       ensureHeightsCleared();
       applyTemplate(tplKey, uiVals);
+      normalizeHeightsIfNeeded();             // only if max<~0.3
+      thermalErode(talus, thermalStrength, 2);
+      smoothLand(smoothAlpha);
+      sinkOuterMargin(0.04, 0.15);            // gentle, once
+
+      // AFTER applyTemplate (and before any mask/clamp)
+      _debugHeights('post-template');
 
       // Keep ocean border
       ProgressManager.setPhase('terrain');
@@ -3353,27 +3372,29 @@ window.generate = async function() {
 
       // Erode & smooth
       ProgressManager.setPhase('erosion');
-      const talus = +document.getElementById('talusInput')?.value || 0.02;
-      const thermalStrength = +document.getElementById('thermalStrengthInput')?.value || 0.5;
-      const smoothAlpha = +document.getElementById('smoothAlphaInput')?.value || 0.2;
-      thermalErode(talus, thermalStrength, 2);
-      smoothLand(smoothAlpha);
+
+      // AFTER erosion
+      _debugHeights('post-erosion');
+
+      // Re-apply the water border after erosion/smoothing
+      applyBorderMask();
+
+      // Fixed coastline by default (slider overrides)
+      if (!Number.isFinite(S.params.seaLevel)) S.params.seaLevel = 0.20;
+      const seaIn = document.getElementById('seaLevelInput');
+      if (seaIn && seaIn.value !== '') S.params.seaLevel = +seaIn.value;
+
+      // recompute mask & paint
+      resetCaches('isWater');
+      setIsWater(ensureIsWater(cells));
+
+      // Remove salt-and-pepper: keep a few biggest landmasses
+      sinkSmallIslands({ keep: 2, minCells: 300, epsilon: 0.02 });
+      resetCaches('isWater');
+      setIsWater(ensureIsWater(cells));
 
       // Mark terrain dirty for raster
       ensureTerrainCanvas().setDirty();
-
-      // === NOW classify & paint ===
-      // Keep state seaLevel in sync with the slider
-      try {
-        const seaIn = document.getElementById('seaLevelInput');
-        if (seaIn) S.params.seaLevel = +seaIn.value;
-      } catch {}
-      
-      try {
-        resetCaches('isWater');           // heights changed
-        const updatedIsWater = ensureIsWater(cells);
-        setIsWater(updatedIsWater);
-      } catch (e) { console.warn('[generate] ensureIsWater failed', e); }
 
       try {
         await recolor(run);               // logs "Land fraction ~ X.XX"
@@ -3439,6 +3460,13 @@ window.generate = async function() {
       const active = CURRENT_RUN;
       if (!active) return;        // nothing to recolor yet
       return recolor(active);     // recolor respects isStale(active)
+    }
+
+    function quantile(xs, q) {
+      if (!xs.length) return 0;
+      const a = xs.slice().sort((a,b)=>a-b);
+      const i = Math.max(0, Math.min(a.length-1, Math.floor(q*(a.length-1))));
+      return a[i];
     }
 
     function relaxOnce(pts, w, h) {
@@ -3520,7 +3548,7 @@ window.generate = async function() {
           return; 
         }
         
-        const tplKey = document.getElementById('worldType')?.value || 'volcanicIsland';
+        const tplKey = document.getElementById('worldType')?.value || 'continents';
         const seedInput = document.getElementById('seedInput')?.value;
         // Use provided seed if available, otherwise use input or generate random
         const worldSeed = providedSeed || (seedInput ? +seedInput : Math.floor(Math.random() * 999999) + 1);

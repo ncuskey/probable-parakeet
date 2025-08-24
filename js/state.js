@@ -20,7 +20,7 @@ export const S = {
   // Tunables / params
   params: {
     seaLevel: 0.5,
-    worldType: 'volcanicIsland',
+    worldType: 'continents',
     regionCountK: 3,
   },
 

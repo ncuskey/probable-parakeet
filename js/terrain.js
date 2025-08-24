@@ -2,6 +2,191 @@
 import { S, getWorld, resetCaches } from './state.js';
 import { mulberry32, rngFromSeed, clamp, randRange, choice } from './utils.js';
 
+// --- RNG helper (we already use mulberry32(S.seed) elsewhere) ---
+function getRng() {
+  return mulberry32(S.seed);
+}
+
+// Pick an interior cell (keeps seeds off borders)
+function interiorCellIndex(minEdgePx = Math.min(getWorld().width, getWorld().height) * 0.06) {
+  const { cells, width, height } = getWorld();
+  const rng = getRng();
+  for (let t = 0; t < 200; t++) {
+    const i = (rng() * cells.length) | 0;
+    const c = cells[i];
+    const d = Math.min(c.cx, c.cy, width - c.cx, height - c.cy);
+    if (d >= minEdgePx) return i;
+  }
+  return (rng() * getWorld().cells.length) | 0;
+}
+
+// Nearest cell by XY (use your own finder if available)
+function nearestCellIndex(x, y) {
+  const { cells } = getWorld();
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < cells.length; i++) {
+    const dx = cells[i].cx - x, dy = cells[i].cy - y;
+    const d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+
+// Azgaar-style growth: queue/BFS; children height = parentHeight * radius * modifier
+function growBlob({ startIndex, peak = 1, radius = 0.94, sharpness = 0.12, stop = 0.01 }) {
+  const { cells } = getWorld();
+  const rng = getRng();
+  const used = new Uint8Array(cells.length);
+  const q = [];
+  cells[startIndex].high = Math.max(cells[startIndex].high ?? 0, peak);
+  used[startIndex] = 1; q.push(startIndex);
+  for (let qi = 0; qi < q.length; qi++) {
+    const u = q[qi];
+    const parentH = cells[u].high ?? 0;
+    const nextBase = parentH * radius;
+    if (nextBase <= stop) continue;
+    const nn = cells[u].neighbors || [];
+    for (const v of nn) {
+      if (used[v]) continue;
+      const mod = sharpness ? (rng() * sharpness + 1.1 - sharpness) : 1; // around ~1
+      const h = Math.min(1, nextBase * mod);
+      cells[v].high = Math.min(1, (cells[v].high ?? 0) + h);
+      used[v] = 1; q.push(v);
+    }
+  }
+}
+
+function rescaleHeights(factor = 1) {
+  const { cells } = getWorld();
+  for (const c of cells) c.high = Math.min(1, (c.high ?? 0) * factor);
+}
+
+// Use only if the template ends up too flat (max<0.3)
+export function normalizeHeightsIfNeeded({ minMax = 0.3, maxTarget = 0.85 } = {}) {
+  const { cells } = getWorld();
+  let lo = 1, hi = 0;
+  for (const c of cells) { const h = c.high ?? 0; if (h < lo) lo = h; if (h > hi) hi = h; }
+  if (hi < minMax || hi <= lo) {
+    const scale = (maxTarget - 0) / Math.max(1e-6, hi - lo);
+    for (const c of cells) c.high = Math.max(0, Math.min(1, (c.high - lo) * scale));
+  }
+}
+
+// Very gentle post-pass: sink a thin outer margin to avoid border spill
+export function sinkOuterMargin(pct = 0.04, amount = 0.15) {
+  const { cells, width, height } = getWorld();
+  const m = Math.min(width, height) * pct;
+  for (const c of cells) {
+    const d = Math.min(c.cx, c.cy, width - c.cx, height - c.cy);
+    if (d < m) c.high = Math.max(0, (c.high ?? 0) - amount);
+  }
+}
+
+// --- Blob-based operations ---
+function opMountain({ peak = 1, radius = 0.95, sharpness = 0.12 } = {}) {
+  growBlob({ startIndex: interiorCellIndex(), peak, radius, sharpness });
+}
+
+function opHill({ peak = 0.5, radius = 0.95, sharpness = 0.10 } = {}) {
+  growBlob({ startIndex: interiorCellIndex(), peak, radius, sharpness });
+}
+
+function opRange({ peak = 0.8, steps = 6, stepRadius = 0.93, sharpness = 0.10 } = {}) {
+  const { width, height } = getWorld();
+  const rng = getRng();
+  let x = rng() * width, y = rng() * height, dir = rng() * Math.PI * 2;
+  for (let s = 0; s < steps; s++) {
+    growBlob({ startIndex: nearestCellIndex(x, y), peak, radius: stepRadius, sharpness });
+    x += Math.cos(dir) * (Math.min(width, height) * 0.12);
+    y += Math.sin(dir) * (Math.min(width, height) * 0.12);
+    dir += (rng() - 0.5) * 0.9;
+  }
+}
+
+function opTrough(args = {}) { // negative linear feature
+  const { cells } = getWorld();
+  const before = cells.map(c => c.high ?? 0);
+  opRange(args);
+  for (let i = 0; i < cells.length; i++) cells[i].high = Math.max(0, before[i] - (cells[i].high - before[i]));
+}
+
+function opPit({ depth = 0.35, radius = 0.94, sharpness = 0.10 } = {}) { // negative blob
+  const { cells } = getWorld();
+  const before = cells.map(c => c.high ?? 0);
+  growBlob({ startIndex: interiorCellIndex(), peak: depth, radius, sharpness });
+  for (let i = 0; i < cells.length; i++) cells[i].high = Math.max(0, before[i] - (cells[i].high - before[i]));
+}
+
+export function _debugHeights(label = '') {
+  const { cells } = getWorld();
+  let min = 1, max = 0, sum = 0, n = cells.length, gt01 = 0, gt02 = 0, gt05 = 0;
+  for (const c of cells) {
+    const h = c.high ?? 0;
+    if (h < min) min = h;
+    if (h > max) max = h;
+    sum += h;
+    if (h > 0.10) gt01++;
+    if (h > 0.20) gt02++;
+    if (h > 0.50) gt05++;
+  }
+  console.log(`[H] ${label} min=${min.toFixed(3)} max=${max.toFixed(3)} mean=${(sum/n).toFixed(3)} | >0.10:${gt01} >0.20:${gt02} >0.50:${gt05} / ${n}`);
+}
+
+export function normalizeHeights({minTarget = 0, maxTarget = 0.85, floor = 0} = {}) {
+  const { cells } = getWorld();
+  if (!cells?.length) return;
+  let lo = +Infinity, hi = -Infinity;
+  for (const c of cells) {
+    const h = c.high ?? 0;
+    if (h < lo) lo = h;
+    if (h > hi) hi = h;
+  }
+  if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return;
+  const scale = (maxTarget - minTarget) / (hi - lo);
+  for (const c of cells) {
+    let h = c.high ?? 0;
+    h = minTarget + (h - lo) * scale;
+    if (h < floor) h = floor;
+    c.high = Math.max(0, Math.min(1, h));
+  }
+}
+
+export function sinkSmallIslands({ keep = 2, minCells = 200, epsilon = 0.01 } = {}) {
+  const { cells } = getWorld();
+  // label connected land components using cell.neighbors
+  const isLand = cells.map(c => (c.high ?? 0) >= (S.params.seaLevel ?? 0.45));
+  const comp = new Int32Array(cells.length).fill(-1);
+  const sizes = [];
+  let id = 0;
+
+  for (let i = 0; i < cells.length; i++) {
+    if (!isLand[i] || comp[i] !== -1) continue;
+    let q = [i], head = 0;
+    comp[i] = id; let sz = 0;
+    while (head < q.length) {
+      const u = q[head++]; sz++;
+      const nn = cells[u].neighbors || [];
+      for (const v of nn) if (isLand[v] && comp[v] === -1) { comp[v] = id; q.push(v); }
+    }
+    sizes[id++] = sz;
+  }
+  if (!sizes.length) return;
+
+  // sort component ids by size, keep the largest K above threshold
+  const order = sizes.map((sz, i) => [sz, i]).sort((a,b)=>b[0]-a[0]);
+  const keepIds = new Set(order.filter(([sz], idx) => idx < keep || sz >= minCells).map(([,i]) => i));
+
+  for (let i = 0; i < cells.length; i++) {
+    if (isLand[i] && !keepIds.has(comp[i])) {
+      // sink this micro-island just below sea level
+      const sea = S.params.seaLevel ?? 0.45;
+      cells[i].high = Math.min(cells[i].high ?? 0, Math.max(0, sea - epsilon));
+    }
+  }
+}
+
+// Legacy functions removed - using Azgaar-style blob growth instead
+
 // ---------------- Templates registry ----------------
 /** Internal mutable registry; don't export directly. */
 const Templates = Object.create(null);
@@ -13,131 +198,33 @@ export function setTemplates(obj) {
   for (const k of Object.keys(obj || {})) Templates[k] = obj[k];
 }
 
-/** Default templates (MOVE your existing function-based ones here) */
-function volcanicIsland(ui = {}) {
-  const { cells, width, height } = getWorld();
-  console.log('volcanicIsland template called with:', { cellsLength: cells?.length, width, height, ui });
-  if (!cells?.length) return;
-  const cx = width * 0.5, cy = height * 0.5;
-  const borderPct = Math.max(0, Math.min(40, +(ui?.borderPct ?? 8))); // 0..40%
-  const R = (Math.min(width, height) * 0.5) * (1 - borderPct/100);
-  const falloff = 1.6; // steeper = tighter island
-
-  // Deterministic RNG from seed input if present
-  const seed = S.seed;
-  const rng = mulberry32(seed);
-  const jitter = () => (rng() - 0.5) * 0.18; // +/- ~0.09
-
-  // Base radial bump
-  for (let i = 0; i < cells.length; i++) {
-    const c = cells[i];
-    const dx = c.cx - cx, dy = c.cy - cy;
-    const d = Math.hypot(dx, dy);
-    let t = 1 - Math.pow(d / Math.max(1, R), falloff);
-    if (t < 0) t = 0;
-    if (t > 1) t = 1;
-    c.high = Math.max(0, Math.min(1, t + jitter()*t));
-  }
-
-  // Two light smoothing passes to remove speckle
-  for (let pass = 0; pass < 2; pass++) {
-    for (let i = 0; i < cells.length; i++) {
-      const c = cells[i];
-      const nn = c.neighbors || [];
-      if (!nn.length) continue;
-      let acc = c.high, n = 1;
-      for (const j of nn) { acc += cells[j].high; n++; }
-      c.high = acc / n;
-    }
-  }
-  
-  // Debug: Check what heights were set
-  const maxHeight = Math.max(...cells.map(c => c.high));
-  const minHeight = Math.min(...cells.map(c => c.high));
-  console.log('volcanicIsland heights set:', { minHeight, maxHeight, cellCount: cells.length });
+/** Default templates (Azgaar-style blob composition) */
+export function volcanicIsland() { // "High Island"
+  ensureHeightsCleared();
+  opMountain({ peak: 1, radius: 0.95, sharpness: 0.12 });
+  for (let i = 0; i < 15; i++) opHill({ peak: 0.5, radius: 0.95, sharpness: 0.10 });
+  for (let i = 0; i < 2; i++)  opRange({ peak: 0.7, steps: 6 });
+  for (let i = 0; i < 2; i++)  opTrough({ peak: 0.6, steps: 5 });
+  for (let i = 0; i < 3; i++)  opPit({ depth: 0.3 });
 }
 
-function archipelago(ui = {}) {
-  const { cells, width, height } = getWorld();
-  if (!cells?.length) return;
-  const count = Math.max(3, Math.min(30, +(ui?.smallCount ?? 8)));
-  const seed = S.seed;
-  const rng = mulberry32(seed);
-
-  // reset
-  for (const c of cells) c.high = 0;
-
-  function pickInterior() {
-    const margin = Math.min(width, height) * 0.08;
-    // pick until interior
-    for (let tries = 0; tries < 1000; tries++) {
-      const idx = Math.floor(rng() * cells.length);
-      const c = cells[idx];
-      if (c.cx > margin && c.cy > margin && c.cx < width - margin && c.cy < height - margin) return idx;
-    }
-    return Math.floor(rng()*cells.length);
-  }
-
-  // paint bumps
-  for (let k = 0; k < count; k++) {
-    const idx = pickInterior();
-    const radius = (Math.min(width, height) * 0.08) * (0.6 + rng()*0.8);
-    const fall = 2.2;
-    for (let i = 0; i < cells.length; i++) {
-      const c = cells[i];
-      const d = Math.hypot(c.cx - cells[idx].cx, c.cy - cells[idx].cy);
-      let t = 1 - Math.pow(d / Math.max(1, radius), fall);
-      if (t < 0) t = 0;
-      c.high = Math.max(c.high, t);
-    }
-  }
-
-  // smooth a bit
-  for (let pass = 0; pass < 2; pass++) {
-    for (let i = 0; i < cells.length; i++) {
-      const c = cells[i];
-      const nn = c.neighbors || [];
-      if (!nn.length) continue;
-      let acc = c.high, n = 1;
-      for (const j of nn) { acc += cells[j].high; n++; }
-      c.high = acc / n;
-    }
-  }
+export function lowIsland() {
+  volcanicIsland();
+  rescaleHeights(0.3);  // Azgaar: "re-scaled to 0.3 modifier" for Low Island
 }
 
-function continents(ui = {}) {
-  const { cells, width, height } = getWorld();
-  if (!cells?.length) return;
-  const seed = S.seed;
-  const rng = mulberry32(seed);
-  const bandDir = rng() < 0.5 ? 'x' : 'y';
+export function archipelago() {
+  ensureHeightsCleared();
+  opMountain({ peak: 1, radius: 0.96, sharpness: 0.12 });
+  for (let i = 0; i < 15; i++) opHill({ peak: 0.45, radius: 0.95, sharpness: 0.12 });
+  for (let i = 0; i < 2; i++)  opTrough({ peak: 0.55, steps: 5 });
+  for (let i = 0; i < 8; i++)  opPit({ depth: 0.25, radius: 0.96 });
+}
 
-  // base gradient
-  for (const c of cells) {
-    const t = bandDir === 'x' ? (c.cx / Math.max(1, width)) : (c.cy / Math.max(1, height));
-    c.high = Math.max(0, Math.min(1, 0.8 * Math.abs(0.5 - t) * 2)); // low in middle, high at sides
-  }
-  // pepper with small bumps
-  for (let k = 0; k < 200; k++) {
-    const idx = Math.floor(rng() * cells.length);
-    const r = 12 + rng()*40;
-    for (let i = 0; i < cells.length; i++) {
-      const a = cells[i], b = cells[idx];
-      const d = Math.hypot(a.cx - b.cx, a.cy - b.cy);
-      a.high = Math.min(1, a.high + Math.max(0, 1 - d/r) * 0.12);
-    }
-  }
-  // smooth
-  for (let pass = 0; pass < 2; pass++) {
-    for (let i = 0; i < cells.length; i++) {
-      const c = cells[i];
-      const nn = c.neighbors || [];
-      if (!nn.length) continue;
-      let acc = c.high, n = 1;
-      for (const j of nn) { acc += cells[j].high; n++; }
-      c.high = acc / n;
-    }
-  }
+export function continentalIslands() {
+  ensureHeightsCleared();
+  opMountain({ peak: 1, radius: 0.95, sharpness: 0.10 });
+  for (let i = 0; i < 5; i++)  opTrough({ peak: 0.6, steps: 7, stepRadius: 0.94 });
 }
 
 /** Register defaults (or keep only if not already defined). */
@@ -150,14 +237,18 @@ export function registerDefaultTemplates() {
   const cfg = window.__state.config.templates;
   if (!cfg.default) cfg.default = (x) => x;
   cfg.volcanicIsland = cfg.volcanicIsland || volcanicIsland;
+  cfg.lowIsland = cfg.lowIsland || lowIsland;
   cfg.archipelago = cfg.archipelago || archipelago;
-  cfg.continents = cfg.continents || continents;
+  cfg.continentalIslands = cfg.continentalIslands || continentalIslands;
+  cfg.continents = cfg.continentalIslands; // Map "continents" to continentalIslands
   
   // Also register in our internal registry for the new API
   if (!Templates.default) Templates.default = (x) => x;
   Templates.volcanicIsland = Templates.volcanicIsland || volcanicIsland;
+  Templates.lowIsland = Templates.lowIsland || lowIsland;
   Templates.archipelago = Templates.archipelago || archipelago;
-  Templates.continents = Templates.continents || continents;
+  Templates.continentalIslands = Templates.continentalIslands || continentalIslands;
+  Templates.continents = Templates.continentalIslands; // Map "continents" to continentalIslands
 }
 
 // ---------------- Height clear ----------------
@@ -167,72 +258,7 @@ export function ensureHeightsCleared() {
   for (const c of cells) c.high = 0;
 }
 
-// ---------------- Steps-based executor ----------------
-/**
- * Execute an array of step objects like:
- * { op:'mountain', at:'center', high:0.9, radius:0.94, sharpness:0.18 }
- * { op:'add', value:0.07 }
- * { op:'multiply', factor:1.1 }
- * { op:'hills', count:5, distribution:0.4, high:0.25, radius:0.985, ... }
- */
-function executeSteps(steps = [], uiVals = {}) {
-  const { cells, width, height } = getWorld();
-  const rng = mulberry32(S.seed);
-
-  const ops = {
-    mountain: (st) => {
-      const cx = st.at === 'center' ? width * 0.5 : (st.x ?? width * 0.5);
-      const cy = st.at === 'center' ? height * 0.5 : (st.y ?? height * 0.5);
-      const H = +st.high ?? 0.8;
-      const R = Math.max(4, (Math.min(width, height) * (+st.radius ?? 0.9)));
-      const sharp = clamp(+st.sharpness ?? 0.2, 0.01, 4);
-      for (const c of cells) {
-        const d = Math.hypot(c.cx - cx, c.cy - cy);
-        let t = 1 - Math.pow(d / Math.max(1, R), 1 + sharp);
-        t = clamp(t, 0, 1);
-        c.high = Math.max(c.high ?? 0, H * t);
-      }
-    },
-
-    add: (st) => {
-      const v = +st.value ?? 0;
-      for (const c of cells) c.high = clamp((c.high ?? 0) + v, 0, 1);
-    },
-
-    multiply: (st) => {
-      const k = +st.factor ?? 1;
-      for (const c of cells) c.high = clamp((c.high ?? 0) * k, 0, 1);
-    },
-
-    hills: (st) => {
-      const cnt = Math.max(1, (st.count ?? 5) | 0);
-      const dist = clamp(+st.distribution ?? 0.4, 0.05, 2);
-      const H = clamp(+st.high ?? 0.25, 0, 1);
-      const rScale = clamp(+st.radius ?? 0.98, 0.05, 2);
-      for (let k = 0; k < cnt; k++) {
-        const idx = (rng() * cells.length) | 0;
-        const bx = cells[idx].cx, by = cells[idx].cy;
-        const R = (Math.min(width, height) * rScale) * (0.25 + rng() * dist);
-        for (const c of cells) {
-          const d = Math.hypot(c.cx - bx, c.cy - by);
-          const t = Math.max(0, 1 - d / Math.max(1, R));
-          c.high = clamp(Math.max(c.high ?? 0, H * t), 0, 1);
-        }
-      }
-    }
-  };
-
-  // Back-compat aliases
-  ops.addLand = ops.add;
-  ops.multiplyLand = ops.multiply;
-
-  for (const st of steps) {
-    const fn = ops[st.op];
-    if (!fn) { console.warn('[terrain] unknown op', st.op); continue; }
-    console.log('Executing step:', st);
-    fn(st);
-  }
-}
+// Steps-based executor removed - using Azgaar-style blob templates instead
 
 // ---------------- Template application ----------------
 /**
@@ -253,12 +279,6 @@ export function applyTemplate(tplKey, uiVals = {}) {
     tpl(uiVals);
     resetCaches('isWater'); // heights changed → water mask invalid
     return { applied: true, type };
-  }
-  if (tpl && Array.isArray(tpl.steps)) {
-    executeSteps(tpl.steps, uiVals);
-    resetCaches('isWater');
-    console.log('Template steps executed successfully:', tplKey);
-    return { applied: true, type, stepsCount: tpl.steps.length };
   }
 
   console.warn('[terrain] Unknown template shape for', tplKey);

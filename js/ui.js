@@ -28,7 +28,7 @@ export function readUIParams() {
   const seaEl = document.getElementById('seaLevelInput');
   if (seaEl) setParam('seaLevel', readNumber(seaEl, getParam('seaLevel') ?? 0.5));
 
-  const wt = (document.getElementById('worldType')?.value) || getParam('worldType') || 'volcanicIsland';
+  const wt = (document.getElementById('worldType')?.value) || getParam('worldType') || 'continents';
   setParam('worldType', wt);
 
   const K = readNumber(document.getElementById('regionCount'), getParam('regionCountK') ?? 3);
@@ -81,7 +81,7 @@ export function wireUI() {
 
   // World type select
   bind('worldType', 'change', (e) => {
-    const v = e.currentTarget?.value || 'volcanicIsland';
+    const v = e.currentTarget?.value || 'continents';
     setParam('worldType', v);
     // Do not auto-generate to avoid heavy work on accidental change.
     // User can press Generate; if legacy auto-generated, call generate() here instead.

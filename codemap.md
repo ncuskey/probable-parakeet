@@ -5,8 +5,8 @@
 This is an interactive, client-side fantasy map generator inspired by Azgaar's Fantasy Map Generator. The application creates procedural terrain using Voronoi diagrams with advanced features including climate simulation, biome generation, and realistic river systems.
 
 **Key Features:**
-- Voronoi-based heightmap generation with Lloyd relaxation
-- Multiple terrain templates (Volcanic Island, Continents, Archipelago, etc.)
+- **Azgaar-style blob growth** terrain generation with BFS queue expansion
+- Multiple terrain templates (Volcanic Island, Continental Islands, Archipelago, Low Island)
 - Climate simulation with temperature and precipitation modeling
 - Biome classification using Whittaker diagram principles
 - Advanced river generation with polygonal rendering
@@ -21,12 +21,12 @@ probable-parakeet/
 ├── index.html              # Main HTML entry point with ES module script
 ├── js/
 │   ├── app.js              # Entry point: wires UI and calls init() (cleaned imports)
-│   ├── legacy-main.js      # Pipeline orchestration (9,324 lines, orphaned code removed)
+│   ├── legacy-main.js      # Pipeline orchestration (9,356 lines, Azgaar-style generation)
 │   ├── state.js            # Central app state (S), getters/setters, caches
 │   ├── utils.js            # Pure helpers (RNG, math, geometry)
 │   ├── render.js           # Layer plumbing (getLayers, ensureRasterImage)
 │   ├── recolor.js          # Terrain painting (canvas raster + SVG per-cell)
-│   ├── terrain.js          # Template registry & executor
+│   ├── terrain.js          # Azgaar-style blob templates & operations
 │   ├── climate.js          # Precipitation provider
 │   ├── rivers.js           # Precip recompute, BFS/flow steps, river rendering
 │   ├── regions.js          # Region assignment + rendering (with timing fallbacks)
@@ -99,7 +99,7 @@ export const S = {
   seed: 12345, rng: mulberry32(12345),
   
   // Tunables / params
-  params: { seaLevel: 0.5, worldType: 'volcanicIsland', regionCountK: 3 },
+  params: { seaLevel: 0.2, worldType: 'continents', regionCountK: 3 },
   
   // Derived data / caches
   caches: { isWater: null, landPaths: null, precip: null, /* ... */ },
@@ -155,19 +155,72 @@ export function repaintCellsForMode(mode) {
 }
 ```
 
-### Terrain System (`js/terrain.js`)
+### Terrain System (`js/terrain.js`) - **AZGAAR-STYLE BLOB GROWTH**
 ```javascript
-// Template registry and terrain generation
+// Azgaar-style blob growth system with BFS queue expansion
+
+// Core blob operations
+function growBlob({ startIndex, peak = 1, radius = 0.94, sharpness = 0.12, stop = 0.01 }) {
+  // BFS queue expansion: children height = parentHeight * radius * modifier
+}
+
+function opMountain({ peak = 1, radius = 0.95, sharpness = 0.12 } = {}) {
+  // Single peak blob growth
+}
+
+function opHill({ peak = 0.5, radius = 0.95, sharpness = 0.10 } = {}) {
+  // Smaller hill blobs
+}
+
+function opRange({ peak = 0.8, steps = 6, stepRadius = 0.93, sharpness = 0.10 } = {}) {
+  // Chain of mountains along a path
+}
+
+function opTrough(args = {}) {
+  // Negative linear features (valleys)
+}
+
+function opPit({ depth = 0.35, radius = 0.94, sharpness = 0.10 } = {}) {
+  // Negative circular blobs (depressions)
+}
+
+// Azgaar-style templates
+export function volcanicIsland() {
+  // "High Island": mountain + 15 hills + 2 ranges + 2 troughs + 3 pits
+}
+
+export function lowIsland() {
+  // volcanicIsland rescaled to 0.3 modifier
+}
+
+export function archipelago() {
+  // mountain + 15 hills + 2 troughs + 8 pits
+}
+
+export function continentalIslands() {
+  // mountain + 5 troughs (long linear features)
+}
+
+// Template registry and application
 export function registerDefaultTemplates() {
-  // Registers default terrain templates
+  // Registers blob-based templates, maps "continents" to continentalIslands
 }
 
 export function applyTemplate(tplKey, uiVals = {}) {
-  // Applies terrain template with UI values
+  // Applies Azgaar-style blob templates
 }
 
 export function ensureHeightsCleared() {
   // Clears height data for new generation
+}
+
+// Post-processing utilities
+export function normalizeHeightsIfNeeded({ minMax = 0.3, maxTarget = 0.85 } = {}) {
+  // Only if template ends up too flat (max<0.3)
+}
+
+export function sinkOuterMargin(pct = 0.04, amount = 0.15) {
+  // Gentle post-pass to avoid border spill
 }
 ```
 
@@ -191,7 +244,8 @@ export function computeRiverSteps() {
 }
 
 export function computeRivers(run = 0) {
-  // Main river computation and rendering
+  // Main river computation and rendering with higher flux thresholds
+  // River threshold: 35% of max flux (increased from 25% for fewer rivers)
 }
 ```
 
@@ -263,13 +317,13 @@ export function toggleSettings() {
 
 ## Main Application Logic (`js/legacy-main.js`)
 
-### Module Structure (9,324 lines - orphaned code removed)
+### Module Structure (9,356 lines - Azgaar-style generation)
 
 #### 1. Imports and Dependencies (Lines 1-60)
 ```javascript
 import { mulberry32, rngFromSeed, /* ... */ } from './utils.js';
 import { S, getWorld, setSize, /* ... */, ensureIsWater } from './state.js';
-import { ensureHeightsCleared, applyTemplate, registerDefaultTemplates } from './terrain.js';
+import { ensureHeightsCleared, applyTemplate, registerDefaultTemplates, normalizeHeightsIfNeeded, sinkOuterMargin } from './terrain.js';
 import { computeRiverSteps, recomputePrecipIfNeeded, computeRivers } from './rivers.js';
 import { computeAndDrawRegions } from './regions.js';
 import { computeRoutes } from './routes.js';
@@ -416,30 +470,41 @@ window.init = async function() {
 
 // === WINDOW BINDINGS FOR INLINE HANDLERS ===
 window.generate = async function() {
-  // Main generation pipeline with proper sequencing:
-  // ensureIsWater → recolor → recomputePrecipIfNeeded → computeRiverSteps → computeRivers → computeAndDrawRegions → computeRoutes
+  // Main generation pipeline with Azgaar-style blob growth:
+  // ensureHeightsCleared → applyTemplate → normalizeHeightsIfNeeded → thermalErode → smoothLand → sinkOuterMargin → classify → recolor
 };
 ```
 
 ## Generation Pipeline
 
-### Pipeline Sequence
-The main generation pipeline follows this exact order with try/catch guards:
+### **AZGAAR-STYLE BLOB GROWTH PIPELINE**
+The main generation pipeline follows this exact order with Azgaar-style blob growth:
 
-1. **ensureIsWater** - Land/water classification
-2. **recolor** - Terrain painting (logs "Land fraction ~ ...")
-3. **recomputePrecipIfNeeded** - Precipitation computation
-4. **computeRiverSteps** - River steps computation (logs "⏱ Compute river steps (BFS): ...")
-5. **computeRivers** - River generation (logs "⏱ Compute rivers: ...")
-6. **computeAndDrawRegions** - Region assignment and rendering
-7. **computeRoutes** - Route generation (logs "computeRoutes() vKNN", "primary-road count:", etc.)
+1. **ensureHeightsCleared** - Clear height data for new generation
+2. **applyTemplate** - Apply Azgaar-style blob templates (volcanicIsland, continentalIslands, etc.)
+3. **normalizeHeightsIfNeeded** - Only if template ends up too flat (max<0.3)
+4. **thermalErode** - Thermal erosion simulation
+5. **smoothLand** - Land smoothing
+6. **sinkOuterMargin** - Gentle post-pass to avoid border spill
+7. **Fixed coastline** - Set seaLevel = 0.20 (slider overrides)
+8. **recolor** - Terrain painting (logs "Land fraction ~ ...")
+9. **recomputePrecipIfNeeded** - Precipitation computation
+10. **computeRiverSteps** - River steps computation (logs "⏱ Compute river steps (BFS): ...")
+11. **computeRivers** - River generation with higher flux thresholds (logs "⏱ Compute rivers: ...")
+12. **computeAndDrawRegions** - Region assignment and rendering
+13. **computeRoutes** - Route generation (logs "computeRoutes() vKNN", "primary-road count:", etc.)
 
 ### Error Handling
 Each stage is wrapped in try/catch blocks with specific error messages:
 ```javascript
 try { 
-  ensureIsWater(cells);
-} catch (e) { console.warn('[generate] ensureIsWater failed', e); }
+  ensureHeightsCleared();
+  applyTemplate(tplKey, uiVals);
+  normalizeHeightsIfNeeded();
+  thermalErode(talus, thermalStrength, 2);
+  smoothLand(smoothAlpha);
+  sinkOuterMargin(0.04, 0.15);
+} catch (e) { console.warn('[generate] terrain generation failed', e); }
 
 try { 
   await recolor(run);
@@ -484,8 +549,12 @@ body.view-mode-terrain #regions path.fallback-land {
 - **Spatial indexing** for efficient neighbor lookups
 - **Cell polygon generation** with proper edge handling
 
-### 2. Terrain Generation
-- **Heightmap generation** with multiple templates
+### 2. **AZGAAR-STYLE TERRAIN GENERATION**
+- **Blob growth with BFS queue** - children height = parentHeight * radius * modifier
+- **Template composition** - mountains, hills, ranges, troughs, pits combined
+- **Interior cell seeding** - keeps seeds off borders for coherent landmasses
+- **Sharpness modifiers** - random variation around ~1 for natural appearance
+- **Fixed coastline ≈ 0.2** - with slider override capability
 - **Thermal erosion** simulation
 - **Water border masking** for realistic coastlines
 - **Lake detection** with spill level calculation
@@ -498,6 +567,7 @@ body.view-mode-terrain #regions path.fallback-land {
 ### 4. River Generation
 - **Flux-based drainage** patterns
 - **Polygonal river rendering** with variable width
+- **Higher flux thresholds** - 35% of max flux for fewer, larger rivers
 - **Coastline detail enhancement** with noise-based perturbation
 
 ### 5. Settlement Placement
@@ -531,14 +601,14 @@ body.view-mode-terrain #regions path.fallback-land {
 ## User Interface
 
 ### Main Controls
-- **Generate Map** - Triggers new world generation
+- **Generate Map** - Triggers new world generation with Azgaar-style blob growth
 - **Settings** - Opens configuration modal
 - **Regenerate Names** - Updates settlement names
 - **Show Regions** - Toggles region visibility
 - **Export SVG/PNG** - Saves generated maps
 
 ### Settings Categories
-1. **Terrain** - Graph size, elevation, water levels, world type
+1. **Terrain** - Graph size, elevation, water levels, world type (continents, volcanicIsland, archipelago, lowIsland)
 2. **Climate** - Temperature, rainfall, wind belts, river density
 3. **Settlements** - Region count and distribution
 4. **Routes** - Road network configuration
@@ -560,6 +630,11 @@ body.view-mode-terrain #regions path.fallback-land {
 - **Layer Management** - Unified layer access via getLayers()
 - **Pipeline Sequencing** - Proper generation pipeline with error handling
 - **Error Recovery** - Fixed syntax and runtime errors with proper fallbacks
+- **AZGAAR-STYLE BLOB GROWTH** - Complete implementation of Azgaar's proven terrain algorithm
+- **Template Composition** - volcanicIsland, continentalIslands, archipelago, lowIsland templates
+- **Fixed Coastline** - Default seaLevel = 0.20 with slider override
+- **Coherent Landmasses** - No more speckled blobs, produces realistic continents/islands
+- **Higher River Thresholds** - 35% flux threshold for fewer, larger rivers
 - Core terrain generation with multiple templates
 - Climate simulation and biome classification
 - River generation with polygonal rendering
@@ -580,6 +655,10 @@ body.view-mode-terrain #regions path.fallback-land {
 - **Dev guard rails** - Sanity checks for missing layers
 - **CSS integration** - Proper fallback land hiding in terrain mode
 - **Documentation updates** - README and codemap reflect all changes
+- **Azgaar-style blob growth** - Replaced plate/noise approach with proven BFS algorithm
+- **Template mapping** - "continents" maps to continentalIslands()
+- **Generation order** - Proper sequencing with normalizeHeightsIfNeeded and sinkOuterMargin
+- **River optimization** - Higher thresholds for fewer, larger rivers
 
 ### In Progress 🔄
 - Route system refinements (per TODO.md)
@@ -676,4 +755,4 @@ body.view-mode-terrain #regions path.fallback-land {
 
 ---
 
-*This codemap provides a comprehensive overview of the Voronoi Heightmap Generator project structure, architecture, and key components after the ES module refactor. For detailed implementation specifics, refer to the individual source files and inline documentation.*
+*This codemap provides a comprehensive overview of the Voronoi Heightmap Generator project structure, architecture, and key components after the Azgaar-style blob growth implementation. For detailed implementation specifics, refer to the individual source files and inline documentation.*

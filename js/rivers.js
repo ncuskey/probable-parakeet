@@ -213,7 +213,7 @@ export function computeRivers(run = 0) {
   }
 
   // River threshold and rendering
-  const thr = maxF * 0.15; // 15% of max flux
+  const thr = maxF * 0.35; // 35% of max flux (increased from 25% for fewer rivers)
   const confluences = countConfluences(thr);
   const majors = landIdxs.filter(i => flux[i] >= thr).length;
   

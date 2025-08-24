@@ -5,10 +5,11 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 ## Features
 
 ### Core Generation
-- **Voronoi-based heightmap** with Lloyd relaxation for natural cell distribution
-- **Multiple terrain templates**: Volcanic Island, Lowland Island, Archipelago, Continental, and Atoll
-- **Procedural terrain generation** with customizable parameters
-- **Water border masking** for realistic coastlines
+- **Azgaar-style blob growth** terrain generation with BFS queue expansion
+- **Multiple terrain templates**: Volcanic Island (High Island), Low Island, Archipelago, Continental Islands
+- **Template composition** - mountains, hills, ranges, troughs, pits combined for realistic terrain
+- **Fixed coastline ≈ 0.2** with slider override capability
+- **Coherent landmasses** - no more speckled blobs, produces realistic continents/islands
 
 ### Climate & Biomes
 - **Temperature simulation** based on elevation and base temperature
@@ -20,10 +21,11 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 - **Lake detection and simulation** with proper outlet rivers
 - **Advanced river generation** using flux-based drainage patterns
 - **Polygonal river rendering** with variable width from source to mouth
+- **Higher flux thresholds** - 35% of max flux for fewer, larger rivers
 - **Coastline detail enhancement** with noise-based perturbation
 
 ### Interactive Controls
-- **Terrain Template**: Choose from 5 different world types
+- **Terrain Template**: Choose from 4 different world types (continents, volcanicIsland, archipelago, lowIsland)
 - **Graph Size**: Adjust the number of Voronoi cells (100-10,000)
 - **Elevation Controls**: Max height, radius, and sharpness for terrain generation
 - **Climate Settings**: Base temperature and rainfall intensity
@@ -35,7 +37,7 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 1. Start a local server (required for ES modules): `python3 -m http.server 8000`
 2. Open `http://localhost:8000/` in a web browser
-3. Click "Generate Map" to create a new world
+3. Click "Generate Map" to create a new world with Azgaar-style blob growth
 4. Adjust the various sliders and dropdowns to customize your map
 5. Use the "Show Tests" section to verify functionality
 6. Add `?selftest=1` to the URL to run module validation tests
@@ -50,6 +52,9 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 ### Key Algorithms
 - **Voronoi cell generation** with Lloyd relaxation for natural spacing
+- **Azgaar-style blob growth** with BFS queue expansion and sharpness modifiers
+- **Template composition** - mountains, hills, ranges, troughs, pits for realistic terrain
+- **Interior cell seeding** - keeps seeds off borders for coherent landmasses
 - **Flood-fill lake detection** with spill level calculation
 - **BFS distance-to-coast** for realistic river flow direction
 - **Wind-biased precipitation** with orographic lift simulation
@@ -64,12 +69,14 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 This implementation builds on the original Voronoi heightmap demo with several Azgaar-inspired enhancements:
 
-1. ✅ **Terrain Templates** - Multiple world generation patterns
-2. ✅ **Climate Simulation** - Temperature and precipitation modeling
-3. ✅ **Biome System** - Ecological zone classification and coloring
-4. ✅ **Enhanced Rivers** - Polygonal rendering with variable width
-5. ✅ **Lake Systems** - Depression detection and outlet simulation
-6. ✅ **Coastline Detail** - Noise-based coastline perturbation
+1. ✅ **Azgaar-style Blob Growth** - BFS queue expansion with template composition
+2. ✅ **Terrain Templates** - Volcanic Island, Continental Islands, Archipelago, Low Island
+3. ✅ **Climate Simulation** - Temperature and precipitation modeling
+4. ✅ **Biome System** - Ecological zone classification and coloring
+5. ✅ **Enhanced Rivers** - Polygonal rendering with higher flux thresholds
+6. ✅ **Lake Systems** - Depression detection and outlet simulation
+7. ✅ **Coastline Detail** - Noise-based coastline perturbation
+8. ✅ **Fixed Coastline** - Default seaLevel = 0.20 with slider override
 
 Future enhancements could include:
 - **Cultural features** (cities, roads, borders)
@@ -95,14 +102,14 @@ This project runs entirely in the browser using native ES modules:
 index.html
 js/
 ├── app.js                    # Entry: wires UI and calls init() (no unused imports)
-├── legacy-main.js            # Pipeline orchestration (ensureIsWater → recolor → rivers → regions → routes), exports init(), generate()
+├── legacy-main.js            # Pipeline orchestration (Azgaar-style blob growth pipeline), exports init(), generate()
 ├── state.js                  # Central app state (S), getters/setters, caches (isWater, landPaths, precip)
 ├── utils.js                  # Pure helpers (RNG, math, geometry)
 ├── render.js                 # Layer plumbing (getLayers, ensureRasterImage), view-mode toggles, light repaints
 ├── recolor.js                # Terrain painting (canvas raster + SVG per-cell)
-├── terrain.js                # Template registry & executor (function/steps), height clear, cache invalidation
+├── terrain.js                # Azgaar-style blob templates & operations (growBlob, opMountain, opHill, etc.)
 ├── climate.js                # Precipitation provider (shim until full climate)
-├── rivers.js                 # Precip recompute, BFS/flow steps, river rendering
+├── rivers.js                 # Precip recompute, BFS/flow steps, river rendering (higher flux thresholds)
 ├── regions.js                # Region assignment + rendering (fallback drawn under #regions > .overlay)
 ├── routes.js                 # Roads/paths rendering and logs
 ├── ui.js                     # DOM event wiring for controls (generate, view toggle, seed, sea level, etc.)
@@ -134,5 +141,5 @@ Cells group must have `id="mapCells"`. Regions group is `#regions`. Fallback lan
 
 In "Terrain" mode, CSS hides `#regions path.fallback-land` so terrain shading remains visible.
 
-**Pipeline:**
-`ensureIsWater` → `recolor` → `recomputePrecipIfNeeded` → `computeRiverSteps` → `computeRivers` → `computeAndDrawRegions` → `computeRoutes`
+**Azgaar-style Pipeline:**
+`ensureHeightsCleared` → `applyTemplate` → `normalizeHeightsIfNeeded` → `thermalErode` → `smoothLand` → `sinkOuterMargin` → `recolor` → `recomputePrecipIfNeeded` → `computeRiverSteps` → `computeRivers` → `computeAndDrawRegions` → `computeRoutes`
