@@ -140,76 +140,138 @@ function markFeatures(polygons, neighbors, H, seaLevel, width, height) {
   return { isLand, isOcean: type.map ? type.map(v=>v===1) : Uint8Array.from(type,v=>+(v===1)), type };
 }
 
-// ---------- Coastlines (land↔water edges) ----------
-function coastEdges(polygons, neighbors, isLand, isOcean){
-  const N = polygons.length;
-  const edges = [];
-  for (let i=0;i<N;i++){
-    if (!isLand[i]) continue;
-    const poly = polygons[i];
-    // loop polygon edges, test neighbor water
-    for (let p=0;p<poly.length;p+=2){
-      const x1=poly[p], y1=poly[p+1];
-      const p2=(p+2)%poly.length;
-      const x2=poly[p2], y2=poly[p2+1];
-      // decide if this edge borders ocean: check any neighbor that shares it
-      // (cheap check: if any neighbor is ocean and has a nearly-collinear matching segment)
-      let oceanTouch=false;
-      for (const n of neighbors[i]){
-        if (!isOcean[n]) continue;
-        const polyN = polygons[n];
-        for (let k=0;k<polyN.length;k+=2){
-          const nx1=polyN[k], ny1=polyN[k+1];
-          const k2=(k+2)%polyN.length;
-          const nx2=polyN[k2], ny2=polyN[k2+1];
-          // share if endpoints equal (within epsilon)
-          const e = 1e-6;
-          const same = (Math.hypot(nx1-x2,ny1-y2)<e && Math.hypot(nx2-x1,ny2-y1)<e) ||
-                       (Math.hypot(nx1-x1,ny1-y1)<e && Math.hypot(nx2-x2,ny2-y2)<e);
-          if (same){ oceanTouch=true; break; }
-        }
-        if (oceanTouch) break;
-      }
-      if (oceanTouch) edges.push([[x1,y1],[x2,y2]]);
-    }
-  }
-  return edges;
+// ---------- Robust coastline extraction (no rounding) ----------
+
+// canonical string for an endpoint with high precision
+function vkey(x, y) {
+  // 1e-6 precision is plenty for d3-voronoi floating points
+  return `${x.toFixed(6)}|${y.toFixed(6)}`;
 }
 
-// chain edges into loops (very small, robust)
-function chainLoops(edges){
-  const map = new Map();
-  const key = ([x,y]) => `${Math.round(x*100)}/${Math.round(y*100)}`;
-  for (const [a,b] of edges){
-    const ka=key(a), kb=key(b);
-    if (!map.has(ka)) map.set(ka,[]);
-    if (!map.has(kb)) map.set(kb,[]);
-    map.get(ka).push(kb);
-    map.get(kb).push(ka);
-  }
-  const used = new Set();
-  const loops = [];
-  for (const [a,b] of edges){
-    const ek = key(a)+'|'+key(b);
-    if (used.has(ek)) continue;
-    let curr = [a,b]; used.add(ek);
-    // forward
-    while(true){
-      const last = curr[curr.length-1];
-      const arr = map.get(key(last))||[];
-      const next = arr.find(k => {
-        const npt = k.split('/').map(v=>parseFloat(v)/100);
-        const ek2 = key(last)+'|'+k;
-        return !used.has(ek2);
-      });
-      if (!next) break;
-      const [nx,ny] = next.split('/').map(v=>parseFloat(v)/100);
-      used.add(key(last)+'|'+next);
-      curr.push([nx,ny]);
-      if (Math.hypot(nx-curr[0][0], ny-curr[0][1]) < 1e-6) break;
+// canonical undirected key for an edge (order-independent)
+function ekey(a, b) {
+  const ka = vkey(a[0], a[1]);
+  const kb = vkey(b[0], b[1]);
+  return ka < kb ? `${ka}__${kb}` : `${kb}__${ka}`;
+}
+
+/**
+ * Build a global edge map from all cell polygons.
+ * Each unique Voronoi segment will end up with up to two adjacent cells.
+ */
+function buildEdgeMap(polygons) {
+  const map = new Map(); // ekey -> { a:[x,y], b:[x,y], cells:[i,j?] }
+  for (let i = 0; i < polygons.length; i++) {
+    const poly = polygons[i];
+    if (!poly || poly.length < 6) continue;
+    for (let p = 0; p < poly.length; p += 2) {
+      const x1 = poly[p], y1 = poly[p + 1];
+      const p2 = (p + 2) % poly.length;
+      const x2 = poly[p2], y2 = poly[p2 + 1];
+      const a = [x1, y1], b = [x2, y2];
+      const k = ekey(a, b);
+      let rec = map.get(k);
+      if (!rec) {
+        rec = { a, b, cells: [i] };
+        map.set(k, rec);
+      } else if (rec.cells.length === 1 && rec.cells[0] !== i) {
+        rec.cells.push(i);
+      } // ignore rare >2 due to numerical quirks
     }
-    if (curr.length>=3) loops.push(curr);
   }
+  return map;
+}
+
+/**
+ * Extract only those edges that separate land from ocean.
+ * - Ignores frame edges (they have only one adjacent cell in the map).
+ * - Returns undirected segments as [ [x1,y1], [x2,y2] ].
+ */
+function coastSegments(polygons, isLand, isOcean) {
+  const edgeMap = buildEdgeMap(polygons);
+  const segs = [];
+  for (const rec of edgeMap.values()) {
+    if (!rec.cells || rec.cells.length !== 2) continue; // frame edge -> skip
+    const [i, j] = rec.cells;
+    const li = !!isLand[i], lj = !!isLand[j];
+    if (li === lj) continue; // not a land-water boundary
+    // (Optional: if you want only ocean coasts, ensure the water side is ocean)
+    const waterIsOcean = li ? !!isOcean[j] : !!isOcean[i];
+    if (!waterIsOcean) continue;
+    segs.push([rec.a, rec.b]);
+  }
+  return segs;
+}
+
+/**
+ * Chain segments into closed loops by exact endpoint keys.
+ * Pick the next edge by smallest left-turn to keep a smooth traversal.
+ */
+function chainCoastLoops(segments) {
+  // adjacency map: vkey -> [{pt:[x,y], other:[x,y]}...]
+  const adj = new Map();
+  const pushAdj = (k, from, to) => {
+    if (!adj.has(k)) adj.set(k, []);
+    adj.get(k).push({ pt: to, other: from });
+  };
+  const used = new Set(); // stores ekey for used segments
+
+  for (const [a, b] of segments) {
+    const ka = vkey(a[0], a[1]);
+    const kb = vkey(b[0], b[1]);
+    const ke = ekey(a, b);
+    if (used.has(ke)) continue;
+    pushAdj(ka, a, b);
+    pushAdj(kb, b, a);
+  }
+
+  const loops = [];
+
+  // angle helper
+  const angle = (ax, ay, bx, by, cx, cy) => {
+    const ux = bx - ax, uy = by - ay;
+    const vx = cx - bx, vy = cy - by;
+    return Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy); // signed turn
+  };
+
+  function takeNext(curr, prev) {
+    const k = vkey(curr[0], curr[1]);
+    const list = (adj.get(k) || []).filter(({ pt }) => !used.has(ekey(curr, pt)));
+    if (list.length === 0) return null;
+    if (!prev) return list[0].pt; // any start
+    // choose the smallest left turn (more continuous)
+    let best = list[0].pt, bestTurn = Infinity;
+    for (const { pt } of list) {
+      const t = Math.abs(angle(prev[0], prev[1], curr[0], curr[1], pt[0], pt[1]));
+      if (t < bestTurn) { bestTurn = t; best = pt; }
+    }
+    return best;
+  }
+
+  // iterate edges; build loops
+  for (const [a, b] of segments) {
+    const ke = ekey(a, b);
+    if (used.has(ke)) continue;
+
+    const loop = [a];
+    let prev = null;
+    let curr = a;
+
+    // walk forward until we close
+    // guard against pathological long runs
+    for (let iter = 0; iter < 10000; iter++) {
+      const next = takeNext(curr, prev);
+      if (!next) break;
+      used.add(ekey(curr, next));
+      loop.push(next);
+      prev = curr;
+      curr = next;
+      if (vkey(curr[0], curr[1]) === vkey(loop[0][0], loop[0][1])) break;
+    }
+
+    if (loop.length >= 3) loops.push(loop);
+  }
+
   return loops;
 }
 
@@ -298,8 +360,8 @@ export function generateAzgaarLite(opts = {}) {
   const water = markFeatures(polygons, neighbors, Hfield, sea, W, H);
 
   // 4) Coastlines
-  const edges = coastEdges(polygons, neighbors, water.isLand, water.isOcean);
-  let loops = chainLoops(edges);
+  const segments = coastSegments(polygons, water.isLand, water.isOcean);
+  let loops = chainCoastLoops(segments);
   loops = loops.map(l => smoothChaikinClosed(l, state.smoothCoastIters));
 
   return {

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Azgaar-Lite Robust Coastlines Test</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+    .test-container { max-width: 1400px; margin: 0 auto; }
+    .controls { margin-bottom: 20px; }
+    button { margin: 5px; padding: 10px 15px; }
+    .maps-container { display: flex; gap: 20px; }
+    .map-section { flex: 1; }
+    svg { border: 1px solid #ccc; width: 100%; height: 400px; }
+    .status { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+    .feature-controls { margin: 20px 0; padding: 15px; background: #f8f8f8; border-radius: 5px; }
+    .feature-controls label { display: inline-block; margin: 5px 15px 5px 0; }
+    .feature-controls input, .feature-controls select { margin-left: 5px; }
+    .coastline-info { margin: 10px 0; padding: 10px; background: #e8f4f8; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <div class="test-container">
+    <h1>Azgaar-Lite Robust Coastlines Test</h1>
+    
+    <div class="feature-controls">
+      <h3>Test Parameters</h3>
+      <label>Seed: <input type="text" id="seedInput" value="coast-test-001" /></label>
+      <button id="seedRerollBtn">Reroll</button>
+      
+      <label>Sea Level: <input id="seaLevelInput" type="number" step="0.01" min="0" max="1" value="0.2" /></label>
+      
+      <label><input id="secondBlobChk" type="checkbox" /> Enable 2nd blob</label>
+      
+      <button id="generateBtn">Generate Map</button>
+      <button id="testMultipleBtn">Test Multiple Seeds</button>
+    </div>
+    
+    <div class="status" id="status">Ready to test robust coastlines...</div>
+    
+    <div class="coastline-info" id="coastlineInfo">
+      <h4>Coastline Analysis</h4>
+      <div id="coastlineStats"></div>
+    </div>
+    
+    <div class="maps-container">
+      <div class="map-section">
+        <h3>Generated Map</h3>
+        <svg id="map" width="600" height="400" viewBox="0 0 1200 800"></svg>
+        <div id="stats" class="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- D3 v7 (uses d3.pointer and d3-delaunay for Voronoi) -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  
+  <!-- Test script -->
+  <script type="module">
+    import { state } from './js/state.js';
+    import { generateAzgaarLite } from './js/generators/azgaar-lite.js';
+    import { renderAzgaarLite } from './js/render/azgaar-lite-svg.js';
+
+    const status = document.getElementById('status');
+    const seedInput = document.getElementById('seedInput');
+    const seaLevelInput = document.getElementById('seaLevelInput');
+    const secondBlobChk = document.getElementById('secondBlobChk');
+    const map = document.getElementById('map');
+    const stats = document.getElementById('stats');
+    const coastlineStats = document.getElementById('coastlineStats');
+
+    function updateStatus(msg) {
+      status.textContent = msg;
+      console.log(msg);
+    }
+
+    function updateStats(world) {
+      const landCount = world.isLand.reduce((a,b) => a + b, 0);
+      const oceanCount = world.isOcean.reduce((a,b) => a + b, 0);
+      const landFrac = (landCount / world.polygons.length * 100).toFixed(1);
+      stats.textContent = `Map: ${world.polygons.length} cells, ${landCount} land (${landFrac}%), ${oceanCount} ocean, sea level: ${world.seaLevel.toFixed(3)}`;
+    }
+
+    function analyzeCoastlines(world) {
+      const loops = world.coastLoops;
+      let totalSegments = 0;
+      let totalLength = 0;
+      let frameEdges = 0;
+      let closedLoops = 0;
+      
+      for (const loop of loops) {
+        totalSegments += loop.length;
+        closedLoops++;
+        
+        // Check if loop is closed (first and last points match)
+        const first = loop[0];
+        const last = loop[loop.length - 1];
+        const isClosed = Math.hypot(first[0] - last[0], first[1] - last[1]) < 1e-6;
+        
+        // Calculate loop length
+        for (let i = 1; i < loop.length; i++) {
+          const prev = loop[i-1];
+          const curr = loop[i];
+          totalLength += Math.hypot(curr[0] - prev[0], curr[1] - prev[1]);
+        }
+        
+        // Check for frame edges (points at canvas boundaries)
+        for (const [x, y] of loop) {
+          if (x <= 1 || x >= world.width - 1 || y <= 1 || y >= world.height - 1) {
+            frameEdges++;
+          }
+        }
+      }
+      
+      coastlineStats.innerHTML = `
+        <strong>Coastline Analysis:</strong><br>
+        • ${loops.length} coastline loops<br>
+        • ${totalSegments} total segments<br>
+        • ${totalLength.toFixed(1)} total length<br>
+        • ${closedLoops} closed loops<br>
+        • ${frameEdges} potential frame edge points<br>
+        • Average loop length: ${(totalLength / loops.length).toFixed(1)}<br>
+        • Average segments per loop: ${(totalSegments / loops.length).toFixed(1)}
+      `;
+    }
+
+    function clearMap(svg) {
+      while (svg.firstChild) {
+        svg.removeChild(svg.firstChild);
+      }
+    }
+
+    function randomSeedHex(nBytes = 6) {
+      if (window.crypto?.getRandomValues) {
+        const buf = new Uint8Array(nBytes);
+        window.crypto.getRandomValues(buf);
+        return Array.from(buf).map(b => b.toString(16).padStart(2,'0')).join('');
+      }
+      return Array.from({length:nBytes}, () => ((Math.random()*256)|0).toString(16).padStart(2,'0')).join('');
+    }
+
+    async function generateMap() {
+      try {
+        // Update state from UI
+        state.rngSeed = seedInput.value.trim() || 'coast-test-001';
+        state.seaLevel = parseFloat(seaLevelInput.value) || 0.2;
+        state.secondBlobEnabled = secondBlobChk.checked;
+
+        updateStatus(`Generating map with robust coastlines - seed: "${state.rngSeed}", sea level: ${state.seaLevel}, 2nd blob: ${state.secondBlobEnabled}`);
+        
+        const start = performance.now();
+        const world = generateAzgaarLite();
+        const time = performance.now() - start;
+        
+        clearMap(map);
+        renderAzgaarLite(map, world);
+        updateStats(world);
+        analyzeCoastlines(world);
+        
+        updateStatus(`✅ Generated robust coastlines in ${time.toFixed(1)}ms - ${world.coastLoops.length} loops`);
+        
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`);
+        console.error(error);
+      }
+    }
+
+    async function testMultipleSeeds() {
+      try {
+        updateStatus('Testing robust coastlines with multiple seeds...');
+        
+        const testSeeds = ['coast-test-001', 'coast-test-002', 'coast-test-003', 'coast-test-004'];
+        let totalLoops = 0;
+        let totalSegments = 0;
+        let frameEdgeCount = 0;
+        
+        for (const seed of testSeeds) {
+          state.rngSeed = seed;
+          const world = generateAzgaarLite();
+          
+          totalLoops += world.coastLoops.length;
+          
+          for (const loop of world.coastLoops) {
+            totalSegments += loop.length;
+            
+            // Check for frame edges
+            for (const [x, y] of loop) {
+              if (x <= 1 || x >= world.width - 1 || y <= 1 || y >= world.height - 1) {
+                frameEdgeCount++;
+              }
+            }
+          }
+        }
+        
+        const avgLoops = (totalLoops / testSeeds.length).toFixed(1);
+        const avgSegments = (totalSegments / testSeeds.length).toFixed(1);
+        
+        updateStatus(`✅ Multi-seed test complete: ${testSeeds.length} seeds, avg ${avgLoops} loops, avg ${avgSegments} segments, ${frameEdgeCount} frame edge points`);
+        
+        // Generate the last one for display
+        state.rngSeed = testSeeds[testSeeds.length - 1];
+        const world = generateAzgaarLite();
+        clearMap(map);
+        renderAzgaarLite(map, world);
+        updateStats(world);
+        analyzeCoastlines(world);
+        
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`);
+        console.error(error);
+      }
+    }
+
+    // Wire up controls
+    seedInput.addEventListener('change', generateMap);
+    seaLevelInput.addEventListener('change', generateMap);
+    secondBlobChk.addEventListener('change', generateMap);
+
+    document.getElementById('seedRerollBtn').addEventListener('click', () => {
+      state.rngSeed = `coast-${randomSeedHex(6)}`;
+      seedInput.value = state.rngSeed;
+      generateMap();
+    });
+
+    document.getElementById('generateBtn').addEventListener('click', generateMap);
+    document.getElementById('testMultipleBtn').addEventListener('click', testMultipleSeeds);
+
+    // Initial generation
+    generateMap();
+  </script>
+</body>
+</html>

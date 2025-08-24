@@ -1,5 +1,75 @@
 # TODO List
 
+## ✅ COMPLETED: Azgaar-Lite Robust Coastlines
+
+**Goal**: Replace coastline builder with robust extraction that avoids rounding issues and frame edges.
+
+### Phase 1: Robust Coastline Functions ✅
+- [x] Added vkey() function for high-precision endpoint canonicalization
+- [x] Added ekey() function for order-independent edge keys
+- [x] Added buildEdgeMap() function for global edge mapping
+- [x] Added coastSegments() function for land-ocean boundary extraction
+- [x] Added chainCoastLoops() function for smooth loop chaining
+- [x] Replaced old coastEdges() and chainLoops() functions
+
+### Phase 2: Edge Map Construction ✅
+- [x] Implemented global edge map from all cell polygons
+- [x] Added support for up to two adjacent cells per edge
+- [x] Added handling for numerical quirks (>2 cells per edge)
+- [x] Used high-precision floating point keys (1e-6 precision)
+
+### Phase 3: Coastline Extraction ✅
+- [x] Implemented frame edge detection (single adjacent cell)
+- [x] Added land-water boundary detection
+- [x] Added ocean-specific filtering (excludes lakes)
+- [x] Maintained undirected segment representation
+
+### Phase 4: Loop Chaining ✅
+- [x] Implemented exact endpoint key matching
+- [x] Added smallest left-turn traversal for smooth loops
+- [x] Added adjacency map construction
+- [x] Added used edge tracking to prevent duplicates
+- [x] Added pathological loop protection (10,000 iteration limit)
+
+### Phase 5: Integration ✅
+- [x] Updated generateAzgaarLite() to use new coastline functions
+- [x] Replaced coastEdges() + chainLoops() with coastSegments() + chainCoastLoops()
+- [x] Maintained Chaikin smoothing integration
+- [x] Preserved all existing functionality
+
+### Phase 6: Testing ✅
+- [x] Created test_robust_coastlines.html for verification
+- [x] Added coastline analysis and statistics
+- [x] Added frame edge detection testing
+- [x] Added multi-seed testing for robustness
+- [x] Verified no rounding issues or frame edges
+
+### Acceptance Criteria ✅
+- [x] No rounding issues in coastline extraction
+- [x] No frame edges in coastline loops
+- [x] Smooth loop chaining with smallest left-turn traversal
+- [x] High-precision floating point handling (1e-6)
+- [x] Proper land-ocean boundary detection
+- [x] Ocean-specific filtering (excludes lakes)
+- [x] Maintained deterministic behavior
+- [x] Comprehensive testing validates robustness
+
+### Summary ✅
+**Azgaar-Lite Robust Coastlines Complete!** 
+
+Successfully implemented:
+- High-precision coastline extraction without rounding issues
+- Frame edge detection and exclusion
+- Global edge map construction for accurate boundary detection
+- Smooth loop chaining with smallest left-turn traversal
+- Ocean-specific filtering (excludes lakes from coastlines)
+- Comprehensive testing with coastline analysis
+- Maintained deterministic behavior throughout
+
+The Azgaar-Lite generator now produces robust coastlines that avoid rounding artifacts and frame edges, providing clean, accurate land-ocean boundaries.
+
+---
+
 ## ✅ COMPLETED: Azgaar-Lite Seed UI, Percentile Sea, Optional 2nd Blob
 
 **Goal**: Add interactive UI controls for Azgaar-Lite generator with seed management, percentile sea level, and optional second blob.
