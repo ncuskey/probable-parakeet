@@ -1,4 +1,12 @@
 // js/terrain.js — terrain templates + executor (function-based + steps-based)
+// TODO: Growth-aware oval mask system with de-fill implemented
+// - Precomputed rotated-oval mask cached per run
+// - Seeds gated by mask ≥ 0.65 (cores deeper at 0.72)
+// - Growth attenuated by mask values
+// - Propagation clipped at mask < 0.35
+// - Sub-linear blending prevents saturation (h0*0.72 + v*0.62)
+// - Strong carving with mega-troughs (carveSeas)
+// - Final mask pass very light (pow:1.05) for subtle polish
 import { S, getWorld, resetCaches } from './state.js';
 import { mulberry32, rngFromSeed, clamp, randRange, choice } from './utils.js';
 
@@ -6,6 +14,41 @@ import { mulberry32, rngFromSeed, clamp, randRange, choice } from './utils.js';
 export function getRng(){ return mulberry32(S.seed); }
 let RNG = getRng();
 export function _refreshRng(){ RNG = getRng(); }
+
+// ---------- Oval mask cache ----------
+let OVAL_MASK = null; // Float32Array per-cell
+function _smooth01(x){ return x<=0?0:x>=1?1:(x*x*(3-2*x)); }
+function _normUV(cx, cy, W, H, marginPx) {
+  const iw = Math.max(1, W - marginPx*2), ih = Math.max(1, H - marginPx*2);
+  const u = (cx - marginPx) / iw * 2 - 1;
+  const v = (cy - marginPx) / ih * 2 - 1;
+  return {u, v};
+}
+
+function _makeOvalMask({innerPx=null, ax=1.0, ay=0.7, rot=0.0, n=2.5, pow=1.6} = {}) {
+  const W = WORLD.width, H = WORLD.height;
+  const inner = innerPx ?? Math.min(W,H) * 0.04;
+  const cr = Math.cos(rot), sr = Math.sin(rot);
+  const out = new Float32Array(CELLS.length);
+  for (let i=0;i<CELLS.length;i++){
+    const c = CELLS[i];
+    const {u,v} = _normUV(c.cx, c.cy, W, H, inner);
+    const rx =  u*cr - v*sr, ry = u*sr + v*cr;
+    const r = Math.pow(Math.abs(rx/ax), n) + Math.pow(Math.abs(ry/ay), n);
+    const t = 1 - Math.max(0, r - 1);        // >1 => outside → 0
+    const m = _smooth01(t);                   // soften rim
+    out[i] = Math.pow(Math.max(0,m), pow);    // [0..1]
+  }
+  return out;
+}
+
+export function bindOvalMaskForRun() {
+  // randomize per run so it's not canvas-aligned
+  const A = 0.80 + RNG()*0.25;   // ax
+  const B = 0.55 + RNG()*0.25;   // ay
+  const TH = RNG() * Math.PI;    // rotation
+  OVAL_MASK = _makeOvalMask({ ax:A, ay:B, rot:TH, n:2.6, pow:1.7 });
+}
 
 // ---------- World binding (singleton per run) ----------
 let WORLD = null;
@@ -52,32 +95,32 @@ function _neighborIndices(u) {
 }
 
 // Pick an interior cell (keeps seeds off borders)
-function interiorCellIndex(minEdgePx = Math.min(WORLD.width, WORLD.height) * 0.10) {
-  for (let t=0; t<600; t++) {
+function interiorCellIndex(minEdgePx = Math.min(WORLD.width, WORLD.height) * 0.10, minMask=0.65) {
+  for (let t=0; t<800; t++) {
     const i = (RNG() * CELLS.length) | 0;
     const c = CELLS[i];
     const d = Math.min(c.cx, c.cy, WORLD.width - c.cx, WORLD.height - c.cy);
-    if (Number.isFinite(d) && d >= minEdgePx) return i;
+    if (Number.isFinite(d) && d >= minEdgePx && (OVAL_MASK?.[i] ?? 1) >= minMask) return i;
   }
   return (CELLS.length/2)|0;
 }
 
-export function interiorDarts(k, minDistPx) {
-  const out = [];
+export function interiorDarts(k, minDistPx, minMask=0.65) {
   const minD2 = (minDistPx ?? Math.min(WORLD.width, WORLD.height) * 0.22) ** 2;
-  let guard = 0;
-  while (out.length < k && guard++ < 6000) {
-    const i = interiorCellIndex();
-    const { cx, cy } = CELLS[i];
-    let ok = Number.isFinite(cx) && Number.isFinite(cy);
-    for (const j of out) {
-      const dx = cx - CELLS[j].cx, dy = cy - CELLS[j].cy;
+  const picks = [];
+  for (let tries=0; tries<6000 && picks.length<k; tries++) {
+    const i = interiorCellIndex(undefined, minMask);
+    const ci = CELLS[i];
+    if ((OVAL_MASK?.[i] ?? 1) < minMask) continue;
+    let ok = true;
+    for (const j of picks) {
+      const cj = CELLS[j];
+      const dx = ci.cx - cj.cx, dy = ci.cy - cj.cy;
       if (dx*dx + dy*dy < minD2) { ok = false; break; }
     }
-    if (ok) out.push(i);
+    if (ok) picks.push(i);
   }
-  while (out.length < k) out.push(interiorCellIndex());
-  return out;
+  return picks.length ? picks : [(CELLS.length/2)|0];
 }
 
 // Nearest cell by XY (use your own finder if available)
@@ -104,7 +147,7 @@ function idxOfNeighbor(v) {
   return -1;
 }
 
-export function makeBlobField({ startIndex, peak=1, radius=0.925, sharpness=0.08, stop=0.025, warpAmp=0.06, warpFreq=0.0025 }) {
+export function makeBlobField({ startIndex, peak=1, radius=0.915, sharpness=0.085, stop=0.035, warpAmp=0.055, warpFreq=0.0025, maskClip=0.35 }) {
   if (!(startIndex >= 0 && startIndex < CELLS.length)) {
     console.warn('[blob] invalid startIndex', startIndex, 'cells=', CELLS.length);
     return new Float32Array(CELLS.length);
@@ -131,14 +174,16 @@ export function makeBlobField({ startIndex, peak=1, radius=0.925, sharpness=0.08
     }
     for (const v of nn) {
       if (used[v]) continue;
+      const mv = (OVAL_MASK?.[v] ?? 1);
+      if (mv < maskClip) continue;               // don't propagate past rim
       const cv = CELLS[v];
       // noise in world space → [-warpAmp, +warpAmp]
       const n = (_noise2(cv.cx*warpFreq, cv.cy*warpFreq) - 0.5) * 2 * warpAmp;
       const rad = Math.max(0.80, Math.min(0.99, rBase + n));
-      const nextBase = parent * rad;
+      let nextBase = parent * rad;
       // IMPORTANT: mod ∈ [1 - sharpness, 1]; never > 1 so children ≤ parent
       const mod = 1 - sharpness * RNG();
-      const h = nextBase * mod;
+      const h = (nextBase * mod) * mv;           // attenuate by mask
       if (h > f[v]) f[v] = h;
       used[v] = 1;
       q.push(v);
@@ -151,24 +196,31 @@ export function makeBlobField({ startIndex, peak=1, radius=0.925, sharpness=0.08
   return f;
 }
 
+// Sub-linear blend: prevents "fill to 1.0" plateaus when many blobs overlap
 export function applyFieldAdd(field, k=1) {
   let nz = 0;
   for (let i = 0; i < CELLS.length; i++) {
     const inc = k * (field[i] || 0);
     if (inc === 0) continue;
-    const nh = readH(CELLS[i]) + inc;
-    writeH(CELLS[i], nh > 1 ? 1 : nh);
-    nz++;
+    const h0 = readH(CELLS[i]);
+    // Blend weights tuned so repeated additions asymptote below 1
+    const h1 = Math.min(1, h0*0.72 + inc*0.62);
+    if (h1 > h0) {
+      writeH(CELLS[i], h1);
+      nz++;
+    }
   }
   if (nz === 0) console.warn('[add] field added zero cells');
 }
 
+// Slightly super-linear subtract to make carving "win" against fills
 export function applyFieldSub(field, k=1) {
   for (let i = 0; i < CELLS.length; i++) {
     const dec = k * (field[i] || 0);
     if (dec === 0) continue;
-    const nh = readH(CELLS[i]) - dec;
-    writeH(CELLS[i], nh < 0 ? 0 : nh);
+    const h0 = readH(CELLS[i]);
+    const h1 = Math.max(0, h0 - dec*0.85);
+    if (h1 < h0) writeH(CELLS[i], h1);
   }
 }
 
@@ -202,15 +254,6 @@ export function sinkOuterMargin(pct = 0.04, amount = 0.15) {
 }
 
 // --------- math helpers ----------
-function _smooth01(x){ return x<=0?0:x>=1?1:(x*x*(3-2*x)); }
-
-// sample rotated normalized coords in [-1,1] with an inner margin (px)
-function _normUV(cx, cy, W, H, marginPx) {
-  const iw = W - marginPx*2, ih = H - marginPx*2;
-  const x = (cx - marginPx) / Math.max(1, iw) * 2 - 1;
-  const y = (cy - marginPx) / Math.max(1, ih) * 2 - 1;
-  return {u:x, v:y};
-}
 
 // Superellipse membership: |u|^n + |v|^n <= 1 (n ~ 2..3), rotated
 export function applyOvalMask({innerPx=null, ax=1.0, ay=0.7, rot=0.0, n=2.4, pow=1.7} = {}) {
@@ -267,21 +310,21 @@ export function capHeights(maxH=0.92){
 // --- Blob-based operations ---
 // Positive add
 function opMountain(opts = {}) {
-  const { peak = 1, radius = 0.985, sharpness = 0.06 } = opts; // wider, smoother
-  const f = makeBlobField({ startIndex: interiorCellIndex(), peak, radius, sharpness, stop: 0.025, warpAmp:0.06, warpFreq:0.003 });
+  const { peak = 1, radius = 0.975, sharpness = 0.065 } = opts; // wider, smoother
+  const f = makeBlobField({ startIndex: interiorCellIndex(undefined, 0.65), peak, radius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   applyFieldAdd(f, 1);
 }
 
 function opHill(opts = {}) {
-  const { peak = 0.42, radius = 0.985, sharpness = 0.06 } = opts; // many broad hills
-  const f = makeBlobField({ startIndex: interiorCellIndex(), peak, radius, sharpness, stop: 0.025, warpAmp:0.06, warpFreq:0.003 });
+  const { peak = 0.42, radius = 0.975, sharpness = 0.065 } = opts; // many broad hills
+  const f = makeBlobField({ startIndex: interiorCellIndex(undefined, 0.65), peak, radius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   applyFieldAdd(f, 1);
 }
 
-function opRange({ peak = 0.8, steps = 6, stepRadius = 0.93, sharpness = 0.10 } = {}) {
+function opRange({ peak = 0.8, steps = 6, stepRadius = 0.92, sharpness = 0.105 } = {}) {
   let x = RNG() * WORLD.width, y = RNG() * WORLD.height, dir = RNG() * Math.PI * 2;
   for (let s = 0; s < steps; s++) {
-    const f = makeBlobField({ startIndex: nearestCellIndex(x, y), peak, radius: stepRadius, sharpness });
+    const f = makeBlobField({ startIndex: nearestCellIndex(x, y), peak, radius: stepRadius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
     applyFieldAdd(f, 1);
     x += Math.cos(dir) * (Math.min(WORLD.width, WORLD.height) * 0.12);
     y += Math.sin(dir) * (Math.min(WORLD.width, WORLD.height) * 0.12);
@@ -291,11 +334,11 @@ function opRange({ peak = 0.8, steps = 6, stepRadius = 0.93, sharpness = 0.10 } 
 
 // Negative: subtract gently (scale k)
 function opTrough(opts = {}) {
-  const { peak = 0.40, steps = 6, stepRadius = 0.94, sharpness = 0.07, strength = 0.25 } = opts;
+  const { peak = 0.40, steps = 6, stepRadius = 0.935, sharpness = 0.075, strength = 0.25 } = opts;
   let x = RNG() * WORLD.width, y = RNG() * WORLD.height, dir = RNG() * Math.PI * 2;
   for (let s = 0; s < steps; s++) {
     const idx = nearestCellIndex(x, y);
-    const f = makeBlobField({ startIndex: idx, peak, radius: stepRadius, sharpness, stop: 0.02 });
+    const f = makeBlobField({ startIndex: idx, peak, radius: stepRadius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
     applyFieldSub(f, strength); // gentle carve
     x += Math.cos(dir) * (Math.min(WORLD.width, WORLD.height) * 0.12);
     y += Math.sin(dir) * (Math.min(WORLD.width, WORLD.height) * 0.12);
@@ -303,9 +346,28 @@ function opTrough(opts = {}) {
   }
 }
 
-function opPit({ depth = 0.35, radius = 0.94, sharpness = 0.10 } = {}) {
-  const f = makeBlobField({ startIndex: interiorCellIndex(), peak: depth, radius, sharpness });
+function opPit({ depth = 0.35, radius = 0.935, sharpness = 0.105 } = {}) {
+  const f = makeBlobField({ startIndex: interiorCellIndex(undefined, 0.65), peak: depth, radius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   applyFieldSub(f, 1);
+}
+
+function carveSeas({count=3, minMask=0.55} = {}){
+  for (let k=0;k<count;k++){
+    const seed = interiorCellIndex(undefined, minMask);
+    // Wide, soft trough; allow carving closer to rim (looser maskClip)
+    const f = makeBlobField({
+      startIndex: seed,
+      peak: 0.68 + RNG()*0.12,   // how much to remove before scaling below
+      radius: 0.955,
+      sharpness: 0.07,
+      stop: 0.05,                // longer reach to open basins/straits
+      warpAmp: 0.07,
+      warpFreq: 0.002,
+      maskClip: 0.22             // allow carving nearer boundary
+    });
+    // Carve with moderate strength so we create bays/seas, not voids
+    applyFieldSub(f, 0.55 + RNG()*0.1);
+  }
 }
 
 function _stats(label='[H]') {
@@ -387,6 +449,7 @@ export function volcanicIsland() { // "High Island"
   ensureHeightsCleared();
   _refreshRng(); // IMPORTANT: seed ops for this run
   bindWorld();
+  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
   opMountain({ peak: 1, radius: 0.95, sharpness: 0.12 });
   for (let i = 0; i < 15; i++) opHill({ peak: 0.5, radius: 0.95, sharpness: 0.10 });
   for (let i = 0; i < 2; i++)  opRange({ peak: 0.7, steps: 6 });
@@ -398,6 +461,7 @@ export function lowIsland() {
   ensureHeightsCleared();
   _refreshRng(); // IMPORTANT: seed ops for this run
   bindWorld();
+  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
   opMountain({ peak: 1, radius: 0.95, sharpness: 0.12 });
   for (let i = 0; i < 15; i++) opHill({ peak: 0.5, radius: 0.95, sharpness: 0.10 });
   for (let i = 0; i < 2; i++)  opRange({ peak: 0.7, steps: 6 });
@@ -410,6 +474,7 @@ export function archipelago() {
   ensureHeightsCleared();
   _refreshRng(); // IMPORTANT: seed ops for this run
   bindWorld();
+  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
   opMountain({ peak: 1, radius: 0.96, sharpness: 0.12 });
   for (let i = 0; i < 15; i++) opHill({ peak: 0.45, radius: 0.95, sharpness: 0.12 });
   for (let i = 0; i < 2; i++)  opTrough({ peak: 0.55, steps: 5 });
@@ -421,7 +486,8 @@ export function continentalIslands() {
   _refreshRng();
   bindWorld();             // make sure CELLS is bound
   resolveHeightKey();      // ensure we write the property recolor reads
-  const cores = interiorDarts(3);
+  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
+  const cores = interiorDarts(3, undefined, /*minMask*/0.72); // deeper inside
   for (const idx of cores) {
     const f = makeBlobField({ startIndex: idx, peak: 1, radius: 0.985, sharpness: 0.06, stop: 0.025, warpAmp:0.06, warpFreq:0.003 });
     const nz = f.reduce((a,v)=>a+(v>0),0);
@@ -430,9 +496,13 @@ export function continentalIslands() {
   }
   _stats('[H] after cores');
 
-  const hills = 28 + ((RNG()*12)|0);
-  for (let i=0;i<hills;i++) {
-    const f = makeBlobField({ startIndex: interiorCellIndex(), peak: 0.35 + RNG()*0.09, radius: 0.94, sharpness: 0.07, stop: 0.025, warpAmp:0.06, warpFreq:0.003 });
+  const hills = 22 + ((RNG()*8)|0); // fewer hills; less global fill
+  for (let i=0;i<hills;i++){
+    const f = makeBlobField({
+      startIndex: interiorCellIndex(undefined, 0.75),
+      peak: 0.33 + RNG()*0.08, radius: 0.935, sharpness: 0.075, stop: 0.035,
+      warpAmp:0.055, warpFreq:0.003, maskClip:0.46
+    });
     applyFieldAdd(f, 1);
   }
   _stats('[H] after hills');
@@ -440,11 +510,16 @@ export function continentalIslands() {
   for (let i=0; i<2; i++) opTrough({ strength: 0.45 });
   _stats('[H] after troughs');
   
+  // existing gentle troughs (keep or reduce to 1–2); then carve seas:
+  carveSeas({count: 2 + ((RNG()*2)|0), minMask: 0.58});
+  _stats('[H] after seas');
+  
   // pick a random oval aspect & rotation so coastlines aren't canvas-aligned
   const A = 0.80 + RNG()*0.25;        // ax
   const B = 0.55 + RNG()*0.25;        // ay
   const TH = RNG() * Math.PI;         // rotation
-  applyOvalMask({ ax:A, ay:B, rot:TH, n:2.6, pow:1.9 });
+  // Optional light polish (small pow)
+  applyOvalMask({ ax:A, ay:B, rot:TH, n:2.6, pow:1.05 }); // subtle coastal polish
   _stats('[H] after oval mask');
 
   // ---- Fail-safe: if still zero, draw a visible disk in the middle ----
@@ -526,13 +601,15 @@ export function applyTemplate(tplKey, uiVals = {}) {
 export function _debugSingleMountain() {
   ensureHeightsCleared();
   _refreshRng();
-  const i = interiorCellIndex();
-  const f = makeBlobField({ startIndex: i, peak: 1, radius: 0.985, sharpness: 0.06, stop: 0.025, warpAmp:0.06, warpFreq:0.003 });
+  bindWorld();
+  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
+  const i = interiorCellIndex(undefined, 0.65);
+  const f = makeBlobField({ startIndex: i, peak: 1, radius: 0.975, sharpness: 0.065, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   applyFieldAdd(f, 1);
 }
 
 export function _probeFieldFrom(i) {
-  const f = makeBlobField({ startIndex: i, peak: 1, radius: 0.985, sharpness: 0.06, stop: 0.025, warpAmp:0.06, warpFreq:0.003 });
+  const f = makeBlobField({ startIndex: i, peak: 1, radius: 0.975, sharpness: 0.065, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   let mx = 0, cnt = 0;
   for (let k = 0; k < f.length; k++) { if (f[k] > 0) { cnt++; if (f[k] > mx) mx = f[k]; } }
   console.log(`[F] from ${i} -> nonzero=${cnt} max=${mx.toFixed(3)}`);
@@ -540,8 +617,10 @@ export function _probeFieldFrom(i) {
 }
 
 export function _probeAddOnce(){
-  const i = interiorCellIndex();
-  const f = makeBlobField({ startIndex:i, peak:1, radius:0.985, sharpness:0.06, stop:0.025, warpAmp:0.06, warpFreq:0.003 });
+  bindWorld();
+  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
+  const i = interiorCellIndex(undefined, 0.65);
+  const f = makeBlobField({ startIndex:i, peak:1, radius:0.975, sharpness:0.065, stop:0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   let nz=0,mx=0; for (let k=0;k<f.length;k++){ if(f[k]>0){nz++; if(f[k]>mx) mx=f[k];}}
   console.log(`[F] seed=${i} nonzero=${nz} max=${mx.toFixed(3)}`);
   applyFieldAdd(f,1);
