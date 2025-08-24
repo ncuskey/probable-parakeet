@@ -7,13 +7,15 @@
 // - Sub-linear blending prevents saturation (h0*0.72 + v*0.62)
 // - Strong carving with mega-troughs (carveSeas)
 // - Final mask pass very light (pow:1.05) for subtle polish
-import { S, getWorld, resetCaches } from './state.js';
+import { S, getWorld, resetCaches, getRng as getStateRng } from './state.js';
 import { mulberry32, rngFromSeed, clamp, randRange, choice } from './utils.js';
+import { samplePoints } from './mesh/poisson.js';
+import { buildMesh } from './mesh/mesh.js';
 
-// One canonical RNG for this run
-export function getRng(){ return mulberry32(S.seed); }
-let RNG = getRng();
-export function _refreshRng(){ RNG = getRng(); }
+// One canonical RNG for this run (legacy - use getStateRng for new code)
+export function getTerrainRng(){ return mulberry32(S.seed); }
+let RNG = getTerrainRng();
+export function _refreshRng(){ RNG = getTerrainRng(); }
 
 // ---------- Oval mask cache ----------
 let OVAL_MASK = null; // Float32Array per-cell
@@ -625,6 +627,34 @@ export function _probeAddOnce(){
   console.log(`[F] seed=${i} nonzero=${nz} max=${mx.toFixed(3)}`);
   applyFieldAdd(f,1);
   _stats('[H] after probe');
+}
+
+// TODO: Base mesh generation entry point
+/**
+ * Build base mesh using Poisson-disc sampling and Delaunay/Voronoi
+ * @returns {Object} Mesh object with cached topology
+ */
+export function buildBaseMesh() {
+  const { width, height, cellCountTarget } = S;
+  const rng = getStateRng();
+
+  // TODO: Derive spacing from desired cell count
+  const area = width * height;
+  const c = 1.2; // Packing efficiency factor
+  const spacing = Math.sqrt((area / cellCountTarget) * c);
+
+  const t0 = performance.now();
+  const points = samplePoints({ width, height, minDist: spacing, k: 30 }, rng);
+  const t1 = performance.now();
+  const mesh = buildMesh({ width, height, points });
+  const t2 = performance.now();
+
+  console.log(`[mesh] points=${points.length/2} poisson=${(t1-t0).toFixed(1)}ms delaunay+voronoi=${(t2-t1).toFixed(1)}ms`);
+  
+  // TODO: Cache mesh in state
+  S.caches.mesh = mesh;
+  
+  return mesh;
 }
 
 

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Mesh Test</title>
+</head>
+<body>
+    <h1>Simple Mesh Test</h1>
+    <div id="output"></div>
+    
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script type="module">
+        import { S, setSeed, setSize, setCellTarget } from './js/state.js';
+        import { buildBaseMesh } from './js/terrain.js';
+        
+        async function test() {
+            try {
+                console.log('Starting mesh test...');
+                
+                // Set up state
+                setSeed('test-123');
+                setSize(800, 600);
+                setCellTarget(1000);
+                
+                console.log('State set, generating mesh...');
+                
+                // Generate mesh
+                const mesh = buildBaseMesh();
+                
+                console.log('✅ Mesh generated successfully!');
+                console.log('Points:', mesh.points.length / 2);
+                console.log('Cells:', mesh.cellCount);
+                console.log('Edges:', mesh.edgeCount);
+                
+                document.getElementById('output').innerHTML = `
+                    <h2>✅ Success!</h2>
+                    <p>Generated ${mesh.points.length / 2} points</p>
+                    <p>Created ${mesh.cellCount} cells</p>
+                    <p>Found ${mesh.edgeCount} edges</p>
+                `;
+                
+            } catch (e) {
+                console.error('❌ Error:', e);
+                document.getElementById('output').innerHTML = `
+                    <h2>❌ Error</h2>
+                    <p>${e.message}</p>
+                    <pre>${e.stack}</pre>
+                `;
+            }
+        }
+        
+        test();
+    </script>
+</body>
+</html>

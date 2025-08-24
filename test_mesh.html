@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesh Generation Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        canvas { border: 1px solid #ccc; margin: 10px; }
+        .controls { margin: 10px 0; }
+        button { margin: 5px; padding: 8px 16px; }
+        .log { background: #f5f5f5; padding: 10px; margin: 10px 0; font-family: monospace; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>Mesh Generation Test</h1>
+    
+    <div class="controls">
+        <label>Seed: <input type="text" id="seedInput" value="test-seed-123"></label>
+        <label>Width: <input type="number" id="widthInput" value="800" min="100" max="2000"></label>
+        <label>Height: <input type="number" id="heightInput" value="600" min="100" max="2000"></label>
+        <label>Cell Count: <input type="number" id="cellCountInput" value="2000" min="100" max="10000"></label>
+        <button onclick="testMesh()">Generate Mesh</button>
+        <button onclick="testDeterminism()">Test Determinism</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+    
+    <canvas id="meshCanvas" width="800" height="600"></canvas>
+    <div id="log" class="log"></div>
+
+    <!-- D3 for Delaunay/Voronoi -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    
+    <script type="module">
+        import { S, setSeed, setSize, setCellTarget } from './js/state.js';
+        import { buildBaseMesh } from './js/terrain.js';
+        import { testMeshDeterminism } from './js/selftest.js';
+        
+        window.testMesh = async function() {
+            const seed = document.getElementById('seedInput').value;
+            const width = parseInt(document.getElementById('widthInput').value);
+            const height = parseInt(document.getElementById('heightInput').value);
+            const cellCount = parseInt(document.getElementById('cellCountInput').value);
+            
+            log(`Generating mesh with seed: ${seed}, size: ${width}x${height}, cells: ${cellCount}`);
+            
+            try {
+                // Set state
+                setSeed(seed);
+                setSize(width, height);
+                setCellTarget(cellCount);
+                
+                const t0 = performance.now();
+                const mesh = buildBaseMesh();
+                const t1 = performance.now();
+                
+                log(`✅ Mesh generated in ${(t1-t0).toFixed(1)}ms`);
+                log(`   Points: ${mesh.points.length/2}`);
+                log(`   Cells: ${mesh.cellCount}`);
+                log(`   Edges: ${mesh.edgeCount}`);
+                
+                // Visualize mesh
+                visualizeMesh(mesh);
+                
+            } catch (e) {
+                log(`❌ Error: ${e.message}`);
+                console.error(e);
+            }
+        };
+        
+        window.testDeterminism = async function() {
+            log('Testing determinism...');
+            try {
+                await testMeshDeterminism();
+            } catch (e) {
+                log(`❌ Determinism test failed: ${e.message}`);
+            }
+        };
+        
+        window.clearLog = function() {
+            document.getElementById('log').textContent = '';
+        };
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            logDiv.textContent += message + '\n';
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function visualizeMesh(mesh) {
+            const canvas = document.getElementById('meshCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Scale to fit canvas
+            const scaleX = canvas.width / mesh.width;
+            const scaleY = canvas.height / mesh.height;
+            const scale = Math.min(scaleX, scaleY);
+            
+            ctx.save();
+            ctx.scale(scale, scale);
+            
+            // Draw Voronoi cells
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1;
+            
+            for (let i = 0; i < mesh.cells.polygons.length; i++) {
+                const poly = mesh.cells.polygons[i];
+                if (poly.length > 0) {
+                    ctx.beginPath();
+                    ctx.moveTo(poly[0], poly[1]);
+                    for (let j = 2; j < poly.length; j += 2) {
+                        ctx.lineTo(poly[j], poly[j+1]);
+                    }
+                    ctx.closePath();
+                    ctx.stroke();
+                }
+            }
+            
+            // Draw cell centers
+            ctx.fillStyle = '#f00';
+            for (let i = 0; i < mesh.points.length; i += 2) {
+                ctx.beginPath();
+                ctx.arc(mesh.points[i], mesh.points[i+1], 2, 0, 2*Math.PI);
+                ctx.fill();
+            }
+            
+            ctx.restore();
+        }
+        
+        // Auto-run test on load
+        window.addEventListener('load', () => {
+            log('Mesh generation test ready. Click "Generate Mesh" to start.');
+        });
+    </script>
+</body>
+</html>

@@ -3372,6 +3372,17 @@ window.generate = async function() {
       // refresh terrain RNG for this run (uses S.seed)
       _refreshRng();
       bindWorld();            // <— NEW
+      
+      // TODO: Step 1 - Build base mesh (Poisson → Delaunay/Voronoi)
+      ProgressManager.setPhase('mesh');
+      try {
+        const { buildBaseMesh } = await import('./terrain.js');
+        const mesh = buildBaseMesh();
+        console.log(`[mesh] Generated ${mesh.cellCount} cells with ${mesh.edgeCount} edges`);
+      } catch (e) {
+        console.warn('[generate] mesh generation failed', e);
+      }
+      
       applyTemplate(tplKey, uiVals);
       
       // Cap to [0,1] and normalize if too flat

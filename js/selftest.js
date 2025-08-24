@@ -75,5 +75,73 @@
     else throw new Error('Missing toggleSettings/ProgressManager');
   } catch (e) { fail('ui-overlays exports', e); }
 
+  // TODO: Test new mesh generation system
+  try {
+    const rng = await import('./rng.js');
+    if (typeof rng.makeRng === 'function') pass('rng.makeRng');
+    else throw new Error('Missing makeRng()');
+  } catch (e) { fail('rng exports', e); }
+
+  try {
+    const poisson = await import('./mesh/poisson.js');
+    if (typeof poisson.samplePoints === 'function') pass('poisson.samplePoints');
+    else throw new Error('Missing samplePoints()');
+  } catch (e) { fail('poisson exports', e); }
+
+  try {
+    const mesh = await import('./mesh/mesh.js');
+    if (typeof mesh.buildMesh === 'function') pass('mesh.buildMesh');
+    else throw new Error('Missing buildMesh()');
+  } catch (e) { fail('mesh exports', e); }
+
+  try {
+    const terrain = await import('./terrain.js');
+    if (typeof terrain.buildBaseMesh === 'function') pass('terrain.buildBaseMesh');
+    else throw new Error('Missing buildBaseMesh()');
+  } catch (e) { fail('terrain.buildBaseMesh', e); }
+
   logSummary();
 })();
+
+// TODO: Determinism test for mesh generation
+export async function testMeshDeterminism() {
+  console.group('🧪 Testing mesh determinism...');
+  
+  try {
+    const { S, setSeed, getRng } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    
+    const seed = 'test-determinism-123';
+    setSeed(seed);
+    
+    // First run
+    const run1 = buildBaseMesh();
+    const points1 = run1.points;
+    
+    // Reset and run again
+    setSeed(seed);
+    const run2 = buildBaseMesh();
+    const points2 = run2.points;
+    
+    // Compare results
+    if (points1.length !== points2.length) {
+      throw new Error(`Point count differs: ${points1.length} vs ${points2.length}`);
+    }
+    
+    for (let i = 0; i < points1.length; i++) {
+      if (points1[i] !== points2[i]) {
+        throw new Error(`Points differ at index ${i}: ${points1[i]} vs ${points2[i]}`);
+      }
+    }
+    
+    console.log('✅ Mesh determinism test passed');
+    console.log(`   Generated ${points1.length/2} points`);
+    console.log(`   Cell count: ${run1.cellCount}`);
+    console.log(`   Edge count: ${run1.edgeCount}`);
+    
+  } catch (e) {
+    console.error('❌ Mesh determinism test failed:', e);
+  }
+  
+  console.groupEnd();
+}

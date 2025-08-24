@@ -1,5 +1,6 @@
 // js/state.js — Single source of truth for world + params + caches
 import { mulberry32 } from './utils.js';
+import { makeRng } from './rng.js';
 
 /**
  * Central state bag. Avoid touching DOM/d3 here.
@@ -14,8 +15,12 @@ export const S = {
   vertices: [],    // optional
 
   // RNG / seed
-  seed: 12345,
+  seed: 'azgaar-perilous-0001',  // TODO: Enhanced string seed support
   rng: mulberry32(12345),
+  _rng: null,  // TODO: Memoized enhanced RNG instance
+
+  // TODO: Mesh generation parameters
+  cellCountTarget: 8000,  // Target number of cells for Poisson sampling
 
   // Tunables / params
   params: {
@@ -39,6 +44,8 @@ export const S = {
     isLake: null,     // lake data
     lakeId: null,     // lake ID data
     lakes: null,      // lakes data
+    // TODO: Mesh cache
+    mesh: null,       // cached mesh object
   },
 
   // Burgs and regions
@@ -57,8 +64,25 @@ export function setEdges(edges) { S.edges = edges || []; }
 export function setVertices(verts) { S.vertices = verts || []; }
 
 export function setSeed(seed) {
-  S.seed = Number.isFinite(+seed) ? +seed : 12345;
-  S.rng = mulberry32(S.seed);
+  S.seed = seed;
+  S.rng = mulberry32(typeof seed === 'string' ? 12345 : seed); // TODO: Remove legacy rng
+  S._rng = null; // TODO: Reset memoized RNG
+}
+
+// TODO: Export state object for direct access
+export { S as state };
+
+// TODO: Enhanced RNG getter with memoization
+export function getRng() {
+  if (!S._rng) {
+    S._rng = makeRng(S.seed);
+  }
+  return S._rng;
+}
+
+// TODO: Mesh parameter setters
+export function setCellTarget(n) { 
+  S.cellCountTarget = Math.max(100, Math.min(50000, n)); 
 }
 
 export function setParam(key, val) { S.params[key] = val; }
@@ -82,6 +106,7 @@ export function resetCaches(...keys) {
     S.caches.isLake = null;
     S.caches.lakeId = null;
     S.caches.lakes = null;
+    S.caches.mesh = null; // TODO: Reset mesh cache
     return;
   }
   for (const k of keys) if (k in S.caches) S.caches[k] = null;
