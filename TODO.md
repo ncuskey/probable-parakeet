@@ -1,5 +1,68 @@
 # TODO List
 
+## ✅ COMPLETED: Azgaar-Lite Safe-Zone Seeding
+
+**Goal**: Enforce safe-zone seeding to match JSFiddle behavior with window constraints and height limits.
+
+### Phase 1: Enhanced Voronoi Construction ✅
+- [x] Updated buildVoronoi() to include sites array
+- [x] Added findCell() function for fast cell lookup
+- [x] Exposed sites array for each cell (matches JSFiddle polygon.data[0/1])
+- [x] Maintained all existing functionality (polygons, neighbors)
+
+### Phase 2: Safe-Zone Cell Picker ✅
+- [x] Added pickCellInWindow() function with JSFiddle-faithful constraints
+- [x] Implemented window boundary enforcement (prevents near-frame creeps)
+- [x] Added height limit filtering (maxHeightAllowed parameter)
+- [x] Added retry mechanism with configurable maxTries (default: 50)
+- [x] Added fallback strategies (in-window sites, center cell)
+
+### Phase 3: Seeding Integration ✅
+- [x] Updated big island seeding to use pickCellInWindow()
+- [x] Updated second blob seeding to use pickCellInWindow()
+- [x] Updated random hills seeding with height limit (h ≤ 0.25)
+- [x] Enforced window constraints for all seeding operations
+- [x] Maintained deterministic RNG throughout
+
+### Phase 4: Window Configuration ✅
+- [x] Tightened default seed window for better padding
+- [x] Updated seedWindow: { left: 0.28, right: 0.72, top: 0.22, bottom: 0.74 }
+- [x] Reduced window area from ~44% to ~33% of total canvas
+- [x] Maintained JSFiddle-like behavior with improved margins
+
+### Phase 5: Testing ✅
+- [x] Created test_safe_zone_seeding.html for verification
+- [x] Added seed window visualization and analysis
+- [x] Added safe-zone seeding statistics
+- [x] Added multi-seed testing for consistency
+- [x] Verified window constraints and height limits
+
+### Acceptance Criteria ✅
+- [x] All seeding operations restricted to seed window
+- [x] Random hills only placed on low cells (h ≤ 0.25)
+- [x] Window boundary enforcement prevents near-frame seeding
+- [x] Retry mechanism with fallback strategies
+- [x] Maintained deterministic behavior
+- [x] Matches JSFiddle randomMap() constraints
+- [x] Comprehensive testing validates safe-zone behavior
+
+### Summary ✅
+**Azgaar-Lite Safe-Zone Seeding Complete!** 
+
+Successfully implemented:
+- Enhanced Voronoi construction with sites and findCell
+- JSFiddle-faithful cell picker with window constraints
+- Height limit filtering for random hills (h ≤ 0.25)
+- Window boundary enforcement to prevent near-frame seeding
+- Retry mechanism with fallback strategies
+- Tightened seed window for better padding (33% vs 44%)
+- Comprehensive testing with safe-zone analysis
+- Maintained deterministic behavior throughout
+
+The Azgaar-Lite generator now enforces safe-zone seeding that matches the JSFiddle behavior, ensuring all land features are properly contained within the seed window and avoiding edge artifacts.
+
+---
+
 ## ✅ COMPLETED: Azgaar-Lite Robust Coastlines
 
 **Goal**: Replace coastline builder with robust extraction that avoids rounding issues and frame edges.

@@ -45,7 +45,7 @@ export const S = {
     sharpness: 0.2                // "Blob Sharpness" (random mod)
   },
   seaLevel: 0.2,                  // fixed threshold like the fiddle
-  seedWindow: { left: 0.25, right: 0.75, top: 0.20, bottom: 0.75 }, // where big island can spawn
+  seedWindow: { left: 0.28, right: 0.72, top: 0.22, bottom: 0.74 }, // tightened window for better padding
   randomSmallHills: 10,           // count for "Random map"
   smoothCoastIters: 2,            // Chaikin passes (visual parity to curveBasisClosed)
   drawMaskOcean: true,

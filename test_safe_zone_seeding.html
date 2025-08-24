@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Azgaar-Lite Safe-Zone Seeding Test</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+    .test-container { max-width: 1400px; margin: 0 auto; }
+    .controls { margin-bottom: 20px; }
+    button { margin: 5px; padding: 10px 15px; }
+    .maps-container { display: flex; gap: 20px; }
+    .map-section { flex: 1; }
+    svg { border: 1px solid #ccc; width: 100%; height: 400px; }
+    .status { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+    .feature-controls { margin: 20px 0; padding: 15px; background: #f8f8f8; border-radius: 5px; }
+    .feature-controls label { display: inline-block; margin: 5px 15px 5px 0; }
+    .feature-controls input, .feature-controls select { margin-left: 5px; }
+    .seeding-info { margin: 10px 0; padding: 10px; background: #e8f4f8; border-radius: 5px; }
+    .seed-window-visual { margin: 10px 0; padding: 10px; background: #fff3cd; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <div class="test-container">
+    <h1>Azgaar-Lite Safe-Zone Seeding Test</h1>
+    
+    <div class="feature-controls">
+      <h3>Test Parameters</h3>
+      <label>Seed: <input type="text" id="seedInput" value="safe-zone-test-001" /></label>
+      <button id="seedRerollBtn">Reroll</button>
+      
+      <label>Sea Level: <input id="seaLevelInput" type="number" step="0.01" min="0" max="1" value="0.2" /></label>
+      
+      <label><input id="secondBlobChk" type="checkbox" /> Enable 2nd blob</label>
+      
+      <label>Random Hills: <input id="hillsInput" type="number" min="0" max="50" value="10" /></label>
+      
+      <button id="generateBtn">Generate Map</button>
+      <button id="testMultipleBtn">Test Multiple Seeds</button>
+    </div>
+    
+    <div class="status" id="status">Ready to test safe-zone seeding...</div>
+    
+    <div class="seed-window-visual" id="seedWindowVisual">
+      <h4>Seed Window Visualization</h4>
+      <div id="windowInfo"></div>
+    </div>
+    
+    <div class="seeding-info" id="seedingInfo">
+      <h4>Safe-Zone Seeding Analysis</h4>
+      <div id="seedingStats"></div>
+    </div>
+    
+    <div class="maps-container">
+      <div class="map-section">
+        <h3>Generated Map</h3>
+        <svg id="map" width="600" height="400" viewBox="0 0 1200 800"></svg>
+        <div id="stats" class="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- D3 v7 (uses d3.pointer and d3-delaunay for Voronoi) -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  
+  <!-- Test script -->
+  <script type="module">
+    import { state } from './js/state.js';
+    import { generateAzgaarLite } from './js/generators/azgaar-lite.js';
+    import { renderAzgaarLite } from './js/render/azgaar-lite-svg.js';
+
+    const status = document.getElementById('status');
+    const seedInput = document.getElementById('seedInput');
+    const seaLevelInput = document.getElementById('seaLevelInput');
+    const secondBlobChk = document.getElementById('secondBlobChk');
+    const hillsInput = document.getElementById('hillsInput');
+    const map = document.getElementById('map');
+    const stats = document.getElementById('stats');
+    const seedingStats = document.getElementById('seedingStats');
+    const windowInfo = document.getElementById('windowInfo');
+
+    function updateStatus(msg) {
+      status.textContent = msg;
+      console.log(msg);
+    }
+
+    function updateStats(world) {
+      const landCount = world.isLand.reduce((a,b) => a + b, 0);
+      const oceanCount = world.isOcean.reduce((a,b) => a + b, 0);
+      const landFrac = (landCount / world.polygons.length * 100).toFixed(1);
+      stats.textContent = `Map: ${world.polygons.length} cells, ${landCount} land (${landFrac}%), ${oceanCount} ocean, sea level: ${world.seaLevel.toFixed(3)}`;
+    }
+
+    function analyzeSafeZoneSeeding(world) {
+      const win = state.seedWindow;
+      const W = world.width, H = world.height;
+      
+      // Analyze sites within the seed window
+      let sitesInWindow = 0;
+      let sitesOutsideWindow = 0;
+      let highCellsInWindow = 0;
+      let lowCellsInWindow = 0;
+      
+      for (let i = 0; i < world.sites.length; i++) {
+        const [sx, sy] = world.sites[i];
+        const inWindow = sx >= win.left * W && sx <= win.right * W && 
+                        sy >= win.top * H && sy <= win.bottom * H;
+        
+        if (inWindow) {
+          sitesInWindow++;
+          if (world.height[i] > 0.25) {
+            highCellsInWindow++;
+          } else {
+            lowCellsInWindow++;
+          }
+        } else {
+          sitesOutsideWindow++;
+        }
+      }
+      
+      // Calculate window area
+      const windowArea = (win.right - win.left) * (win.bottom - win.top);
+      const totalArea = 1.0;
+      const windowAreaPercent = (windowArea / totalArea * 100).toFixed(1);
+      
+      seedingStats.innerHTML = `
+        <strong>Safe-Zone Seeding Analysis:</strong><br>
+        • Seed window: ${(windowAreaPercent)}% of total area<br>
+        • Sites in window: ${sitesInWindow} / ${world.sites.length} (${(sitesInWindow/world.sites.length*100).toFixed(1)}%)<br>
+        • Sites outside window: ${sitesOutsideWindow}<br>
+        • High cells in window (h>0.25): ${highCellsInWindow}<br>
+        • Low cells in window (h≤0.25): ${lowCellsInWindow}<br>
+        • Available hill sites: ${lowCellsInWindow}<br>
+        • Window bounds: (${(win.left*W).toFixed(0)},${(win.top*H).toFixed(0)}) to (${(win.right*W).toFixed(0)},${(win.bottom*H).toFixed(0)})
+      `;
+      
+      windowInfo.innerHTML = `
+        <strong>Seed Window:</strong> left=${(win.left*100).toFixed(0)}%, right=${(win.right*100).toFixed(0)}%, top=${(win.top*100).toFixed(0)}%, bottom=${(win.bottom*100).toFixed(0)}%<br>
+        <strong>Window Area:</strong> ${windowAreaPercent}% of total canvas<br>
+        <strong>JSFiddle Behavior:</strong> All seeding (big island, 2nd blob, hills) restricted to this window
+      `;
+    }
+
+    function clearMap(svg) {
+      while (svg.firstChild) {
+        svg.removeChild(svg.firstChild);
+      }
+    }
+
+    function randomSeedHex(nBytes = 6) {
+      if (window.crypto?.getRandomValues) {
+        const buf = new Uint8Array(nBytes);
+        window.crypto.getRandomValues(buf);
+        return Array.from(buf).map(b => b.toString(16).padStart(2,'0')).join('');
+      }
+      return Array.from({length:nBytes}, () => ((Math.random()*256)|0).toString(16).padStart(2,'0')).join('');
+    }
+
+    async function generateMap() {
+      try {
+        // Update state from UI
+        state.rngSeed = seedInput.value.trim() || 'safe-zone-test-001';
+        state.seaLevel = parseFloat(seaLevelInput.value) || 0.2;
+        state.secondBlobEnabled = secondBlobChk.checked;
+        state.randomSmallHills = parseInt(hillsInput.value) || 10;
+
+        updateStatus(`Generating map with safe-zone seeding - seed: "${state.rngSeed}", sea level: ${state.seaLevel}, 2nd blob: ${state.secondBlobEnabled}, hills: ${state.randomSmallHills}`);
+        
+        const start = performance.now();
+        const world = generateAzgaarLite();
+        const time = performance.now() - start;
+        
+        clearMap(map);
+        renderAzgaarLite(map, world);
+        updateStats(world);
+        analyzeSafeZoneSeeding(world);
+        
+        updateStatus(`✅ Generated with safe-zone seeding in ${time.toFixed(1)}ms - ${world.coastLoops.length} coast loops`);
+        
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`);
+        console.error(error);
+      }
+    }
+
+    async function testMultipleSeeds() {
+      try {
+        updateStatus('Testing safe-zone seeding with multiple seeds...');
+        
+        const testSeeds = ['safe-zone-test-001', 'safe-zone-test-002', 'safe-zone-test-003', 'safe-zone-test-004'];
+        let totalSitesInWindow = 0;
+        let totalHighCellsInWindow = 0;
+        let totalLowCellsInWindow = 0;
+        
+        for (const seed of testSeeds) {
+          state.rngSeed = seed;
+          const world = generateAzgaarLite();
+          
+          const win = state.seedWindow;
+          const W = world.width, H = world.height;
+          
+          for (let i = 0; i < world.sites.length; i++) {
+            const [sx, sy] = world.sites[i];
+            const inWindow = sx >= win.left * W && sx <= win.right * W && 
+                            sy >= win.top * H && sy <= win.bottom * H;
+            
+            if (inWindow) {
+              totalSitesInWindow++;
+              if (world.height[i] > 0.25) {
+                totalHighCellsInWindow++;
+              } else {
+                totalLowCellsInWindow++;
+              }
+            }
+          }
+        }
+        
+        const avgSitesInWindow = (totalSitesInWindow / testSeeds.length).toFixed(1);
+        const avgHighCells = (totalHighCellsInWindow / testSeeds.length).toFixed(1);
+        const avgLowCells = (totalLowCellsInWindow / testSeeds.length).toFixed(1);
+        
+        updateStatus(`✅ Multi-seed test complete: ${testSeeds.length} seeds, avg ${avgSitesInWindow} sites in window, avg ${avgHighCells} high cells, avg ${avgLowCells} low cells available for hills`);
+        
+        // Generate the last one for display
+        state.rngSeed = testSeeds[testSeeds.length - 1];
+        const world = generateAzgaarLite();
+        clearMap(map);
+        renderAzgaarLite(map, world);
+        updateStats(world);
+        analyzeSafeZoneSeeding(world);
+        
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`);
+        console.error(error);
+      }
+    }
+
+    // Wire up controls
+    seedInput.addEventListener('change', generateMap);
+    seaLevelInput.addEventListener('change', generateMap);
+    secondBlobChk.addEventListener('change', generateMap);
+    hillsInput.addEventListener('change', generateMap);
+
+    document.getElementById('seedRerollBtn').addEventListener('click', () => {
+      state.rngSeed = `safe-zone-${randomSeedHex(6)}`;
+      seedInput.value = state.rngSeed;
+      generateMap();
+    });
+
+    document.getElementById('generateBtn').addEventListener('click', generateMap);
+    document.getElementById('testMultipleBtn').addEventListener('click', testMultipleSeeds);
+
+    // Initial generation
+    generateMap();
+  </script>
+</body>
+</html>
