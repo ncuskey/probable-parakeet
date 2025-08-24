@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Step 2 Elevation Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .pass { background: #d4edda; color: #155724; }
+        .fail { background: #f8d7da; color: #721c24; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Step 2: Elevation Generation Test</h1>
+    <div id="results"></div>
+
+    <script type="module">
+        const results = document.getElementById('results');
+        
+        function log(message, isError = false) {
+            const div = document.createElement('div');
+            div.className = `test-result ${isError ? 'fail' : 'pass'}`;
+            div.textContent = message;
+            results.appendChild(div);
+            console.log(message);
+        }
+
+        async function runTests() {
+            try {
+                log('🧪 Starting Step 2 elevation tests...');
+                
+                // Test 1: Import modules
+                log('Testing module imports...');
+                const { state } = await import('./js/state.js');
+                const { buildBaseMesh } = await import('./js/terrain.js');
+                const { generateElevation } = await import('./js/elevation.js');
+                const { makeNoise2D, fbm2, warp2 } = await import('./js/noise.js');
+                log('✅ All modules imported successfully');
+
+                // Test 2: Basic noise functionality
+                log('Testing noise functions...');
+                const noise = makeNoise2D('test-seed');
+                const sample = noise(1.5, 2.3);
+                if (typeof sample === 'number' && sample >= -1 && sample <= 1) {
+                    log('✅ Noise function working correctly');
+                } else {
+                    throw new Error(`Invalid noise output: ${sample}`);
+                }
+
+                // Test 3: FBM and warp
+                log('Testing FBM and warp functions...');
+                const fbmResult = fbm2(noise, 10, 20, { octaves: 3 });
+                const warpResult = warp2(noise, 10, 20, { scale: 100, amp: 10 });
+                if (Array.isArray(warpResult) && warpResult.length === 2) {
+                    log('✅ FBM and warp functions working');
+                } else {
+                    throw new Error('Warp function returned invalid result');
+                }
+
+                // Test 4: Build mesh and generate elevation
+                log('Testing elevation generation...');
+                state.setSeed('test-elevation-123');
+                const mesh = buildBaseMesh();
+                log(`✅ Built mesh with ${mesh.cellCount} cells`);
+
+                const elev = generateElevation(mesh, state);
+                const landCount = elev.isLand.reduce((a,b) => a+b, 0);
+                const landFrac = (landCount / elev.isLand.length);
+                
+                log(`✅ Generated elevation data:`);
+                log(`   - Sea level: ${elev.seaLevel.toFixed(3)}`);
+                log(`   - Land fraction: ${(landFrac*100).toFixed(1)}%`);
+                log(`   - Target was: ${(state.targetLandFrac*100).toFixed(1)}%`);
+                log(`   - Height range: ${Math.min(...elev.height).toFixed(3)} to ${Math.max(...elev.height).toFixed(3)}`);
+                log(`   - Coast cells: ${elev.isCoast.reduce((a,b) => a+b, 0)}`);
+
+                // Test 5: Determinism
+                log('Testing determinism...');
+                state.setSeed('test-elevation-123');
+                const mesh2 = buildBaseMesh();
+                const elev2 = generateElevation(mesh2, state);
+                
+                if (elev.seaLevel === elev2.seaLevel) {
+                    log('✅ Sea level is deterministic');
+                } else {
+                    throw new Error(`Sea level differs: ${elev.seaLevel} vs ${elev2.seaLevel}`);
+                }
+
+                let heightMatches = true;
+                for (let i = 0; i < elev.height.length; i++) {
+                    if (elev.height[i] !== elev2.height[i]) {
+                        heightMatches = false;
+                        break;
+                    }
+                }
+                
+                if (heightMatches) {
+                    log('✅ Elevation heights are deterministic');
+                } else {
+                    throw new Error('Elevation heights are not deterministic');
+                }
+
+                // Test 6: Template switching
+                log('Testing template switching...');
+                state.template = 'continentalGradient';
+                state.templateDir = 'EtoW';
+                const elev3 = generateElevation(mesh, state);
+                const landFrac3 = elev3.isLand.reduce((a,b) => a+b, 0) / elev3.isLand.length;
+                log(`✅ Continental gradient template: ${(landFrac3*100).toFixed(1)}% land`);
+
+                log('🎉 All Step 2 elevation tests passed!');
+
+            } catch (error) {
+                log(`❌ Test failed: ${error.message}`, true);
+                console.error('Full error:', error);
+            }
+        }
+
+        runTests();
+    </script>
+</body>
+</html>

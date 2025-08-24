@@ -6,6 +6,28 @@
 import './legacy-main.js';
 import { wireUI } from './ui.js';
 import { ProgressManager } from './ui-overlays.js';
+import { state } from './state.js';
+import { buildBaseMesh } from './terrain.js';
+import { generateElevation } from './elevation.js';
+
+// TODO: Step 2 - New orchestrator function for elevation generation
+export async function generateWorld() {
+  console.time('generateWorld');
+
+  // 1) Base mesh (Step 1)
+  const mesh = buildBaseMesh();
+
+  // 2) Elevation + sea level (Step 2)
+  const t0 = performance.now();
+  const elev = generateElevation(mesh, state);
+  const t1 = performance.now();
+  const landCount = elev.isLand.reduce((a,b)=>a+b,0);
+  const landFrac = (landCount / elev.isLand.length);
+  console.log(`[elevation] seaLevel=${elev.seaLevel.toFixed(3)} landFrac=${(landFrac*100).toFixed(1)}% time=${(t1-t0).toFixed(1)}ms`);
+
+  console.timeEnd('generateWorld');
+  return { mesh, elev };
+}
 
 
 window.addEventListener('DOMContentLoaded', () => {

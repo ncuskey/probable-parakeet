@@ -3379,6 +3379,21 @@ window.generate = async function() {
         const { buildBaseMesh } = await import('./terrain.js');
         const mesh = buildBaseMesh();
         console.log(`[mesh] Generated ${mesh.cellCount} cells with ${mesh.edgeCount} edges`);
+        
+        // TODO: Step 2 - Elevation + sea level autotune
+        ProgressManager.setPhase('elevation');
+        try {
+          const { generateElevation } = await import('./elevation.js');
+          const elev = generateElevation(mesh, S);
+          const landCount = elev.isLand.reduce((a,b)=>a+b,0);
+          const landFrac = (landCount / elev.isLand.length);
+          console.log(`[elevation] seaLevel=${elev.seaLevel.toFixed(3)} landFrac=${(landFrac*100).toFixed(1)}%`);
+          
+          // Store elevation data in state for later use
+          S.elevation = elev;
+        } catch (e) {
+          console.warn('[generate] elevation generation failed', e);
+        }
       } catch (e) {
         console.warn('[generate] mesh generation failed', e);
       }

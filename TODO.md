@@ -275,3 +275,47 @@
 3. Check for any console errors
 4. Document any issues found
 5. Consider further modularization of remaining functions
+
+# TODO: Step 2 - Elevation templates + sea-level autotune
+
+## Phase 1: Core Infrastructure
+- [x] Create js/noise.js with deterministic hash-based 2D noise
+- [x] Add fbm2() and warp2() helper functions
+- [x] Test noise determinism and performance
+
+## Phase 2: Elevation Generation
+- [x] Create js/elevation.js with generateElevation() function
+- [x] Implement template functions: radialIsland, continentalGradient, twinContinents
+- [x] Add elevation pipeline: template → domain warp → fbm noise → normalize
+- [x] Implement auto-sea-level tuning via percentile search
+- [x] Compute derivatives: isLand, isCoast, slope, distToCoast
+
+## Phase 3: Integration
+- [x] Update js/state.js with elevation/template controls
+- [x] Wire generateElevation() into app.js orchestrator
+- [x] Add logging and stats output
+
+## Phase 4: Testing
+- [x] Add determinism test to js/selftest.js
+- [x] Add target land fraction validation test
+- [x] Verify all exports and imports work correctly
+
+## Acceptance Criteria
+- [x] Deterministic elevation generation with same seed
+- [x] Auto-tune sea level to hit targetLandFrac (e.g., 35%)
+- [x] All template types working (radialIsland, continentalGradient, twinContinents)
+- [x] Proper derivatives computed (isLand, isCoast, slope, distToCoast)
+- [x] Clean integration with existing mesh system
+
+## Summary
+✅ **Step 2 Complete!** 
+
+Successfully implemented:
+- Deterministic hash-based 2D noise system (`js/noise.js`)
+- Elevation generation with templates and auto sea-level tuning (`js/elevation.js`)
+- Integration with existing state management and mesh system
+- Comprehensive self-tests for determinism and land fraction targeting
+- All three template types: radialIsland, continentalGradient, twinContinents
+- Complete derivative computation: isLand, isCoast, slope, distToCoast
+
+The system now generates elevation data with proper sea-level autotuning to hit target land percentages, and all data is deterministic for the same seed.

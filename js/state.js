@@ -22,6 +22,19 @@ export const S = {
   // TODO: Mesh generation parameters
   cellCountTarget: 8000,  // Target number of cells for Poisson sampling
 
+  // NEW: elevation/template controls
+  template: 'radialIsland',     // 'radialIsland' | 'continentalGradient' | 'twinContinents'
+  templateDir: 'WtoE',          // for continentalGradient
+  targetLandFrac: 0.35,         // 35% land by default
+
+  // noise knobs
+  baseNoiseScale: 450,
+  baseNoiseOctaves: 5,
+  baseNoiseGain: 0.5,
+  baseNoiseLac: 2.0,
+  warpScale: 350,
+  warpAmp: 45,
+
   // Tunables / params
   params: {
     seaLevel: 0.5,

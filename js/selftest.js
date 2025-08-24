@@ -100,6 +100,19 @@
     else throw new Error('Missing buildBaseMesh()');
   } catch (e) { fail('terrain.buildBaseMesh', e); }
 
+  // TODO: Test Step 2 elevation generation
+  try {
+    const noise = await import('./noise.js');
+    if (typeof noise.makeNoise2D === 'function') pass('noise.makeNoise2D');
+    else throw new Error('Missing makeNoise2D()');
+  } catch (e) { fail('noise exports', e); }
+
+  try {
+    const elevation = await import('./elevation.js');
+    if (typeof elevation.generateElevation === 'function') pass('elevation.generateElevation');
+    else throw new Error('Missing generateElevation()');
+  } catch (e) { fail('elevation exports', e); }
+
   logSummary();
 })();
 
@@ -141,6 +154,67 @@ export async function testMeshDeterminism() {
     
   } catch (e) {
     console.error('❌ Mesh determinism test failed:', e);
+  }
+  
+  console.groupEnd();
+}
+
+// TODO: Step 2 elevation determinism test
+export async function testElevationDeterminism() {
+  console.group('🧪 Testing elevation determinism...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    
+    const seed = 'step2-seed';
+    setSeed(seed);
+    const mesh1 = buildBaseMesh();
+    const a = generateElevation(mesh1, S);
+
+    setSeed(seed);
+    const mesh2 = buildBaseMesh();
+    const b = generateElevation(mesh2, S);
+
+    if (a.seaLevel !== b.seaLevel) throw new Error('Elevation determinism: seaLevel differs');
+    for (let i = 0; i < a.height.length; i++) {
+      if (a.height[i] !== b.height[i]) throw new Error(`Elevation determinism: height differs at ${i}`);
+    }
+    console.log('✅ Elevation determinism OK');
+    
+  } catch (e) {
+    console.error('❌ Elevation determinism test failed:', e);
+  }
+  
+  console.groupEnd();
+}
+
+// TODO: Step 2 target land fraction test
+export async function testTargetLandFraction(tolerance = 0.02) {
+  console.group('🧪 Testing target land fraction...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    
+    setSeed('step2-landfrac');
+    S.targetLandFrac = 0.40;
+    const mesh = buildBaseMesh();
+    const e = generateElevation(mesh, S);
+    const frac = e.isLand.reduce((s,v)=>s+v,0) / e.isLand.length;
+    
+    if (Math.abs(frac - S.targetLandFrac) > tolerance) {
+      throw new Error(`Target land fraction off: got ${frac.toFixed(3)}, want ${S.targetLandFrac}`);
+    }
+    console.log('✅ Target land fraction near target');
+    console.log(`   Target: ${(S.targetLandFrac*100).toFixed(1)}%`);
+    console.log(`   Actual: ${(frac*100).toFixed(1)}%`);
+    console.log(`   Sea level: ${e.seaLevel.toFixed(3)}`);
+    
+  } catch (e) {
+    console.error('❌ Target land fraction test failed:', e);
   }
   
   console.groupEnd();
