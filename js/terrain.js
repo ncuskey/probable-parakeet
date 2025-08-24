@@ -18,7 +18,8 @@ let RNG = getTerrainRng();
 export function _refreshRng(){ RNG = getTerrainRng(); }
 
 // ---------- Oval mask cache ----------
-let OVAL_MASK = null; // Float32Array per-cell
+// TODO: Step 2.5 - Legacy oval mask stubbed out (replaced by border-flood oceans)
+let OVAL_MASK = null; // Float32Array per-cell - NO LONGER USED
 function _smooth01(x){ return x<=0?0:x>=1?1:(x*x*(3-2*x)); }
 function _normUV(cx, cy, W, H, marginPx) {
   const iw = Math.max(1, W - marginPx*2), ih = Math.max(1, H - marginPx*2);
@@ -27,29 +28,18 @@ function _normUV(cx, cy, W, H, marginPx) {
   return {u, v};
 }
 
+// TODO: Step 2.5 - Legacy oval mask function stubbed out (replaced by border-flood oceans)
 function _makeOvalMask({innerPx=null, ax=1.0, ay=0.7, rot=0.0, n=2.5, pow=1.6} = {}) {
-  const W = WORLD.width, H = WORLD.height;
-  const inner = innerPx ?? Math.min(W,H) * 0.04;
-  const cr = Math.cos(rot), sr = Math.sin(rot);
+  // This function is no longer used - replaced by border-flood ocean classification
   const out = new Float32Array(CELLS.length);
-  for (let i=0;i<CELLS.length;i++){
-    const c = CELLS[i];
-    const {u,v} = _normUV(c.cx, c.cy, W, H, inner);
-    const rx =  u*cr - v*sr, ry = u*sr + v*cr;
-    const r = Math.pow(Math.abs(rx/ax), n) + Math.pow(Math.abs(ry/ay), n);
-    const t = 1 - Math.max(0, r - 1);        // >1 => outside → 0
-    const m = _smooth01(t);                   // soften rim
-    out[i] = Math.pow(Math.max(0,m), pow);    // [0..1]
-  }
+  out.fill(1.0); // Always "inside mask" - no longer constraining
   return out;
 }
 
+// TODO: Step 2.5 - Legacy oval mask binding stubbed out (replaced by border-flood oceans)
 export function bindOvalMaskForRun() {
-  // randomize per run so it's not canvas-aligned
-  const A = 0.80 + RNG()*0.25;   // ax
-  const B = 0.55 + RNG()*0.25;   // ay
-  const TH = RNG() * Math.PI;    // rotation
-  OVAL_MASK = _makeOvalMask({ ax:A, ay:B, rot:TH, n:2.6, pow:1.7 });
+  // This function is no longer used - replaced by border-flood ocean classification
+  OVAL_MASK = _makeOvalMask(); // Always returns all 1.0s
 }
 
 // ---------- World binding (singleton per run) ----------
@@ -257,24 +247,10 @@ export function sinkOuterMargin(pct = 0.04, amount = 0.15) {
 
 // --------- math helpers ----------
 
-// Superellipse membership: |u|^n + |v|^n <= 1 (n ~ 2..3), rotated
+// TODO: Step 2.5 - Legacy oval mask function stubbed out (replaced by border-flood oceans)
 export function applyOvalMask({innerPx=null, ax=1.0, ay=0.7, rot=0.0, n=2.4, pow=1.7} = {}) {
-  const W = WORLD.width, H = WORLD.height;
-  const inner = innerPx ?? Math.min(W,H) * 0.04; // small true water frame
-  const cr = Math.cos(rot), sr = Math.sin(rot);
-  for (const c of CELLS) {
-    const {u, v} = _normUV(c.cx, c.cy, W, H, inner);
-    // rotate
-    const rx =  u*cr - v*sr;
-    const ry =  u*sr + v*cr;
-    // superellipse radius ∈ [0..∞); <=1 is inside
-    const r = Math.pow(Math.abs(rx/ax), n) + Math.pow(Math.abs(ry/ay), n);
-    // map to mask: 0 outside, 1 deep inside, with soft edge
-    const t = 1 - Math.max(0, r - 1); // >1 -> outside
-    const m = _smooth01(t);           // smooth step at rim
-    const factor = Math.pow(Math.max(0,m), pow);
-    writeH(c, readH(c) * factor);
-  }
+  // This function is no longer used - replaced by border-flood ocean classification
+  // No-op: heights remain unchanged
 }
 
 // --------- tiny value noise (tileable-enough for our use) ----------
@@ -451,7 +427,7 @@ export function volcanicIsland() { // "High Island"
   ensureHeightsCleared();
   _refreshRng(); // IMPORTANT: seed ops for this run
   bindWorld();
-  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
+  // TODO: Step 2.5 - bindOvalMaskForRun() removed (replaced by border-flood oceans)
   opMountain({ peak: 1, radius: 0.95, sharpness: 0.12 });
   for (let i = 0; i < 15; i++) opHill({ peak: 0.5, radius: 0.95, sharpness: 0.10 });
   for (let i = 0; i < 2; i++)  opRange({ peak: 0.7, steps: 6 });
@@ -463,7 +439,7 @@ export function lowIsland() {
   ensureHeightsCleared();
   _refreshRng(); // IMPORTANT: seed ops for this run
   bindWorld();
-  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
+  // TODO: Step 2.5 - bindOvalMaskForRun() removed (replaced by border-flood oceans)
   opMountain({ peak: 1, radius: 0.95, sharpness: 0.12 });
   for (let i = 0; i < 15; i++) opHill({ peak: 0.5, radius: 0.95, sharpness: 0.10 });
   for (let i = 0; i < 2; i++)  opRange({ peak: 0.7, steps: 6 });
@@ -476,7 +452,7 @@ export function archipelago() {
   ensureHeightsCleared();
   _refreshRng(); // IMPORTANT: seed ops for this run
   bindWorld();
-  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
+  // TODO: Step 2.5 - bindOvalMaskForRun() removed (replaced by border-flood oceans)
   opMountain({ peak: 1, radius: 0.96, sharpness: 0.12 });
   for (let i = 0; i < 15; i++) opHill({ peak: 0.45, radius: 0.95, sharpness: 0.12 });
   for (let i = 0; i < 2; i++)  opTrough({ peak: 0.55, steps: 5 });
@@ -488,7 +464,7 @@ export function continentalIslands() {
   _refreshRng();
   bindWorld();             // make sure CELLS is bound
   resolveHeightKey();      // ensure we write the property recolor reads
-  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
+  // TODO: Step 2.5 - bindOvalMaskForRun() removed (replaced by border-flood oceans)
   const cores = interiorDarts(3, undefined, /*minMask*/0.72); // deeper inside
   for (const idx of cores) {
     const f = makeBlobField({ startIndex: idx, peak: 1, radius: 0.985, sharpness: 0.06, stop: 0.025, warpAmp:0.06, warpFreq:0.003 });
@@ -516,13 +492,13 @@ export function continentalIslands() {
   carveSeas({count: 2 + ((RNG()*2)|0), minMask: 0.58});
   _stats('[H] after seas');
   
+  // TODO: Step 2.5 - applyOvalMask() removed (replaced by border-flood oceans)
   // pick a random oval aspect & rotation so coastlines aren't canvas-aligned
   const A = 0.80 + RNG()*0.25;        // ax
   const B = 0.55 + RNG()*0.25;        // ay
   const TH = RNG() * Math.PI;         // rotation
-  // Optional light polish (small pow)
-  applyOvalMask({ ax:A, ay:B, rot:TH, n:2.6, pow:1.05 }); // subtle coastal polish
-  _stats('[H] after oval mask');
+  // Optional light polish (small pow) - REMOVED: applyOvalMask({ ax:A, ay:B, rot:TH, n:2.6, pow:1.05 });
+  _stats('[H] after oval mask (removed)');
 
   // ---- Fail-safe: if still zero, draw a visible disk in the middle ----
   const hasLand = CELLS.some(c => readH(c) > 0.05);
@@ -604,7 +580,7 @@ export function _debugSingleMountain() {
   ensureHeightsCleared();
   _refreshRng();
   bindWorld();
-  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
+  // TODO: Step 2.5 - bindOvalMaskForRun() removed (replaced by border-flood oceans)
   const i = interiorCellIndex(undefined, 0.65);
   const f = makeBlobField({ startIndex: i, peak: 1, radius: 0.975, sharpness: 0.065, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   applyFieldAdd(f, 1);
@@ -620,7 +596,7 @@ export function _probeFieldFrom(i) {
 
 export function _probeAddOnce(){
   bindWorld();
-  bindOvalMaskForRun();   // <<< prepare per-cell growth mask
+  // TODO: Step 2.5 - bindOvalMaskForRun() removed (replaced by border-flood oceans)
   const i = interiorCellIndex(undefined, 0.65);
   const f = makeBlobField({ startIndex:i, peak:1, radius:0.975, sharpness:0.065, stop:0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   let nz=0,mx=0; for (let k=0;k<f.length;k++){ if(f[k]>0){nz++; if(f[k]>mx) mx=f[k];}}

@@ -100,6 +100,11 @@ export function totalPolylineLen(pl) {
   return L; 
 }
 
+//// Legacy Stubs ////////////////////////////////////////////////
+
+// TODO: Step 2.5 - Legacy no-op: always "inside mask"
+export function ovalMaskValue(/* x, y or cell */) { return 1.0; }
+
 export function dedupePolyline(pl) { 
   if (!pl || pl.length < 2) return pl; 
   const out = [pl[0]]; 

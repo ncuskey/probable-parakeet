@@ -6,8 +6,11 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 ### Core Generation
 - **Advanced blob growth** terrain generation with BFS queue expansion and domain warping
-- **Oval-shaped continents** with randomized aspect ratios and rotation
-- **Bounded continent generation** with auto-tuned sea levels and edge falloff masks
+- **Deterministic noise system** - Hash-based 2D noise with FBM and domain warping
+- **Elevation templates** - radialIsland, continentalGradient, twinContinents with auto sea-level tuning
+- **Frame safety** - Optional sea level boosting to prevent land clipping at map borders
+- **Water classification** - FMG-style border-flood ocean classification (oceans vs lakes)
+- **Ocean-aware coasts** - Coast detection based on ocean neighbors, not lakes
 - **Multiple terrain templates**: Volcanic Island (High Island), Low Island, Archipelago, Continental Islands
 - **Template composition** - mountains, hills, ranges, troughs, pits combined for realistic terrain
 - **Auto-tuned sea levels** - iterative adjustment to hit target land fraction (~35%)
@@ -21,6 +24,9 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 ### Water Systems
 - **Lake detection and simulation** with proper outlet rivers
+- **Ocean vs lake classification** - Border-flood algorithm distinguishes oceans from lakes
+- **Ocean-aware coast detection** - Coasts defined by ocean neighbors, not lakes
+- **Distance-to-coast computation** - BFS-based distance from ocean coasts
 - **Advanced river generation** using flux-based drainage patterns
 - **Polygonal river rendering** with variable width from source to mouth
 - **Higher flux thresholds** - 35% of max flux for fewer, larger rivers
@@ -28,6 +34,9 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 ### Interactive Controls
 - **Terrain Template**: Choose from 4 different world types (continents, volcanicIsland, archipelago, lowIsland)
+- **Elevation Template**: radialIsland, continentalGradient, twinContinents with auto sea-level tuning
+- **Frame Safety**: Enable/disable sea level boosting to prevent land clipping at borders
+- **Edge Falloff**: Optional soft rectangular edge falloff for natural transitions
 - **Graph Size**: Adjust the number of Voronoi cells (100-10,000)
 - **Elevation Controls**: Max height, radius, and sharpness for terrain generation
 - **Climate Settings**: Base temperature and rainfall intensity
@@ -54,9 +63,15 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 ### Key Algorithms
 - **Voronoi cell generation** with Lloyd relaxation for natural spacing
+- **Deterministic noise** - Hash-based 2D value noise with Robert Jenkins' algorithm
+- **FBM (Fractal Brownian Motion)** - Multi-octave noise for natural terrain variation
+- **Domain warping** - Vector offset from noise for organic coastline deformation
+- **Elevation templates** - Base shapes (radial, continental, twin) with noise blending
+- **Frame safety** - Sea level boosting to clear border land (capped by maxSeaBoost)
+- **Border-flood ocean classification** - FMG-style algorithm distinguishes oceans from lakes
+- **Ocean-aware coast detection** - Coasts defined by ocean neighbors, not lakes
 - **Advanced blob growth** with BFS queue expansion, domain warping, and sharpness modifiers
 - **Oval edge masks** - superellipse math with random aspect ratios and rotation
-- **Domain warping** - value noise modulates blob radius to create organic coastlines
 - **Template composition** - mountains, hills, ranges, troughs, pits for realistic terrain
 - **Interior cell seeding** - keeps seeds off borders for coherent landmasses
 - **Auto-tuned sea levels** - iterative adjustment to hit target land fraction
@@ -85,6 +100,11 @@ This implementation builds on the original Voronoi heightmap demo with several a
 9. ✅ **Lake Systems** - Depression detection and outlet simulation
 10. ✅ **Coastline Detail** - Noise-based coastline perturbation
 11. ✅ **Auto-tuned Sea Levels** - Iterative adjustment to hit target land fraction (~35%)
+12. ✅ **Deterministic Noise System** - Hash-based 2D noise with FBM and domain warping
+13. ✅ **Elevation Templates** - radialIsland, continentalGradient, twinContinents with auto sea-level tuning
+14. ✅ **Frame Safety** - Sea level boosting to prevent land clipping at map borders
+15. ✅ **Water Classification** - FMG-style border-flood ocean classification (oceans vs lakes)
+16. ✅ **Ocean-aware Coasts** - Coast detection based on ocean neighbors, not lakes
 
 Future enhancements could include:
 - **Cultural features** (cities, roads, borders)

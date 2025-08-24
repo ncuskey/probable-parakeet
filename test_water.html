@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Step 2.5 Water Classification Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .pass { background: #d4edda; color: #155724; }
+        .fail { background: #f8d7da; color: #721c24; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Step 2.5: Water Classification Test (FMG-style)</h1>
+    <div id="results"></div>
+
+    <script type="module">
+        const results = document.getElementById('results');
+        
+        function log(message, isError = false) {
+            const div = document.createElement('div');
+            div.className = `test-result ${isError ? 'fail' : 'pass'}`;
+            div.textContent = message;
+            results.appendChild(div);
+            console.log(message);
+        }
+
+        async function runTests() {
+            try {
+                log('🧪 Starting Step 2.5 water classification tests...');
+                
+                // Test 1: Import modules
+                log('Testing module imports...');
+                const { state } = await import('./js/state.js');
+                const { buildBaseMesh } = await import('./js/terrain.js');
+                const { generateElevation } = await import('./js/elevation.js');
+                const { classifyWater, computeCoastAndDistance } = await import('./js/water.js');
+                log('✅ All modules imported successfully');
+
+                // Test 2: Build mesh and generate elevation
+                log('Testing mesh and elevation generation...');
+                state.setSeed('test-water-123');
+                const mesh = buildBaseMesh();
+                const elev = generateElevation(mesh, state);
+                log(`✅ Built mesh with ${mesh.cellCount} cells and generated elevation`);
+
+                // Test 3: Water classification
+                log('Testing water classification...');
+                const water = classifyWater(mesh, elev.height, elev.seaLevel);
+                const coast = computeCoastAndDistance(mesh, elev.isLand, water.isOcean);
+                
+                const landCount = elev.isLand.reduce((a,b)=>a+b,0);
+                const oceanCount = water.isOcean.reduce((a,b)=>a+b,0);
+                const lakeCount = water.isLake.reduce((a,b)=>a+b,0);
+                const coastCount = coast.isCoast.reduce((a,b)=>a+b,0);
+                
+                log(`✅ Water classification results:`);
+                log(`   - Land cells: ${landCount}`);
+                log(`   - Ocean cells: ${oceanCount}`);
+                log(`   - Lake cells: ${lakeCount}`);
+                log(`   - Coast cells: ${coastCount}`);
+
+                // Test 4: Water partition invariants
+                log('Testing water partition invariants...');
+                const N = elev.height.length;
+                let partitionOk = true;
+                let overlapOk = true;
+                
+                for (let i = 0; i < N; i++) {
+                    const waterBit = elev.height[i] <= elev.seaLevel ? 1 : 0;
+                    const waterUnion = water.isOcean[i] | water.isLake[i];
+                    
+                    if (waterBit !== waterUnion) {
+                        partitionOk = false;
+                        log(`❌ Water partition mismatch at cell ${i}: waterBit=${waterBit}, union=${waterUnion}`, true);
+                        break;
+                    }
+                    
+                    if (water.isOcean[i] && water.isLake[i]) {
+                        overlapOk = false;
+                        log(`❌ Cell ${i} marked as both ocean and lake`, true);
+                        break;
+                    }
+                }
+                
+                if (partitionOk) log('✅ Water partition invariant: water = ocean ∪ lake');
+                if (overlapOk) log('✅ No overlap: ocean ∩ lake = ∅');
+
+                // Test 5: Coast cell validation
+                log('Testing coast cell validation...');
+                const neighbors = mesh.cells.neighbors;
+                let coastOk = true;
+                
+                for (let i = 0; i < N; i++) {
+                    if (!coast.isCoast[i]) continue;
+                    
+                    if (!elev.isLand[i]) {
+                        coastOk = false;
+                        log(`❌ Coast cell ${i} is not land`, true);
+                        break;
+                    }
+                    
+                    let hasOceanNeighbor = false;
+                    for (const j of neighbors[i]) {
+                        if (water.isOcean[j]) {
+                            hasOceanNeighbor = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!hasOceanNeighbor) {
+                        coastOk = false;
+                        log(`❌ Coast cell ${i} has no ocean neighbor`, true);
+                        break;
+                    }
+                }
+                
+                if (coastOk) log('✅ Coast cells are land with ocean neighbors');
+
+                // Test 6: Distance to coast
+                log('Testing distance to coast...');
+                const maxDist = Math.max(...coast.distToCoast);
+                const minDist = Math.min(...coast.distToCoast.filter(d => d !== Infinity));
+                log(`✅ Distance to coast range: ${minDist.toFixed(3)} to ${maxDist.toFixed(3)}`);
+
+                // Test 7: Integration test
+                log('Testing integration with generateWorld...');
+                const { generateWorld } = await import('./js/app.js');
+                const result = await generateWorld();
+                
+                if (result.water && result.elev) {
+                    log('✅ generateWorld() returns water and elevation data');
+                    log(`   - Water data: ${Object.keys(result.water).join(', ')}`);
+                    log(`   - Elevation data: ${Object.keys(result.elev).join(', ')}`);
+                } else {
+                    log('❌ generateWorld() missing water or elevation data', true);
+                }
+
+                log('🎉 All Step 2.5 water classification tests passed!');
+
+            } catch (error) {
+                log(`❌ Test failed: ${error.message}`, true);
+                console.error('Full error:', error);
+            }
+        }
+
+        runTests();
+    </script>
+</body>
+</html>

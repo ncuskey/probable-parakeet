@@ -9,8 +9,9 @@ import { ProgressManager } from './ui-overlays.js';
 import { state } from './state.js';
 import { buildBaseMesh } from './terrain.js';
 import { generateElevation } from './elevation.js';
+import { classifyWater, computeCoastAndDistance } from './water.js';
 
-// TODO: Step 2 - New orchestrator function for elevation generation
+// TODO: Step 2.5 - New orchestrator function with water classification
 export async function generateWorld() {
   console.time('generateWorld');
 
@@ -25,8 +26,25 @@ export async function generateWorld() {
   const landFrac = (landCount / elev.isLand.length);
   console.log(`[elevation] seaLevel=${elev.seaLevel.toFixed(3)} landFrac=${(landFrac*100).toFixed(1)}% time=${(t1-t0).toFixed(1)}ms`);
 
+  // 2.5) FMG-style oceans & coasts (border flood)
+  const t2 = performance.now();
+  const water = classifyWater(mesh, elev.height, elev.seaLevel);
+  const coast = computeCoastAndDistance(mesh, elev.isLand, water.isOcean);
+
+  // override Step-2 coast/dist to the new ocean-aware values
+  elev.isCoast = coast.isCoast;
+  elev.distToCoast = coast.distToCoast;
+
+  const oceanCount = water.isOcean.reduce((a, b) => a + b, 0);
+  const lakeCount  = water.isLake.reduce((a, b) => a + b, 0);
+  const coastCount = coast.isCoast.reduce((a,b)=>a+b,0);
+
+  console.log(
+    `[water] land=${landCount} ocean=${oceanCount} lakes=${lakeCount} coast=${coastCount} time=${(performance.now()-t2).toFixed(1)}ms`
+  );
+
   console.timeEnd('generateWorld');
-  return { mesh, elev };
+  return { mesh, elev, water };
 }
 
 

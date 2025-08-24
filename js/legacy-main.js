@@ -3389,6 +3389,31 @@ window.generate = async function() {
           const landFrac = (landCount / elev.isLand.length);
           console.log(`[elevation] seaLevel=${elev.seaLevel.toFixed(3)} landFrac=${(landFrac*100).toFixed(1)}%`);
           
+          // TODO: Step 2.5 - FMG-style oceans & coasts (border flood)
+          ProgressManager.setPhase('water');
+          try {
+            const { classifyWater, computeCoastAndDistance } = await import('./water.js');
+            const water = classifyWater(mesh, elev.height, elev.seaLevel);
+            const coast = computeCoastAndDistance(mesh, elev.isLand, water.isOcean);
+
+            // override Step-2 coast/dist to the new ocean-aware values
+            elev.isCoast = coast.isCoast;
+            elev.distToCoast = coast.distToCoast;
+
+            const oceanCount = water.isOcean.reduce((a, b) => a + b, 0);
+            const lakeCount  = water.isLake.reduce((a, b) => a + b, 0);
+            const coastCount = coast.isCoast.reduce((a,b)=>a+b,0);
+
+            console.log(
+              `[water] land=${landCount} ocean=${oceanCount} lakes=${lakeCount} coast=${coastCount}`
+            );
+            
+            // Store water data in state for later use
+            S.water = water;
+          } catch (e) {
+            console.warn('[generate] water classification failed', e);
+          }
+          
           // Store elevation data in state for later use
           S.elevation = elev;
         } catch (e) {

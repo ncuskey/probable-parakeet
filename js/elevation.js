@@ -1,5 +1,39 @@
-// TODO: Step 2 - Elevation generation with templates, noise, and auto sea-level tuning
+// TODO: Step 2.6 - Elevation generation with templates, noise, auto sea-level tuning, and frame safety
 import { makeNoise2D, fbm2, warp2 } from './noise.js';
+
+// Frame safety helpers
+function touchesBorder(poly, width, height, eps = 1e-3) {
+  for (let i = 0; i < poly.length; i += 2) {
+    const x = poly[i], y = poly[i+1];
+    if (x <= eps || y <= eps || x >= width - eps || y >= height - eps) return true;
+  }
+  return false;
+}
+
+// Rectangular edge falloff (soft, not an oval)
+function rectEdgeWeight(x, y, width, height, marginPx, exp = 1.5) {
+  if (marginPx <= 0) return 1;
+  const d = Math.min(x, y, width - x, height - y);
+  const t = Math.max(0, Math.min(1, d / marginPx));      // 0 at frame, →1 inside
+  return Math.pow(t, exp);                                // smooth-ish
+}
+
+// Compute minimal sea level to remove *all* border land; cap boost.
+function adjustSeaToClearFrame(mesh, elevation, seaLevel, eps, maxBoost) {
+  const { width, height } = mesh;
+  const polys = mesh.cells.polygons;
+  let maxBorderLandElev = -Infinity;
+  for (let i = 0; i < elevation.length; i++) {
+    if (!touchesBorder(polys[i], width, height)) continue;
+    if (elevation[i] > seaLevel && elevation[i] > maxBorderLandElev) {
+      maxBorderLandElev = elevation[i];
+    }
+  }
+  if (maxBorderLandElev === -Infinity) return seaLevel;   // already clear
+  const needed = Math.min(1, maxBorderLandElev + eps);
+  const boosted = Math.max(seaLevel, needed);
+  return Math.min(seaLevel + maxBoost, boosted);
+}
 
 /** Template functions: return base 0..1 shape before noise */
 function radialIslandTemplate(cx, cy, x, y) {
@@ -135,7 +169,10 @@ export function generateElevation(mesh, state) {
 
     // 4) blend template with noise (bias so template dominates large shape)
     const v = 0.72 * t0 + 0.28 * ((n + 1) * 0.5); // 0..1-ish
-    elevation[i] = v;
+    
+    // 5) optional edge falloff (soft rectangular, not oval)
+    const w = rectEdgeWeight(x, y, width, height, state.edgeFalloffPx, state.edgeFalloffExp);
+    elevation[i] = v * w;
   }
 
   // Normalize 0..1
@@ -144,8 +181,19 @@ export function generateElevation(mesh, state) {
   // Auto-tune sea level to match target land fraction
   const target = Math.max(0.05, Math.min(0.90, state.targetLandFrac || 0.35));
   // choose threshold as (1 - target) percentile of elevation (since land = elevation > seaLevel)
-  const seaLevel = percentile(elevation, 1 - target);
+  let seaLevel = percentile(elevation, 1 - target);
 
+  // NEW: if requested, bump sea level just enough to clear the outer frame
+  if (state.enforceOceanFrame) {
+    const boosted = adjustSeaToClearFrame(mesh, elevation, seaLevel, state.frameEpsilon, state.maxSeaBoost);
+    if (boosted !== seaLevel) {
+      // (optional) console log for visibility
+      console.log(`[sea] boost to clear frame: +${(boosted - seaLevel).toFixed(3)}`);
+      seaLevel = boosted;
+    }
+  }
+
+  // (re)compute masks with the possibly-boosted sea level
   const isLand = new Uint8Array(N);
   for (let i = 0; i < N; i++) isLand[i] = elevation[i] > seaLevel ? 1 : 0;
 

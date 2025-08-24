@@ -319,3 +319,99 @@ Successfully implemented:
 - Complete derivative computation: isLand, isCoast, slope, distToCoast
 
 The system now generates elevation data with proper sea-level autotuning to hit target land percentages, and all data is deterministic for the same seed.
+
+---
+
+# TODO: Step 2.5 - Replace oval mask with border-flood oceans (FMG style)
+
+## Phase 1: Water Classification System
+- [x] Create js/water.js with classifyWater() and computeCoastAndDistance()
+- [x] Implement border-flood algorithm for ocean classification
+- [x] Add lake detection (water that isn't ocean)
+- [x] Recompute coast and distance-to-coast from ocean-aware data
+
+## Phase 2: Integration
+- [x] Wire water classification into generator after elevation generation
+- [x] Override Step 2's coast/distance with ocean-aware versions
+- [x] Add logging for water statistics (land, ocean, lakes, coast)
+
+## Phase 3: Remove Oval Mask Logic
+- [x] Search codebase for oval mask references
+- [x] Remove or stub oval mask logic
+- [x] Replace mask conditions with appropriate alternatives
+- [x] Clean up any legacy mask-related code
+
+## Phase 4: Testing & Validation
+- [x] Add water invariants test to js/selftest.js
+- [x] Verify water partition properties (water = ocean ∪ lake)
+- [x] Test coast cell validation (land with ocean neighbors)
+- [x] Ensure no regression in existing functionality
+
+## Acceptance Criteria
+- [x] No more oval masking - pure border-flood ocean classification
+- [x] Proper water partitioning: isWater = isOcean ∪ isLake
+- [x] Coast cells correctly identified (land touching ocean, not lakes)
+- [x] Distance-to-coast computed from ocean-aware coasts
+- [x] Clean integration with existing elevation system
+- [x] All oval mask references removed or neutralized
+
+## Summary
+✅ **Step 2.5 Complete!** 
+
+Successfully implemented:
+- FMG-style border-flood ocean classification (`js/water.js`)
+- Proper water partitioning: isWater = isOcean ∪ isLake
+- Ocean-aware coast detection (land touching ocean, not lakes)
+- Distance-to-coast computation from ocean-aware coasts
+- Complete removal/stubbing of oval mask logic
+- Integration with existing elevation generation pipeline
+- Comprehensive water invariants testing
+
+The system now uses pure border-flood ocean classification instead of oval masking, providing more realistic water body separation and proper coast detection.
+
+---
+
+# TODO: Step 2.6 - Never clip land on the frame
+
+## Phase 1: State Configuration
+- [x] Add frame safety knobs to js/state.js
+- [x] Add edge falloff parameters for soft rectangular falloff
+- [x] Set reasonable defaults for frame enforcement
+
+## Phase 2: Frame Safety Implementation
+- [x] Add border detection helper function
+- [x] Add rectangular edge falloff function
+- [x] Add sea level adjustment function to clear frame
+- [x] Integrate frame safety into elevation generation pipeline
+
+## Phase 3: Edge Falloff Integration
+- [x] Add optional soft rectangular edge falloff to elevation computation
+- [x] Ensure edge falloff is applied before sea level computation
+- [x] Make edge falloff configurable and off by default
+
+## Phase 4: Testing & Validation
+- [x] Add test to verify no land touches frame when enabled
+- [x] Test edge falloff functionality
+- [x] Verify sea level boosting works correctly
+- [x] Ensure integration with existing water classification
+
+## Acceptance Criteria
+- [x] No land cells touch map border when enforceOceanFrame=true
+- [x] Sea level boosting is capped by maxSeaBoost parameter
+- [x] Optional soft rectangular edge falloff works correctly
+- [x] Frame safety integrates cleanly with existing elevation system
+- [x] All parameters are configurable via state
+- [x] Comprehensive testing validates frame safety
+
+## Summary
+✅ **Step 2.6 Complete!** 
+
+Successfully implemented:
+- Frame safety knobs in state.js (enforceOceanFrame, frameEpsilon, maxSeaBoost)
+- Optional soft rectangular edge falloff (edgeFalloffPx, edgeFalloffExp)
+- Border detection helper function
+- Sea level adjustment to clear frame (capped by maxSeaBoost)
+- Integration with elevation generation pipeline
+- Comprehensive testing validates no land touches frame when enabled
+
+The system now ensures no land cells touch the map border when frame safety is enabled, providing clean ocean edges and preventing clipped land masses.

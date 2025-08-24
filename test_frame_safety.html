@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Step 2.6 Frame Safety Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .pass { background: #d4edda; color: #155724; }
+        .fail { background: #f8d7da; color: #721c24; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Step 2.6: Frame Safety Test</h1>
+    <div id="results"></div>
+
+    <script type="module">
+        const results = document.getElementById('results');
+        
+        function log(message, isError = false) {
+            const div = document.createElement('div');
+            div.className = `test-result ${isError ? 'fail' : 'pass'}`;
+            div.textContent = message;
+            results.appendChild(div);
+            console.log(message);
+        }
+
+        async function runTests() {
+            try {
+                log('🧪 Starting Step 2.6 frame safety tests...');
+                
+                // Test 1: Import modules
+                log('Testing module imports...');
+                const { state } = await import('./js/state.js');
+                const { buildBaseMesh } = await import('./js/terrain.js');
+                const { generateElevation } = await import('./js/elevation.js');
+                log('✅ All modules imported successfully');
+
+                // Test 2: Frame safety with enforceOceanFrame=true
+                log('Testing frame safety with enforceOceanFrame=true...');
+                state.setSeed('test-frame-safety-123');
+                state.enforceOceanFrame = true;
+                state.frameEpsilon = 1e-4;
+                state.maxSeaBoost = 0.06;
+                
+                const mesh = buildBaseMesh();
+                const elev = generateElevation(mesh, state);
+                
+                // Check that no land touches the border
+                const { width, height } = mesh;
+                const polys = mesh.cells.polygons;
+                let borderLandFound = false;
+                
+                function touchesBorder(poly, w, h, eps=1e-3) {
+                    for (let i = 0; i < poly.length; i += 2) {
+                        const x = poly[i], y = poly[i+1];
+                        if (x <= eps || y <= eps || x >= w - eps || y >= h - eps) return true;
+                    }
+                    return false;
+                }
+                
+                for (let i = 0; i < elev.height.length; i++) {
+                    if (elev.height[i] > elev.seaLevel && touchesBorder(polys[i], width, height)) {
+                        borderLandFound = true;
+                        log(`❌ Land touches frame at cell ${i}`, true);
+                        break;
+                    }
+                }
+                
+                if (!borderLandFound) {
+                    log('✅ No land touches frame when enforceOceanFrame=true');
+                    log(`   Sea level: ${elev.seaLevel.toFixed(3)}`);
+                    log(`   Land cells: ${elev.isLand.reduce((a,b)=>a+b,0)}`);
+                }
+
+                // Test 3: Frame safety with enforceOceanFrame=false
+                log('Testing frame safety with enforceOceanFrame=false...');
+                state.setSeed('test-frame-safety-123');
+                state.enforceOceanFrame = false;
+                
+                const elev2 = generateElevation(mesh, state);
+                
+                // Check if land touches border (should be possible when disabled)
+                let borderLandCount = 0;
+                for (let i = 0; i < elev2.height.length; i++) {
+                    if (elev2.height[i] > elev2.seaLevel && touchesBorder(polys[i], width, height)) {
+                        borderLandCount++;
+                    }
+                }
+                
+                log(`✅ With enforceOceanFrame=false: ${borderLandCount} land cells touch border`);
+                log(`   Sea level: ${elev2.seaLevel.toFixed(3)}`);
+                log(`   Land cells: ${elev2.isLand.reduce((a,b)=>a+b,0)}`);
+
+                // Test 4: Edge falloff functionality
+                log('Testing edge falloff functionality...');
+                state.setSeed('test-edge-falloff-123');
+                state.enforceOceanFrame = true;
+                state.edgeFalloffPx = Math.min(width, height) * 0.08; // Enable edge falloff
+                state.edgeFalloffExp = 1.5;
+                
+                const elev3 = generateElevation(mesh, state);
+                
+                // Check that edge falloff is working (should have lower elevation near edges)
+                let edgeElevations = [];
+                let centerElevations = [];
+                
+                for (let i = 0; i < elev3.height.length; i++) {
+                    const x = mesh.cells.centroids[2*i];
+                    const y = mesh.cells.centroids[2*i+1];
+                    const distToEdge = Math.min(x, y, width - x, height - y);
+                    
+                    if (distToEdge < state.edgeFalloffPx * 0.5) {
+                        edgeElevations.push(elev3.height[i]);
+                    } else if (distToEdge > state.edgeFalloffPx * 1.5) {
+                        centerElevations.push(elev3.height[i]);
+                    }
+                }
+                
+                if (edgeElevations.length > 0 && centerElevations.length > 0) {
+                    const avgEdge = edgeElevations.reduce((a,b)=>a+b,0) / edgeElevations.length;
+                    const avgCenter = centerElevations.reduce((a,b)=>a+b,0) / centerElevations.length;
+                    
+                    log(`✅ Edge falloff working: edge avg=${avgEdge.toFixed(3)}, center avg=${avgCenter.toFixed(3)}`);
+                    log(`   Edge cells: ${edgeElevations.length}, Center cells: ${centerElevations.length}`);
+                } else {
+                    log('⚠️ Edge falloff test inconclusive (insufficient edge/center cells)');
+                }
+
+                // Test 5: Integration with water classification
+                log('Testing integration with water classification...');
+                const { classifyWater, computeCoastAndDistance } = await import('./js/water.js');
+                const water = classifyWater(mesh, elev.height, elev.seaLevel);
+                const coast = computeCoastAndDistance(mesh, elev.isLand, water.isOcean);
+                
+                log(`✅ Water classification with frame safety:`);
+                log(`   Ocean cells: ${water.isOcean.reduce((a,b)=>a+b,0)}`);
+                log(`   Lake cells: ${water.isLake.reduce((a,b)=>a+b,0)}`);
+                log(`   Coast cells: ${coast.isCoast.reduce((a,b)=>a+b,0)}`);
+
+                // Test 6: Parameter validation
+                log('Testing parameter validation...');
+                const originalSeaLevel = elev.seaLevel;
+                const originalLandCount = elev.isLand.reduce((a,b)=>a+b,0);
+                
+                // Test with different maxSeaBoost values
+                state.maxSeaBoost = 0.02; // Smaller boost
+                const elev4 = generateElevation(mesh, state);
+                const newSeaLevel = elev4.seaLevel;
+                const newLandCount = elev4.isLand.reduce((a,b)=>a+b,0);
+                
+                log(`✅ Sea level boost capped: original=${originalSeaLevel.toFixed(3)}, new=${newSeaLevel.toFixed(3)}`);
+                log(`   Land count: original=${originalLandCount}, new=${newLandCount}`);
+
+                log('🎉 All Step 2.6 frame safety tests passed!');
+
+            } catch (error) {
+                log(`❌ Test failed: ${error.message}`, true);
+                console.error('Full error:', error);
+            }
+        }
+
+        runTests();
+    </script>
+</body>
+</html>

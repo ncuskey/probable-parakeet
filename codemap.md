@@ -29,6 +29,9 @@ probable-parakeet/
 │   ├── render.js           # Layer plumbing (getLayers, ensureRasterImage)
 │   ├── recolor.js          # Terrain painting (canvas raster + SVG per-cell)
 │   ├── terrain.js          # Azgaar-style blob templates & operations
+│   ├── noise.js            # Deterministic hash-based 2D noise + FBM + domain warp
+│   ├── elevation.js        # Elevation generation with templates + auto sea-level tuning
+│   ├── water.js            # Water classification (ocean/lake) + coast detection
 │   ├── climate.js          # Precipitation provider
 │   ├── rivers.js           # Precip recompute, BFS/flow steps, river rendering
 │   ├── regions.js          # Region assignment + rendering (with timing fallbacks)
@@ -302,6 +305,82 @@ function interiorCellIndex(minEdgePx = Math.min(WORLD.width, WORLD.height) * 0.1
 export function interiorDarts(k, minDistPx) {
   const minD2 = (minDistPx ?? Math.min(WORLD.width, WORLD.height) * 0.22) ** 2;
   // Increased minimum distance from 0.18 to 0.22 for better continent separation
+}
+```
+
+### Noise System (`js/noise.js`)
+```javascript
+// Deterministic hash-based 2D noise + FBM + domain warp
+export function makeNoise2D(seedStr) {
+  // Returns deterministic (x,y) => [-1,1] noise function
+  // Uses Robert Jenkins' hash algorithm for consistent results
+}
+
+export function fbm2(noise2, x, y, { octaves = 5, lacunarity = 2.0, gain = 0.5, scale = 1.0 } = {}) {
+  // Multi-octave fractal Brownian motion
+  // Returns [-1,1] range
+}
+
+export function warp2(noise2, x, y, { scale = 200, amp = 20 } = {}) {
+  // Domain warping: returns [x + offset, y + offset]
+  // Uses two channels of noise for vector offset
+}
+```
+
+### Elevation System (`js/elevation.js`)
+```javascript
+// Elevation generation with templates + auto sea-level tuning + frame safety
+export function generateElevation(mesh, state) {
+  // Main elevation generation pipeline:
+  // 1. Template base (radialIsland, continentalGradient, twinContinents)
+  // 2. Domain warp (low-frequency deformation)
+  // 3. FBM noise (multi-octave)
+  // 4. Blend template with noise
+  // 5. Optional edge falloff (soft rectangular)
+  // 6. Normalize to 0..1
+  // 7. Auto-tune sea level to target land fraction
+  // 8. Frame safety: boost sea level to clear border land
+  // 9. Compute derivatives: isLand, isCoast, slope, distToCoast
+  
+  return { height, seaLevel, isLand, isCoast, distToCoast, slope };
+}
+
+// Frame safety helpers
+function touchesBorder(poly, width, height, eps = 1e-3) {
+  // Detects if cell polygon touches map border
+}
+
+function rectEdgeWeight(x, y, width, height, marginPx, exp = 1.5) {
+  // Soft rectangular edge falloff (not oval)
+  // Returns 0 at frame, →1 inside
+}
+
+function adjustSeaToClearFrame(mesh, elevation, seaLevel, eps, maxBoost) {
+  // Computes minimal sea level to remove all border land
+  // Capped by maxBoost parameter
+}
+```
+
+### Water Classification System (`js/water.js`)
+```javascript
+// Water classification and coast/distance helpers (FMG-style)
+export function classifyWater(mesh, elevation, seaLevel) {
+  // Border-flood algorithm for ocean classification:
+  // 1. Mark all cells below sea level as water
+  // 2. Seed ocean from water cells touching map border
+  // 3. Flood across water neighbors to mark entire ocean
+  // 4. Remaining water cells = lakes
+  
+  return { isWater, isOcean, isLake };
+}
+
+export function computeCoastAndDistance(mesh, isLand, isOcean) {
+  // Ocean-aware coast detection and distance computation:
+  // 1. Coast = land with ≥1 ocean neighbor (NOT lake)
+  // 2. BFS distances from coast over land graph
+  // 3. Edge weights = euclidean distance between centroids
+  
+  return { isCoast, distToCoast };
 }
 ```
 

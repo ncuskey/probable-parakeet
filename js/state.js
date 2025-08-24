@@ -35,6 +35,15 @@ export const S = {
   warpScale: 350,
   warpAmp: 45,
 
+  // frame safety
+  enforceOceanFrame: true,     // ensure no land touches the outer box
+  frameEpsilon: 1e-4,          // how far above offending border cell to lift sea
+  maxSeaBoost: 0.06,           // cap on how much we're allowed to raise sea level
+
+  // optional soft rectangular falloff (off by default)
+  edgeFalloffPx: 0,            // e.g. set to Math.min(width,height)*0.08 to enable
+  edgeFalloffExp: 1.5,         // curvature of the falloff (1–3 good range)
+
   // Tunables / params
   params: {
     seaLevel: 0.5,

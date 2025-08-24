@@ -113,6 +113,13 @@
     else throw new Error('Missing generateElevation()');
   } catch (e) { fail('elevation exports', e); }
 
+  // TODO: Test Step 2.5 water classification
+  try {
+    const water = await import('./water.js');
+    if (typeof water.classifyWater === 'function') pass('water.classifyWater');
+    else throw new Error('Missing classifyWater()');
+  } catch (e) { fail('water exports', e); }
+
   logSummary();
 })();
 
@@ -215,6 +222,100 @@ export async function testTargetLandFraction(tolerance = 0.02) {
     
   } catch (e) {
     console.error('❌ Target land fraction test failed:', e);
+  }
+  
+  console.groupEnd();
+}
+
+// TODO: Step 2.5 water invariants test
+export async function testWaterInvariants() {
+  console.group('🧪 Testing water invariants...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    const { classifyWater, computeCoastAndDistance } = await import('./water.js');
+    
+    setSeed('ocean-flood-ok');
+    const mesh = buildBaseMesh();
+    const elev = generateElevation(mesh, S);
+
+    const water = classifyWater(mesh, elev.height, elev.seaLevel);
+    const coast = computeCoastAndDistance(mesh, elev.isLand, water.isOcean);
+
+    const N = elev.height.length;
+
+    // 1) partition: water == ocean ∪ lake and they don't overlap
+    for (let i = 0; i < N; i++) {
+      const waterBit = elev.height[i] <= elev.seaLevel ? 1 : 0;
+      if (waterBit !== (water.isOcean[i] | water.isLake[i])) {
+        throw new Error(`Water partition mismatch at ${i}`);
+      }
+      if (water.isOcean[i] && water.isLake[i]) {
+        throw new Error(`Cell ${i} marked as both ocean and lake`);
+      }
+    }
+
+    // 2) coast cells are land and have at least one ocean neighbor
+    const ns = mesh.cells.neighbors;
+    for (let i = 0; i < N; i++) {
+      if (!coast.isCoast[i]) continue;
+      if (!elev.isLand[i]) throw new Error(`Coast cell ${i} not land`);
+      let ok = false;
+      for (const j of ns[i]) if (water.isOcean[j]) { ok = true; break; }
+      if (!ok) throw new Error(`Coast cell ${i} has no ocean neighbor`);
+    }
+
+    console.log('✅ Water invariants OK');
+    console.log(`   Total cells: ${N}`);
+    console.log(`   Land cells: ${elev.isLand.reduce((a,b)=>a+b,0)}`);
+    console.log(`   Ocean cells: ${water.isOcean.reduce((a,b)=>a+b,0)}`);
+    console.log(`   Lake cells: ${water.isLake.reduce((a,b)=>a+b,0)}`);
+    console.log(`   Coast cells: ${coast.isCoast.reduce((a,b)=>a+b,0)}`);
+    
+  } catch (e) {
+    console.error('❌ Water invariants test failed:', e);
+  }
+  
+  console.groupEnd();
+}
+
+// TODO: Step 2.6 frame safety test
+export async function testNoLandOnFrame() {
+  console.group('🧪 Testing frame safety...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    
+    function touchesBorder(poly, w, h, eps=1e-3) {
+      for (let i = 0; i < poly.length; i += 2) {
+        const x = poly[i], y = poly[i+1];
+        if (x <= eps || y <= eps || x >= w - eps || y >= h - eps) return true;
+      }
+      return false;
+    }
+
+    setSeed('frame-guard');
+    S.enforceOceanFrame = true;
+    const mesh = buildBaseMesh();
+    const elev = generateElevation(mesh, S);
+    const { width, height } = mesh;
+    const polys = mesh.cells.polygons;
+
+    for (let i = 0; i < elev.height.length; i++) {
+      if (elev.height[i] > elev.seaLevel && touchesBorder(polys[i], width, height)) {
+        throw new Error(`Land touches frame at cell ${i}`);
+      }
+    }
+    console.log('✅ No land on frame when enforceOceanFrame=true');
+    console.log(`   Sea level: ${elev.seaLevel.toFixed(3)}`);
+    console.log(`   Land cells: ${elev.isLand.reduce((a,b)=>a+b,0)}`);
+    
+  } catch (e) {
+    console.error('❌ Frame safety test failed:', e);
   }
   
   console.groupEnd();
