@@ -3337,31 +3337,46 @@ window.generate = async function() {
         });
       }
 
-      // Auto-generate: center island + N small hills
+      // === TERRAIN FIRST ===
+      // Apply selected template (build heights)
+      const tplKey = document.getElementById('worldType')?.value || 'volcanicIsland';
+      const uiVals = {
+        smallCount: +(document.getElementById('smallCountInput')?.value || 0),
+        borderPct: +(document.getElementById('borderPctInput')?.value || 8)
+      };
+      ensureHeightsCleared();
+      applyTemplate(tplKey, uiVals);
+
+      // Keep ocean border
       ProgressManager.setPhase('terrain');
-      // Apply the water-border mask (keeps edges water)
       applyBorderMask();
-      
-      // Erosion passes: smooth jaggy ridges and improve drainage
+
+      // Erode & smooth
       ProgressManager.setPhase('erosion');
       const talus = +document.getElementById('talusInput')?.value || 0.02;
       const thermalStrength = +document.getElementById('thermalStrengthInput')?.value || 0.5;
       const smoothAlpha = +document.getElementById('smoothAlphaInput')?.value || 0.2;
       thermalErode(talus, thermalStrength, 2);
       smoothLand(smoothAlpha);
-      
-      // Mark terrain as dirty for canvas rendering
+
+      // Mark terrain dirty for raster
       ensureTerrainCanvas().setDirty();
+
+      // === NOW classify & paint ===
+      // Keep state seaLevel in sync with the slider
+      try {
+        const seaIn = document.getElementById('seaLevelInput');
+        if (seaIn) S.params.seaLevel = +seaIn.value;
+      } catch {}
       
-      // IMPORTANT: await each stage in order with try/catch guards
-      try { 
-        // 1) ensure land/water classification (uses your existing implementation)
-        ensureIsWater(cells);
+      try {
+        resetCaches('isWater');           // heights changed
+        const updatedIsWater = ensureIsWater(cells);
+        setIsWater(updatedIsWater);
       } catch (e) { console.warn('[generate] ensureIsWater failed', e); }
 
-      try { 
-        // 2) paint terrain (logs "Land fraction ~ ...")
-        await recolor(run);
+      try {
+        await recolor(run);               // logs "Land fraction ~ X.XX"
       } catch (e) { console.warn('[generate] recolor failed', e); }
 
       try { 
@@ -3523,18 +3538,9 @@ window.generate = async function() {
         // Clear the heightmap first
         ensureHeightsCleared();
         
-        // Apply the selected template
-        applyTemplate(tplKey, uiVals);
-        
-        // Invalidate cached water mask; heights just changed
-        resetCaches('isWater');
-        
-        // Generate seeded burgs and write to state
+        // Generate seeded burgs and write to state (land mask is ready now)
         console.log('BURG PIPELINE: start');
-        // Recompute water mask after template has modified heights
-        const updatedIsWater = ensureIsWater(cells);
-        setIsWater(updatedIsWater);
-        const seededBurgs = generateSeededBurgs(cells, updatedIsWater, worldSeed);
+        const seededBurgs = generateSeededBurgs(cells, S.caches.isWater, worldSeed);
         setBurgs(seededBurgs);
         console.log('autoSeed: burgs=', S.burgs?.length || 0);
         console.log('BURG PIPELINE: end');

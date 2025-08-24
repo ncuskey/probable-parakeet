@@ -59,28 +59,42 @@ const assignRegionsAzgaar = window.__state?.assignRegionsAzgaar || (() => {
   console.warn('assignRegionsAzgaar not available, returning null');
   return null;
 });
+
+// Add a function to wait for the function to become available
+async function waitForAssignRegionsAzgaar(maxWaitMs = 1000) {
+  const startTime = performance.now();
+  while (performance.now() - startTime < maxWaitMs) {
+    if (window.__state?.assignRegionsAzgaar && typeof window.__state.assignRegionsAzgaar === 'function') {
+      return window.__state.assignRegionsAzgaar;
+    }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  console.warn('assignRegionsAzgaar not available after waiting, returning null');
+  return null;
+}
+
 const isStale = window.__state?.isStale || ((run) => false); // fallback if not available
 let regionsInFlight = window.__state?.regionsInFlight || false;
 let regionsQueued = window.__state?.regionsQueued || false;
 
 /** Full region pipeline; preserve all legacy logs and behavior. */
 export async function computeAndDrawRegions(run = 0) {
-  const { regions } = getLayers(); // group
-  const { cells, isWater } = getWorld();
-
-  // If you had parameter logs, keep them:
-  // console.log('Region count K (capitals-matched default):', K);
-  // console.log('Parameters:', { disbalance, overseasPenalty, maxManorDistPx });
-
-  // --- MOVE BODY: your existing region assignment & drawing implementation ---
-  if (isStale(run)) { console.log(`[RUN ${run}] stale -> bail computeAndDrawRegions`); return; }
-  if (regionsInFlight) { regionsQueued = true; return; }
-  regionsInFlight = true;
-  regionsQueued = false;
-
   try {
+    const { regions } = getLayers(); // group
+    const { cells, isWater } = getWorld();
+
+    // If you had parameter logs, keep them:
+    // console.log('Region count K (capitals-matched default):', K);
+    // console.log('Parameters:', { disbalance, overseasPenalty, maxManorDistPx });
+
+    // --- MOVE BODY: your existing region assignment & drawing implementation ---
+    if (isStale(run)) { console.log(`[RUN ${run}] stale -> bail computeAndDrawRegions`); return; }
+    if (regionsInFlight) { regionsQueued = true; return; }
+    regionsInFlight = true;
+    regionsQueued = false;
+
     // console.log('computeAndDrawRegions called');
-    const {cells, isWater, width, height, s} = getWorld();
+    const {width, height, s} = getWorld();
     
     if (!cells.length) { console.warn('[RUN', run, '] no cells yet, skipping computeAndDrawRegions'); return; }
   
@@ -103,7 +117,17 @@ export async function computeAndDrawRegions(run = 0) {
   const maxManorDistPx = +document.getElementById('maxManorDistInput')?.value || 120;
   console.log('Parameters:', { disbalance, overseasPenalty, maxManorDistPx });
 
-  const res = await assignRegionsAzgaar({ K, disbalance, overseasPenalty, maxManorDistPx });
+  // Check if assignRegionsAzgaar is already available, otherwise wait for it
+  let assignRegionsFn = window.__state?.assignRegionsAzgaar;
+  if (!assignRegionsFn || typeof assignRegionsFn !== 'function') {
+    assignRegionsFn = await waitForAssignRegionsAzgaar();
+    if (!assignRegionsFn) {
+      console.warn('assignRegionsAzgaar not available after waiting');
+      return;
+    }
+  }
+  
+  const res = await assignRegionsFn({ K, disbalance, overseasPenalty, maxManorDistPx });
   if (!res) {
     console.warn('assignRegionsAzgaar returned null');
     return;
@@ -122,7 +146,6 @@ export async function computeAndDrawRegions(run = 0) {
   const hasRegions = Array.isArray(regionOfCell) && regionOfCell.some(r => r >= 0);
   if (!hasRegions) {
     console.warn('No regions assigned — drawing coarse land fill as fallback');
-    const { cells, isWater } = getWorld();
     const landPolys = cells?.filter((_,i)=>!isWater?.[i]).map(c => c.poly).filter(Boolean) || [];
 
     const g = d3.select('#regions');

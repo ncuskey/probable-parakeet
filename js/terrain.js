@@ -222,6 +222,10 @@ function executeSteps(steps = [], uiVals = {}) {
     }
   };
 
+  // Back-compat aliases
+  ops.addLand = ops.add;
+  ops.multiplyLand = ops.multiply;
+
   for (const st of steps) {
     const fn = ops[st.op];
     if (!fn) { console.warn('[terrain] unknown op', st.op); continue; }

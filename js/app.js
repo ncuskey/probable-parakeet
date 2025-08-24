@@ -2,7 +2,8 @@
 // TODO: Clean up unused imports and fix init call
 // Search anchors: ~1-33 (app.js entrypoint)
 
-import { init } from './legacy-main.js';
+// legacy main side-effects (defines window.generate and sets up runtime wiring)
+import './legacy-main.js';
 import { wireUI } from './ui.js';
 import { ProgressManager } from './ui-overlays.js';
 
@@ -15,11 +16,15 @@ window.addEventListener('DOMContentLoaded', () => {
   
   // Bind UI first so any init-time UI reads are consistent
   wireUI();
-  init();
+  
+  // Kick off an initial generation if available from legacy module
+  if (typeof window.generate === 'function') {
+    try { window.generate(); } catch (e) { console.warn('[app] initial generate failed:', e); }
+  }
   
   // Register service worker for offline functionality
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.register('./sw.js')
       .then(registration => {
         // console.log('ServiceWorker registration successful');
       })
