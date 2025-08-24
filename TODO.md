@@ -1,5 +1,61 @@
 # TODO List
 
+## ✅ COMPLETED: Azgaar-Lite Deterministic RNG
+
+**Goal**: Add deterministic RNG to Azgaar-Lite baseline generator for reproducible maps.
+
+### Phase 1: State Configuration ✅
+- [x] Added RNG seed knobs to js/state.js
+- [x] Added rngSeed: 'azlite-001' for reproducible maps
+- [x] Added rngAlg: 'sfc32' for future extensibility
+- [x] Kept all existing Azgaar-lite parameters unchanged
+
+### Phase 2: Seeded RNG Implementation ✅
+- [x] Added hash32() function for string-to-integer hashing
+- [x] Added sfc32() function for high-quality seeded RNG
+- [x] Added makeRng() function with proper initialization and warm-up
+- [x] Implemented deterministic seed handling
+
+### Phase 3: Generator Integration ✅
+- [x] Updated poissonDiscSampler() to accept and use seeded RNG
+- [x] Updated growBlob() to accept and use seeded RNG for sharpness jitter
+- [x] Updated generateAzgaarLite() to create single RNG instance
+- [x] Replaced all Math.random() calls with seeded rng() calls:
+  - [x] Poisson disc sampling (initial points, candidate generation)
+  - [x] Island center selection (cx, cy coordinates)
+  - [x] Random hill placement (cell selection)
+  - [x] Hill height generation (maxHeight calculation)
+  - [x] Blob growth sharpness jitter (mod calculation)
+
+### Phase 4: Testing ✅
+- [x] Created test_deterministic.html for verification
+- [x] Added side-by-side map comparison
+- [x] Added seed input and random seed functionality
+- [x] Added deterministic validation (identical structure check)
+
+### Acceptance Criteria ✅
+- [x] Same seed produces identical maps every time
+- [x] Different seeds produce different maps
+- [x] All random elements now use seeded RNG
+- [x] Generator remains minimal (no overscan/falloff/moat)
+- [x] No other behavior changes
+- [x] Comprehensive testing validates determinism
+
+### Summary ✅
+**Azgaar-Lite Deterministic RNG Complete!** 
+
+Successfully implemented:
+- Deterministic seeded RNG using sfc32 algorithm
+- String-to-integer hashing for seed processing
+- Complete replacement of Math.random() with seeded rng()
+- Single RNG instance per generation for consistency
+- Comprehensive testing with side-by-side comparison
+- Seed-based reproducible map generation
+
+The Azgaar-Lite generator now produces identical maps for the same seed, enabling reproducible terrain generation while maintaining the minimal, JSFiddle-faithful behavior.
+
+---
+
 ## ✅ COMPLETED: Azgaar-Lite Baseline Refactor
 
 **Goal**: Create a minimal generator that matches the JSFiddle behavior 1:1 so we can lock terrain fundamentals before layering features.

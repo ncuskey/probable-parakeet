@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Azgaar-Lite Deterministic Test</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+    .test-container { max-width: 1400px; margin: 0 auto; }
+    .controls { margin-bottom: 20px; }
+    button { margin: 5px; padding: 10px 15px; }
+    .maps-container { display: flex; gap: 20px; }
+    .map-section { flex: 1; }
+    svg { border: 1px solid #ccc; width: 100%; height: 400px; }
+    .status { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+    .seed-input { margin: 10px 0; }
+    .seed-input input { padding: 5px; margin-right: 10px; }
+  </style>
+</head>
+<body>
+  <div class="test-container">
+    <h1>Azgaar-Lite Deterministic RNG Test</h1>
+    
+    <div class="controls">
+      <div class="seed-input">
+        <label>Seed: <input type="text" id="seedInput" value="azlite-001"></label>
+        <button id="generateBtn">Generate Both Maps</button>
+        <button id="randomSeedBtn">Random Seed</button>
+      </div>
+    </div>
+    
+    <div class="status" id="status">Ready to test deterministic generation...</div>
+    
+    <div class="maps-container">
+      <div class="map-section">
+        <h3>Map 1</h3>
+        <svg id="map1" width="600" height="400" viewBox="0 0 1200 800"></svg>
+        <div id="stats1" class="status"></div>
+      </div>
+      <div class="map-section">
+        <h3>Map 2</h3>
+        <svg id="map2" width="600" height="400" viewBox="0 0 1200 800"></svg>
+        <div id="stats2" class="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- D3 v7 (uses d3.pointer and d3-delaunay for Voronoi) -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  
+  <!-- Test script -->
+  <script type="module">
+    import { state } from './js/state.js';
+    import { generateAzgaarLite } from './js/generators/azgaar-lite.js';
+    import { renderAzgaarLite } from './js/render/azgaar-lite-svg.js';
+
+    const status = document.getElementById('status');
+    const seedInput = document.getElementById('seedInput');
+    const map1 = document.getElementById('map1');
+    const map2 = document.getElementById('map2');
+    const stats1 = document.getElementById('stats1');
+    const stats2 = document.getElementById('stats2');
+
+    function updateStatus(msg) {
+      status.textContent = msg;
+      console.log(msg);
+    }
+
+    function updateStats(element, world, mapNum) {
+      const landCount = world.isLand.reduce((a,b) => a + b, 0);
+      const oceanCount = world.isOcean.reduce((a,b) => a + b, 0);
+      const landFrac = (landCount / world.polygons.length * 100).toFixed(1);
+      element.textContent = `Map ${mapNum}: ${world.polygons.length} cells, ${landCount} land (${landFrac}%), ${oceanCount} ocean, ${world.coastLoops.length} coast loops`;
+    }
+
+    function clearMap(svg) {
+      while (svg.firstChild) {
+        svg.removeChild(svg.firstChild);
+      }
+    }
+
+    async function testDeterministic() {
+      try {
+        const seed = seedInput.value || 'azlite-001';
+        updateStatus(`Testing deterministic generation with seed: "${seed}"`);
+        
+        // Generate first map
+        const start1 = performance.now();
+        const world1 = generateAzgaarLite({ seed: seed });
+        const time1 = performance.now() - start1;
+        
+        clearMap(map1);
+        renderAzgaarLite(map1, world1);
+        updateStats(stats1, world1, 1);
+        
+        // Generate second map with same seed
+        const start2 = performance.now();
+        const world2 = generateAzgaarLite({ seed: seed });
+        const time2 = performance.now() - start2;
+        
+        clearMap(map2);
+        renderAzgaarLite(map2, world2);
+        updateStats(stats2, world2, 2);
+        
+        // Check if they're identical
+        const identical = world1.polygons.length === world2.polygons.length &&
+                         world1.coastLoops.length === world2.coastLoops.length;
+        
+        if (identical) {
+          updateStatus(`✅ Deterministic! Both maps generated in ${time1.toFixed(1)}ms and ${time2.toFixed(1)}ms - identical structure`);
+        } else {
+          updateStatus(`❌ Not deterministic! Maps have different structures`);
+        }
+        
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`);
+        console.error(error);
+      }
+    }
+
+    function randomSeed() {
+      const seeds = ['azlite-001', 'azlite-002', 'azlite-003', 'test-seed', 'random-123'];
+      const randomSeed = seeds[Math.floor(Math.random() * seeds.length)];
+      seedInput.value = randomSeed;
+      testDeterministic();
+    }
+
+    // Wire up buttons
+    document.getElementById('generateBtn').addEventListener('click', testDeterministic);
+    document.getElementById('randomSeedBtn').addEventListener('click', randomSeed);
+
+    // Initial test
+    testDeterministic();
+  </script>
+</body>
+</html>

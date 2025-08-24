@@ -25,6 +25,10 @@ export const S = {
   // NEW: Azgaar-Lite baseline generator switch
   terrainMode: 'azgaar-lite',     // 'azgaar-lite' | 'current'
 
+  // NEW: Azgaar-Lite RNG seed knobs
+  rngSeed: 'azlite-001',   // ← NEW: change to reproduce a map
+  rngAlg: 'sfc32',         // (kept for future extensibility)
+
   // Azgaar-lite params (match the fiddle's UX)
   poissonRadius: 4,               // "Points radius"
   blob: {                         // defaults like the sliders

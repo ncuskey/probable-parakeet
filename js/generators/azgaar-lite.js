@@ -5,50 +5,39 @@
 
 import { state } from '../state.js';
 
-// ---------- Poisson (ported from the fiddle) ----------
-function poissonDiscSampler(width, height, radius) {
-  const k = 30, r2 = radius*radius, R = 3*r2,
-        cell = radius * Math.SQRT1_2,
-        gw = Math.ceil(width / cell),
-        gh = Math.ceil(height / cell),
-        grid = new Array(gw * gh);
-  const queue = [];
-  let qSize = 0, sSize = 0;
-
-  function far(x,y){
-    const i = (x/cell)|0, j = (y/cell)|0;
-    const i0 = Math.max(i-2,0), j0 = Math.max(j-2,0),
-          i1 = Math.min(i+3,gw), j1 = Math.min(j+3,gh);
-    for (let yy=j0; yy<j1; yy++){
-      const o = yy*gw;
-      for (let xx=i0; xx<i1; xx++){
-        const s = grid[o+xx]; if (!s) continue;
-        const dx=s[0]-x, dy=s[1]-y;
-        if (dx*dx + dy*dy < r2) return false;
-      }
-    }
-    return true;
+// ---------- Seeded RNG functions ----------
+function hash32(str){
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
-  function sample(x,y){
-    const s = [x,y];
-    queue[qSize++] = s;
-    grid[gw*(((y/cell)|0)) + ((x/cell)|0)] = s;
-    sSize++; return s;
-  }
+  return h >>> 0;
+}
 
-  return function next(){
-    if (!sSize) return sample(Math.random()*width, Math.random()*height);
-    while (qSize){
-      const i = (Math.random()*qSize)|0, s = queue[i];
-      for (let j=0; j<k; j++){
-        const a = 2*Math.PI*Math.random();
-        const r = Math.sqrt(Math.random()*R + r2);
-        const x = s[0] + r*Math.cos(a), y = s[1] + r*Math.sin(a);
-        if (x>=0 && x<width && y>=0 && y<height && far(x,y)) return sample(x,y);
-      }
-      queue[i] = queue[--qSize]; queue.length = qSize;
-    }
+function sfc32(a, b, c, d){
+  return function() {
+    a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0; 
+    let t = (a + b) | 0;
+    a = b ^ b >>> 9;
+    b = (c + (c << 3)) | 0;
+    c = (c << 21 | c >>> 11);
+    d = (d + 1) | 0;
+    t = (t + d) | 0;
+    c = (c + t) | 0;
+    return (t >>> 0) / 4294967296;
   };
+}
+
+function makeRng(seedStr){
+  const s1 = hash32(seedStr + ':a');
+  const s2 = hash32(seedStr + ':b');
+  const s3 = hash32(seedStr + ':c');
+  const s4 = hash32(seedStr + ':d');
+  const rng = sfc32(s1, s2, s3, s4);
+  // warm up
+  for (let i=0;i<15;i++) rng();
+  return rng;
 }
 
 // ---------- Voronoi via d3-delaunay (or your internal) ----------
@@ -72,7 +61,7 @@ function buildVoronoi(points, width, height) {
 }
 
 // ---------- Blob growth (BFS over neighbors) ----------
-function growBlob(polygons, neighbors, start, opts) {
+function growBlob(polygons, neighbors, start, opts, rng) {
   const { maxHeight, radius, sharpness } = opts;
   const N = polygons.length;
   const H = new Float32Array(N);      // height field
@@ -84,7 +73,7 @@ function growBlob(polygons, neighbors, start, opts) {
     let h = H[i] * radius;
     for (const n of neighbors[i]) {
       if (used[n]) continue;
-      let mod = Math.random()*sharpness + 1.1 - sharpness;
+      let mod = rng()*sharpness + 1.1 - sharpness;
       if (sharpness === 0) mod = 1;
       H[n] += h * mod;
       if (H[n] > 1) H[n] = 1;
@@ -236,32 +225,34 @@ export function generateAzgaarLite(opts = {}) {
   const H = opts.height ?? state.height;
   const pr = opts.poissonRadius ?? state.poissonRadius;
 
+  const rng = makeRng(opts.seed ?? state.rngSeed);     // ← NEW
+
   // 1) Poisson → Voronoi (bounded to canvas)
-  const sampler = poissonDiscSampler(W,H,pr);
+  const sampler = poissonDiscSampler(W,H,pr, rng);   // ← pass rng
   const pts = []; for (let s; (s=sampler()); ) pts.push(s);
   const { polygons, neighbors } = buildVoronoi(pts, W, H);
 
   // 2) Heights via blob growth
   // big island: seed inside central window
   const win = state.seedWindow;
-  const cx = (win.left + (win.right-win.left)*Math.random()) * W;
-  const cy = (win.top  + (win.bottom-win.top)*Math.random()) * H;
+  const cx = (win.left + (win.right-win.left)*rng()) * W;
+  const cy = (win.top  + (win.bottom-win.top)*rng()) * H;
   // find nearest cell to (cx,cy)
   let start=0, dmin=Infinity;
   for (let i=0;i<polygons.length;i++){
     const dx=polygons[i][0]-cx, dy=polygons[i][1]-cy, d=dx*dx+dy*dy;
     if (d<dmin){dmin=d; start=i;}
   }
-  let Hfield = growBlob(polygons, neighbors, start, state.blob);
+  let Hfield = growBlob(polygons, neighbors, start, state.blob, rng);
 
   // a few random hills (like Random map)
   for (let k=0;k<(opts.randomSmallHills ?? state.randomSmallHills); k++){
-    const rnd = (Math.random()*polygons.length)|0;
+    const rnd = (rng()*polygons.length)|0;
     const add = growBlob(polygons, neighbors, rnd, {
-      maxHeight: Math.random()*0.4 + 0.1,
+      maxHeight: rng()*0.4 + 0.1,  // ← rng
       radius: 0.99,
       sharpness: state.blob.sharpness
-    });
+    }, rng);
     for (let i=0;i<Hfield.length;i++) Hfield[i] = Math.min(1, Hfield[i] + add[i]);
   }
 
