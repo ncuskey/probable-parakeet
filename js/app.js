@@ -28,5 +28,8 @@ window.addEventListener('DOMContentLoaded', () => {
       });
   }
   
-
+  // Self-test harness (opt-in via ?selftest=1)
+  if (new URL(location.href).searchParams.get('selftest') === '1') {
+    import('./selftest.js');
+  }
 });

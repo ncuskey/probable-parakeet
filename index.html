@@ -256,12 +256,5 @@
   <!-- ES Module loader -->
   <script type="module" src="js/app.js"></script>
 
-  <!-- Self-test harness (opt-in via ?selftest=1) -->
-  <script type="module">
-    if (new URL(location.href).searchParams.get('selftest') === '1') {
-      import('./js/selftest.js');
-    }
-  </script>
-
 </body>
 </html>
