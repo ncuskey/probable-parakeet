@@ -196,3 +196,82 @@
 - [x] Acceptance: No more ReferenceError: pathToPolyline is not defined
 - [x] Acceptance: Console logs: primary-road count: N then routes render: drew X paths
 - [x] Acceptance: Primary roads appear under #routes .roads path.route using existing CSS
+
+# TODO: UI Wiring Extraction
+
+## ✅ Completed
+
+### 1. Created js/ui.js
+- [x] Created new ES module `js/ui.js` that exports `wireUI()` and `readUIParams()`
+- [x] Implemented safe event binding with `bind()` helper function
+- [x] Added handlers for all UI controls:
+  - [x] Generate button (`generateBtn`)
+  - [x] View toggle button (`viewToggleBtn`) 
+  - [x] Settings button (`settingsBtn`)
+  - [x] Seed input (`seedInput`) with Enter key support
+  - [x] Sea level input (`seaLevelInput`) with auto-recolor
+  - [x] World type select (`worldType`)
+  - [x] Region count apply (`applyRegionCount`)
+  - [x] Regenerate names (`regenNamesBtn`)
+  - [x] Export buttons (SVG/PNG)
+  - [x] Close button and modal controls
+  - [x] Tab buttons
+  - [x] Range inputs with output updates
+  - [x] Select inputs (river style, wind belts, render mode, shading mode)
+  - [x] Checkbox inputs (debug operations)
+- [x] Added safe guards for missing elements and functions
+- [x] Exposed `recolorCurrent` globally in legacy-main.js
+
+### 2. Updated js/app.js
+- [x] Added import for `wireUI` from `./ui.js`
+- [x] Called `wireUI()` before `init()` in DOMContentLoaded
+- [x] Removed duplicate UI event listeners:
+  - [x] Removed regenerate names button listener
+  - [x] Removed apply region count button listener  
+  - [x] Removed view toggle button listener
+
+### 3. Updated js/legacy-main.js
+- [x] Removed `setupEventListeners()` function call from `init()`
+- [x] Deleted entire `setupEventListeners()` function
+- [x] Removed duplicate modal event listeners (window.onclick, keydown)
+- [x] Exposed `recolorCurrent` function globally
+- [x] Kept all underlying functions intact (generate, toggleSettings, etc.)
+
+## 🔄 In Progress
+
+### 4. Testing & Verification
+- [ ] Test that UI controls still work:
+  - [ ] Generate button runs full pipeline
+  - [ ] Sea level changes immediately recolor terrain
+  - [ ] View toggle works (terrain ↔ regions)
+  - [ ] Settings modal opens/closes
+  - [ ] Tab switching works
+  - [ ] Export buttons work
+  - [ ] All range inputs update outputs and trigger appropriate actions
+  - [ ] Select inputs trigger correct actions (generate vs recolor)
+- [ ] Verify no new console errors
+- [ ] Test with missing elements (safe guards work)
+- [ ] Test with missing functions (safe guards work)
+
+## 📋 Acceptance Criteria
+
+- [x] `js/ui.js` exists; `wireUI()` attaches handlers with no errors even if some controls are absent
+- [x] `app.js` calls `wireUI()` before `init()`; no duplicate listeners remain in `app.js` or `legacy-main.js`
+- [ ] Clicking Generate still runs the full pipeline
+- [ ] Sea level changes immediately recolor terrain (no heavy recompute)
+- [ ] View toggle works (terrain ↔ regions)
+- [ ] No new console errors
+
+## 🔍 Search Anchors (for future reference)
+
+- **app.js**: Removed lines adding listeners to `viewToggleBtn`, `generateBtn`, etc.
+- **legacy-main.js**: Removed `document.getElementById('...')?.addEventListener(...)` blocks
+- **Element IDs covered**: `generateBtn`, `viewToggleBtn`, `settingsBtn`, `seedInput`, `seaLevelInput`, `worldType`, `regionCount`, `applyRegionCount`, `regenNamesBtn`
+
+## 🚀 Next Steps
+
+1. Test the application in browser
+2. Verify all UI controls work as expected
+3. Check for any console errors
+4. Document any issues found
+5. Consider further modularization of remaining functions

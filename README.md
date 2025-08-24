@@ -33,10 +33,12 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 ## Usage
 
-1. Open `voronoi_heightmap_canvas_demo.html` in a web browser
-2. Click "Generate Map" to create a new world
-3. Adjust the various sliders and dropdowns to customize your map
-4. Use the "Show Tests" section to verify functionality
+1. Start a local server (required for ES modules): `python3 -m http.server 8000`
+2. Open `http://localhost:8000/` in a web browser
+3. Click "Generate Map" to create a new world
+4. Adjust the various sliders and dropdowns to customize your map
+5. Use the "Show Tests" section to verify functionality
+6. Add `?selftest=1` to the URL to run module validation tests
 
 ## Technical Details
 
@@ -84,3 +86,53 @@ Tested and working in:
 - Edge 90+
 
 Requires ES6+ features and modern browser APIs for optimal performance.
+
+## Module Structure (No-Bundler ES Modules)
+
+This project runs entirely in the browser using native ES modules:
+
+```
+index.html
+js/
+├── app.js                    # Entry: wires UI and calls init() (no unused imports)
+├── legacy-main.js            # Pipeline orchestration (ensureIsWater → recolor → rivers → regions → routes), exports init(), generate()
+├── state.js                  # Central app state (S), getters/setters, caches (isWater, landPaths, precip)
+├── utils.js                  # Pure helpers (RNG, math, geometry)
+├── render.js                 # Layer plumbing (getLayers, ensureRasterImage), view-mode toggles, light repaints
+├── recolor.js                # Terrain painting (canvas raster + SVG per-cell)
+├── terrain.js                # Template registry & executor (function/steps), height clear, cache invalidation
+├── climate.js                # Precipitation provider (shim until full climate)
+├── rivers.js                 # Precip recompute, BFS/flow steps, river rendering
+├── regions.js                # Region assignment + rendering (fallback drawn under #regions > .overlay)
+├── routes.js                 # Roads/paths rendering and logs
+├── ui.js                     # DOM event wiring for controls (generate, view toggle, seed, sea level, etc.)
+├── ui-overlays.js            # Settings modal + overlay/progress controls
+└── selftest.js               # Browser self-test harness (validates module exports)
+```
+
+**Dev server:** open via a simple static server (modules don't load on `file://`). Examples:
+- Python: `python3 -m http.server` → http://localhost:8000
+- VS Code: "Live Server" extension
+
+**Scripts in HTML:**
+```html
+<!-- If using CDN D3 -->
+<script defer src="https://d3js.org/d3.v7.min.js"></script>
+<script type="module" src="js/app.js"></script>
+
+<!-- Self-test harness (opt-in via ?selftest=1) -->
+<script type="module">
+  if (new URL(location.href).searchParams.get('selftest') === '1') {
+    import('./js/selftest.js');
+  }
+</script>
+```
+
+**View modes & layers:**
+
+Cells group must have `id="mapCells"`. Regions group is `#regions`. Fallback land path uses class `fallback-land`.
+
+In "Terrain" mode, CSS hides `#regions path.fallback-land` so terrain shading remains visible.
+
+**Pipeline:**
+`ensureIsWater` → `recolor` → `recomputePrecipIfNeeded` → `computeRiverSteps` → `computeRivers` → `computeAndDrawRegions` → `computeRoutes`

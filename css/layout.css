@@ -88,6 +88,11 @@ body.view-mode-terrain #regions .overlay {
   display: block; 
 }
 
+/* Hide coarse fallback land fill in terrain view so height shading is visible */
+body.view-mode-terrain #regions path.fallback-land { 
+  display: none; 
+}
+
 /* Overlay tint: subtle, non-interactive */
 #regions .overlay path { 
   fill-opacity: 0.15; 
