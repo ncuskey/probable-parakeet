@@ -29,6 +29,14 @@ export const S = {
   rngSeed: 'azlite-001',   // ← NEW: change to reproduce a map
   rngAlg: 'sfc32',         // (kept for future extensibility)
 
+  // NEW: Azgaar-Lite sea level control
+  seaLevelMode: 'fixed',   // 'fixed' | 'percentile'
+  seaPercentile: 0.35,     // used when seaLevelMode === 'percentile'
+
+  // NEW: Optional second big island (archipelago)
+  secondBlobEnabled: false,
+  secondBlobScale: 0.7,    // relative to blob.maxHeight (0.5–0.8 works well)
+
   // Azgaar-lite params (match the fiddle's UX)
   poissonRadius: 4,               // "Points radius"
   blob: {                         // defaults like the sliders

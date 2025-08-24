@@ -40,6 +40,15 @@ function makeRng(seedStr){
   return rng;
 }
 
+// NEW: Quantile helper for percentile sea level
+function quantile01(arr, p) {
+  const a = Array.from(arr); // copy
+  a.sort((x,y)=>x-y);
+  if (a.length === 0) return 0;
+  const i = Math.max(0, Math.min(a.length-1, Math.floor(p * (a.length - 1))));
+  return a[i];
+}
+
 // ---------- Voronoi via d3-delaunay (or your internal) ----------
 function buildVoronoi(points, width, height) {
   const DelaunayCtor = (window.d3 && window.d3.Delaunay) || (window.d3 && window.d3.voronoi && null);
@@ -245,7 +254,32 @@ export function generateAzgaarLite(opts = {}) {
   }
   let Hfield = growBlob(polygons, neighbors, start, state.blob, rng);
 
-  // a few random hills (like Random map)
+  // 2b) Optional second big island (archipelago-lite)
+  if (state.secondBlobEnabled) {
+    // pick another center inside the same window; try to keep some distance
+    let cx2, cy2, tries = 0;
+    do {
+      cx2 = (win.left + (win.right - win.left) * rng()) * W;
+      cy2 = (win.top  + (win.bottom - win.top ) * rng()) * H;
+      tries++;
+    } while (tries < 20 && Math.hypot(cx2 - cx, cy2 - cy) < 0.18 * Math.min(W,H)); // ~18% min spacing
+
+    // nearest cell to (cx2,cy2)
+    let start2 = 0, dmin2 = Infinity;
+    for (let i=0;i<polygons.length;i++){
+      const dx=polygons[i][0]-cx2, dy=polygons[i][1]-cy2, d=dx*dx+dy*dy;
+      if (d<dmin2){dmin2=d; start2=i;}
+    }
+    const amp = Math.max(0, Math.min(1, state.secondBlobScale ?? 0.7));
+    const H2 = growBlob(polygons, neighbors, start2, {
+      maxHeight: (state.blob.maxHeight ?? 0.9) * amp,
+      radius: state.blob.radius ?? 0.90,
+      sharpness: state.blob.sharpness ?? 0.2
+    }, rng);
+    for (let i=0;i<Hfield.length;i++) Hfield[i] = Math.min(1, Hfield[i] + H2[i]);
+  }
+
+  // 2c) Small random hills (like Random map)
   for (let k=0;k<(opts.randomSmallHills ?? state.randomSmallHills); k++){
     const rnd = (rng()*polygons.length)|0;
     const add = growBlob(polygons, neighbors, rnd, {
@@ -257,7 +291,10 @@ export function generateAzgaarLite(opts = {}) {
   }
 
   // 3) Water classes (fixed threshold + border flood)
-  const sea = opts.seaLevel ?? state.seaLevel;
+  let sea = opts.seaLevel ?? state.seaLevel ?? 0.2;
+  if (state.seaLevelMode === 'percentile') {
+    sea = quantile01(Hfield, state.seaPercentile ?? 0.35);
+  }
   const water = markFeatures(polygons, neighbors, Hfield, sea, W, H);
 
   // 4) Coastlines

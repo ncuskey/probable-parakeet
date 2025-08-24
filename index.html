@@ -44,6 +44,32 @@
       <button id="viewToggleBtn" class="primary-btn">Show Regions</button>
     </div>
 
+    <!-- Azgaar-Lite controls -->
+    <div id="azlite-controls" style="margin:8px 0; display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+      <label>Seed:
+        <input id="seedInput" type="text" style="width:160px" />
+      </label>
+      <button id="seedRerollBtn">Reroll</button>
+
+      <label>Sea:
+        <select id="seaModeSelect">
+          <option value="fixed">Fixed</option>
+          <option value="percentile">Percentile</option>
+        </select>
+      </label>
+      <label id="seaFixedWrap">Level:
+        <input id="seaFixedInput" type="number" step="0.01" min="0" max="1" style="width:70px" />
+      </label>
+      <label id="seaPctWrap" style="display:none;">Percentile:
+        <input id="seaPctInput" type="number" step="0.01" min="0" max="1" style="width:70px" />
+      </label>
+
+      <label title="Add a second big blob like a sibling island">
+        <input id="secondBlobChk" type="checkbox" />
+        2nd big island
+      </label>
+    </div>
+
     <div class="row">
       <button>Export SVG</button>
       <button>Export PNG</button>

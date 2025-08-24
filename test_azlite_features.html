@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Azgaar-Lite Features Test</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+    .test-container { max-width: 1400px; margin: 0 auto; }
+    .controls { margin-bottom: 20px; }
+    button { margin: 5px; padding: 10px 15px; }
+    .maps-container { display: flex; gap: 20px; }
+    .map-section { flex: 1; }
+    svg { border: 1px solid #ccc; width: 100%; height: 400px; }
+    .status { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+    .seed-input { margin: 10px 0; }
+    .seed-input input { padding: 5px; margin-right: 10px; }
+    .feature-controls { margin: 20px 0; padding: 15px; background: #f8f8f8; border-radius: 5px; }
+    .feature-controls label { display: inline-block; margin: 5px 15px 5px 0; }
+    .feature-controls input, .feature-controls select { margin-left: 5px; }
+  </style>
+</head>
+<body>
+  <div class="test-container">
+    <h1>Azgaar-Lite Features Test</h1>
+    
+    <div class="feature-controls">
+      <h3>Seed Controls</h3>
+      <label>Seed: <input type="text" id="seedInput" value="azlite-001" /></label>
+      <button id="seedRerollBtn">Reroll</button>
+      
+      <h3>Sea Level Controls</h3>
+      <label>Mode: 
+        <select id="seaModeSelect">
+          <option value="fixed">Fixed</option>
+          <option value="percentile">Percentile</option>
+        </select>
+      </label>
+      <label id="seaFixedWrap">Level: <input id="seaFixedInput" type="number" step="0.01" min="0" max="1" value="0.2" /></label>
+      <label id="seaPctWrap" style="display:none;">Percentile: <input id="seaPctInput" type="number" step="0.01" min="0" max="1" value="0.35" /></label>
+      
+      <h3>Second Blob</h3>
+      <label><input id="secondBlobChk" type="checkbox" /> Enable 2nd big island</label>
+    </div>
+    
+    <div class="controls">
+      <button id="generateBtn">Generate Map</button>
+      <button id="testDeterministicBtn">Test Deterministic</button>
+    </div>
+    
+    <div class="status" id="status">Ready to test Azgaar-Lite features...</div>
+    
+    <div class="maps-container">
+      <div class="map-section">
+        <h3>Map 1</h3>
+        <svg id="map1" width="600" height="400" viewBox="0 0 1200 800"></svg>
+        <div id="stats1" class="status"></div>
+      </div>
+      <div class="map-section">
+        <h3>Map 2 (for deterministic test)</h3>
+        <svg id="map2" width="600" height="400" viewBox="0 0 1200 800"></svg>
+        <div id="stats2" class="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- D3 v7 (uses d3.pointer and d3-delaunay for Voronoi) -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  
+  <!-- Test script -->
+  <script type="module">
+    import { state } from './js/state.js';
+    import { generateAzgaarLite } from './js/generators/azgaar-lite.js';
+    import { renderAzgaarLite } from './js/render/azgaar-lite-svg.js';
+
+    const status = document.getElementById('status');
+    const seedInput = document.getElementById('seedInput');
+    const seaModeSelect = document.getElementById('seaModeSelect');
+    const seaFixedInput = document.getElementById('seaFixedInput');
+    const seaPctInput = document.getElementById('seaPctInput');
+    const seaFixedWrap = document.getElementById('seaFixedWrap');
+    const seaPctWrap = document.getElementById('seaPctWrap');
+    const secondBlobChk = document.getElementById('secondBlobChk');
+    const map1 = document.getElementById('map1');
+    const map2 = document.getElementById('map2');
+    const stats1 = document.getElementById('stats1');
+    const stats2 = document.getElementById('stats2');
+
+    function updateStatus(msg) {
+      status.textContent = msg;
+      console.log(msg);
+    }
+
+    function updateStats(element, world, mapNum) {
+      const landCount = world.isLand.reduce((a,b) => a + b, 0);
+      const oceanCount = world.isOcean.reduce((a,b) => a + b, 0);
+      const landFrac = (landCount / world.polygons.length * 100).toFixed(1);
+      const seaMode = state.seaLevelMode === 'percentile' ? 'percentile' : 'fixed';
+      const seaValue = state.seaLevelMode === 'percentile' ? state.seaPercentile : state.seaLevel;
+      element.textContent = `Map ${mapNum}: ${world.polygons.length} cells, ${landCount} land (${landFrac}%), ${oceanCount} ocean, ${world.coastLoops.length} coast loops, sea: ${seaMode} ${seaValue}`;
+    }
+
+    function clearMap(svg) {
+      while (svg.firstChild) {
+        svg.removeChild(svg.firstChild);
+      }
+    }
+
+    function randomSeedHex(nBytes = 6) {
+      if (window.crypto?.getRandomValues) {
+        const buf = new Uint8Array(nBytes);
+        window.crypto.getRandomValues(buf);
+        return Array.from(buf).map(b => b.toString(16).padStart(2,'0')).join('');
+      }
+      return Array.from({length:nBytes}, () => ((Math.random()*256)|0).toString(16).padStart(2,'0')).join('');
+    }
+
+    function toggleSeaWraps() {
+      const fixed = seaModeSelect.value === 'fixed';
+      seaFixedWrap.style.display = fixed ? '' : 'none';
+      seaPctWrap.style.display = fixed ? 'none' : '';
+    }
+
+    async function generateMap() {
+      try {
+        // Update state from UI
+        state.rngSeed = seedInput.value.trim() || 'azlite-001';
+        state.seaLevelMode = seaModeSelect.value;
+        state.seaLevel = parseFloat(seaFixedInput.value) || 0.2;
+        state.seaPercentile = parseFloat(seaPctInput.value) || 0.35;
+        state.secondBlobEnabled = secondBlobChk.checked;
+
+        updateStatus(`Generating map with seed: "${state.rngSeed}", sea: ${state.seaLevelMode} ${state.seaLevelMode === 'percentile' ? state.seaPercentile : state.seaLevel}, 2nd blob: ${state.secondBlobEnabled}`);
+        
+        const start = performance.now();
+        const world = generateAzgaarLite();
+        const time = performance.now() - start;
+        
+        clearMap(map1);
+        renderAzgaarLite(map1, world);
+        updateStats(stats1, world, 1);
+        
+        updateStatus(`✅ Generated in ${time.toFixed(1)}ms - ${world.polygons.length} cells, ${world.coastLoops.length} coast loops`);
+        
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`);
+        console.error(error);
+      }
+    }
+
+    async function testDeterministic() {
+      try {
+        const seed = seedInput.value || 'azlite-001';
+        updateStatus(`Testing deterministic generation with seed: "${seed}"`);
+        
+        // Generate first map
+        const start1 = performance.now();
+        const world1 = generateAzgaarLite({ seed: seed });
+        const time1 = performance.now() - start1;
+        
+        clearMap(map1);
+        renderAzgaarLite(map1, world1);
+        updateStats(stats1, world1, 1);
+        
+        // Generate second map with same seed
+        const start2 = performance.now();
+        const world2 = generateAzgaarLite({ seed: seed });
+        const time2 = performance.now() - start2;
+        
+        clearMap(map2);
+        renderAzgaarLite(map2, world2);
+        updateStats(stats2, world2, 2);
+        
+        // Check if they're identical
+        const identical = world1.polygons.length === world2.polygons.length &&
+                         world1.coastLoops.length === world2.coastLoops.length;
+        
+        if (identical) {
+          updateStatus(`✅ Deterministic! Both maps generated in ${time1.toFixed(1)}ms and ${time2.toFixed(1)}ms - identical structure`);
+        } else {
+          updateStatus(`❌ Not deterministic! Maps have different structures`);
+        }
+        
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`);
+        console.error(error);
+      }
+    }
+
+    // Wire up controls
+    seedInput.addEventListener('change', generateMap);
+    seaModeSelect.addEventListener('change', () => {
+      toggleSeaWraps();
+      generateMap();
+    });
+    seaFixedInput.addEventListener('change', generateMap);
+    seaPctInput.addEventListener('change', generateMap);
+    secondBlobChk.addEventListener('change', generateMap);
+
+    document.getElementById('seedRerollBtn').addEventListener('click', () => {
+      state.rngSeed = `azlite-${randomSeedHex(6)}`;
+      seedInput.value = state.rngSeed;
+      generateMap();
+    });
+
+    document.getElementById('generateBtn').addEventListener('click', generateMap);
+    document.getElementById('testDeterministicBtn').addEventListener('click', testDeterministic);
+
+    // Initialize UI
+    toggleSeaWraps();
+
+    // Initial generation
+    generateMap();
+  </script>
+</body>
+</html>

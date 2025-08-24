@@ -6,6 +6,121 @@ import { S, setSeed, setParam, getParam, state } from './state.js';
 import { toggleSettings } from './ui-overlays.js';
 import { regenerateNames } from './legacy-main.js';
 
+// NEW: Azgaar-Lite helpers
+function randomSeedHex(nBytes = 8) {
+  if (window.crypto?.getRandomValues) {
+    const buf = new Uint8Array(nBytes);
+    window.crypto.getRandomValues(buf);
+    return Array.from(buf).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+  // fallback
+  return Array.from({length:nBytes}, () => ((Math.random()*256)|0).toString(16).padStart(2,'0')).join('');
+}
+
+export function initAzLiteControls() {
+  const seedInput     = document.getElementById('seedInput');
+  const seedRerollBtn = document.getElementById('seedRerollBtn');
+  const seaModeSelect = document.getElementById('seaModeSelect');
+  const seaFixedInput = document.getElementById('seaFixedInput');
+  const seaPctInput   = document.getElementById('seaPctInput');
+  const seaFixedWrap  = document.getElementById('seaFixedWrap');
+  const seaPctWrap    = document.getElementById('seaPctWrap');
+  const secondBlobChk = document.getElementById('secondBlobChk');
+
+  if (!seedInput) return; // controls not on this page
+
+  // init from state
+  seedInput.value = state.rngSeed ?? 'azlite-001';
+  seaModeSelect.value = state.seaLevelMode ?? 'fixed';
+  seaFixedInput.value = (state.seaLevel ?? 0.2).toString();
+  seaPctInput.value   = (state.seaPercentile ?? 0.35).toString();
+  secondBlobChk.checked = !!state.secondBlobEnabled;
+
+  function toggleSeaWraps() {
+    const fixed = seaModeSelect.value === 'fixed';
+    seaFixedWrap.style.display = fixed ? '' : 'none';
+    seaPctWrap.style.display   = fixed ? 'none' : '';
+  }
+  toggleSeaWraps();
+
+  // events
+  seedInput.addEventListener('change', () => { 
+    state.rngSeed = seedInput.value.trim() || state.rngSeed; 
+    try { 
+      const generate = window.generate;
+      if (typeof generate === 'function') {
+        generate(); 
+      }
+    } catch (e) { 
+      console.warn('[ui] generate failed', e); 
+    }
+  });
+  
+  seedRerollBtn.addEventListener('click', () => {
+    state.rngSeed = `azlite-${randomSeedHex(6)}`;
+    seedInput.value = state.rngSeed;
+    try { 
+      const generate = window.generate;
+      if (typeof generate === 'function') {
+        generate(); 
+      }
+    } catch (e) { 
+      console.warn('[ui] generate failed', e); 
+    }
+  });
+
+  seaModeSelect.addEventListener('change', () => {
+    state.seaLevelMode = seaModeSelect.value;
+    toggleSeaWraps();
+    try { 
+      const generate = window.generate;
+      if (typeof generate === 'function') {
+        generate(); 
+      }
+    } catch (e) { 
+      console.warn('[ui] generate failed', e); 
+    }
+  });
+
+  seaFixedInput.addEventListener('change', () => {
+    let v = parseFloat(seaFixedInput.value);
+    if (Number.isFinite(v)) state.seaLevel = Math.min(1, Math.max(0, v));
+    try { 
+      const generate = window.generate;
+      if (typeof generate === 'function') {
+        generate(); 
+      }
+    } catch (e) { 
+      console.warn('[ui] generate failed', e); 
+    }
+  });
+
+  seaPctInput.addEventListener('change', () => {
+    let v = parseFloat(seaPctInput.value);
+    if (Number.isFinite(v)) state.seaPercentile = Math.min(1, Math.max(0, v));
+    try { 
+      const generate = window.generate;
+      if (typeof generate === 'function') {
+        generate(); 
+      }
+    } catch (e) { 
+      console.warn('[ui] generate failed', e); 
+    }
+  });
+
+  secondBlobChk.addEventListener('change', () => {
+    state.secondBlobEnabled = secondBlobChk.checked;
+    try { 
+      const generate = window.generate;
+      if (typeof generate === 'function') {
+        generate(); 
+      }
+    } catch (e) { 
+      console.warn('[ui] generate failed', e); 
+    }
+  });
+}
+
 /** Helper: bind an event if the element exists. Returns the element or null. */
 function bind(id, evt, handler, options) {
   const el = document.getElementById(id);
@@ -37,6 +152,9 @@ export function readUIParams() {
 
 /** Wire all UI controls (safe: missing elements/functions → no-op). */
 export function wireUI() {
+  // NEW: Initialize Azgaar-Lite controls
+  try { initAzLiteControls(); } catch (e) { console.warn('[ui] initAzLiteControls failed', e); }
+
   // Buttons
   bind('generateBtn', 'click', async () => {
     try { 

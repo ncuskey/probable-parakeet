@@ -1,5 +1,71 @@
 # TODO List
 
+## ✅ COMPLETED: Azgaar-Lite Seed UI, Percentile Sea, Optional 2nd Blob
+
+**Goal**: Add interactive UI controls for Azgaar-Lite generator with seed management, percentile sea level, and optional second blob.
+
+### Phase 1: State Configuration ✅
+- [x] Added sea level control knobs to js/state.js
+- [x] Added seaLevelMode: 'fixed' | 'percentile'
+- [x] Added seaPercentile: 0.35 for percentile mode
+- [x] Added secondBlobEnabled: false toggle
+- [x] Added secondBlobScale: 0.7 for relative sizing
+- [x] Kept all existing Azgaar-lite parameters unchanged
+
+### Phase 2: UI Controls ✅
+- [x] Added Azgaar-Lite controls section to index.html
+- [x] Added seed input with reroll button
+- [x] Added sea level mode selector (fixed/percentile)
+- [x] Added sea level value inputs (fixed level / percentile)
+- [x] Added second blob checkbox
+- [x] Implemented dynamic UI toggling for sea level modes
+
+### Phase 3: UI Wiring ✅
+- [x] Added initAzLiteControls() function to js/ui.js
+- [x] Implemented randomSeedHex() helper for secure seed generation
+- [x] Wired all control events to update state and regenerate
+- [x] Added proper error handling and fallbacks
+- [x] Integrated with existing wireUI() function
+
+### Phase 4: Generator Features ✅
+- [x] Added quantile01() helper for percentile sea level computation
+- [x] Implemented optional second blob with distance spacing
+- [x] Added percentile sea level mode support
+- [x] Updated generateAzgaarLite() to support new features
+- [x] Maintained deterministic RNG throughout
+
+### Phase 5: Testing ✅
+- [x] Created test_azlite_features.html for comprehensive testing
+- [x] Added side-by-side map comparison
+- [x] Added feature-specific controls and validation
+- [x] Added deterministic testing with new features
+- [x] Verified all features work correctly
+
+### Acceptance Criteria ✅
+- [x] Seed input allows custom seeds and reroll functionality
+- [x] Sea level mode switching works (fixed ↔ percentile)
+- [x] Percentile sea level computes correct land fraction
+- [x] Optional second blob creates archipelago-like maps
+- [x] All features maintain deterministic behavior
+- [x] UI controls update state and trigger regeneration
+- [x] Comprehensive testing validates all features
+
+### Summary ✅
+**Azgaar-Lite Features Complete!** 
+
+Successfully implemented:
+- Interactive seed management with reroll functionality
+- Sea level mode switching (fixed vs percentile)
+- Percentile sea level computation for consistent land fractions
+- Optional second blob for archipelago generation
+- Dynamic UI controls with proper state management
+- Comprehensive testing with feature validation
+- Maintained deterministic RNG throughout
+
+The Azgaar-Lite generator now provides rich interactive controls for seed management, sea level tuning, and archipelago generation while maintaining the minimal, JSFiddle-faithful behavior.
+
+---
+
 ## ✅ COMPLETED: Azgaar-Lite Deterministic RNG
 
 **Goal**: Add deterministic RNG to Azgaar-Lite baseline generator for reproducible maps.
