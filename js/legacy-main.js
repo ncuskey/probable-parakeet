@@ -29,7 +29,8 @@ import {
   setUnifiedLandPaths, setRiverPolys, setPorts, setRoadUsage,
   setIsLake, setLakeId, setLakes,
   setBurgs, setMacroCapitals, setRegenerationCount, setCurrentViewMode,
-  ensureIsWater
+  ensureIsWater,
+  tuneSeaLevelToTarget
 } from './state.js';
 
 import {
@@ -40,7 +41,10 @@ import {
   normalizeHeights,
   sinkSmallIslands,
   normalizeHeightsIfNeeded,
-  sinkOuterMargin
+  sinkOuterMargin,
+  _refreshRng,
+  resolveHeightKey,
+  bindWorld
 } from './terrain.js';
 
 import {
@@ -3357,11 +3361,23 @@ window.generate = async function() {
 
       // Generation order (Azgaar-style)
       ensureHeightsCleared();
+      
+      // Ensure sea level is defined before any terrain operations
+      if (!S.params) S.params = {};
+      if (!Number.isFinite(S.params.seaLevel)) S.params.seaLevel = 0.22; // small uplift to avoid flooding lowlands
+      
+      // Resolve height key for unified access
+      resolveHeightKey();
+      
+      // refresh terrain RNG for this run (uses S.seed)
+      _refreshRng();
+      bindWorld();            // <— NEW
       applyTemplate(tplKey, uiVals);
-      normalizeHeightsIfNeeded();             // only if max<~0.3
-      thermalErode(talus, thermalStrength, 2);
+      
+      // Cap to [0,1] and normalize if too flat
+      normalizeHeights({ maxTarget: 0.9 });
+      thermalErode(talus, thermalStrength, 1);  // gentle
       smoothLand(smoothAlpha);
-      sinkOuterMargin(0.04, 0.15);            // gentle, once
 
       // AFTER applyTemplate (and before any mask/clamp)
       _debugHeights('post-template');
@@ -3379,14 +3395,18 @@ window.generate = async function() {
       // Re-apply the water border after erosion/smoothing
       applyBorderMask();
 
-      // Fixed coastline by default (slider overrides)
-      if (!Number.isFinite(S.params.seaLevel)) S.params.seaLevel = 0.20;
+      // Fixed coastline (blog): default 0.22 unless slider set
+      if (!Number.isFinite(S.params.seaLevel)) S.params.seaLevel = 0.22; // small uplift to avoid flooding lowlands
       const seaIn = document.getElementById('seaLevelInput');
       if (seaIn && seaIn.value !== '') S.params.seaLevel = +seaIn.value;
 
+      // Auto-tune sea level to hit target land fraction
+      const tunedSea = tuneSeaLevelToTarget(getWorld().cells, { target: 0.35, step: 0.01 });
+      console.log('[sea] tuned to', tunedSea);
+
       // recompute mask & paint
-      resetCaches('isWater');
-      setIsWater(ensureIsWater(cells));
+      resetCaches('isWater'); // make sure this deletes S.caches.isWater
+      setIsWater(ensureIsWater(getWorld().cells));
 
       // Remove salt-and-pepper: keep a few biggest landmasses
       sinkSmallIslands({ keep: 2, minCells: 300, epsilon: 0.02 });
@@ -9354,4 +9374,28 @@ export const generate = window.generate;
 // Placeholder for regenerateNames (to be implemented)
 export function regenerateNames() {
   console.warn('regenerateNames() called but not yet implemented');
+}
+
+// --- DEBUG BRIDGE (dev-only) ---
+try {
+  // If these are named differently in your code, adjust the identifiers on the right side
+  const api = {
+    getWorld,          // returns { cells, width, height, ... }
+    resetCaches,       // fn(key)
+    ensureIsWater,     // fn(cells) -> boolean[]
+    setIsWater,        // fn(boolean[])
+    recolor,           // async fn(run)
+  };
+
+  // Don't clobber if it already exists
+  window.__map = Object.assign(window.__map || {}, api);
+
+  // (optional) easy height accessors used earlier
+  window.__map.getH = (i) => __map.getWorld().cells[i].high ?? __map.getWorld().cells[i].h ?? 0;
+  window.__map.setH = (i, v) => {
+    const c = __map.getWorld().cells[i];
+    if ('high' in c) c.high = v; else c.h = v;
+  };
+} catch (e) {
+  console.warn('Debug bridge failed to attach', e);
 }

@@ -4,6 +4,10 @@ import { getLayers } from './render.js';
 import { computePrecipArray } from './climate.js';
 import { ProgressManager } from './ui-overlays.js';
 
+// River filtering constants - keep only bigger rivers
+const MIN_RIVER_STEPS = 24;
+const MIN_RIVER_FLUX = 0.005;
+
 /** Recompute precip cache if missing using climate provider (no window.*) */
 export function recomputePrecipIfNeeded() {
   if (getPrecip()) return;
@@ -212,8 +216,8 @@ export function computeRivers(run = 0) {
     return true;
   }
 
-  // River threshold and rendering
-  const thr = maxF * 0.35; // 35% of max flux (increased from 25% for fewer rivers)
+  // River threshold and rendering - use higher threshold for bigger rivers
+  const thr = Math.max(maxF * 0.35, MIN_RIVER_FLUX); // 35% of max flux or minimum threshold
   const confluences = countConfluences(thr);
   const majors = landIdxs.filter(i => flux[i] >= thr).length;
   
@@ -240,7 +244,7 @@ export function computeRivers(run = 0) {
       curr = next;
     }
     
-    if (chain.length > 1) {
+    if (chain.length > MIN_RIVER_STEPS) {
       segments.push(chain);
     }
   }

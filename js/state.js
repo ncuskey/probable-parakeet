@@ -111,13 +111,15 @@ export function setCurrentViewMode(mode) { S.currentViewMode = mode; }
 export function ensureIsWater(cells) {
   if (S.caches.isWater?.length === cells?.length) return S.caches.isWater;
   
-  const sea = S.params.seaLevel;
+  const sea = Number.isFinite(S?.params?.seaLevel) ? S.params.seaLevel : 0.20;
+  
   const out = new Uint8Array(cells?.length || 0);
   
   for (let i = 0; i < out.length; i++) {
     const c = cells[i] || {};
-    const flag = c.water ?? c.isWater ?? (c.high != null ? c.high < sea : false);
-    out[i] = flag ? 1 : 0;
+    const h = (c.high ?? c.h ?? 0);
+    const isWater = (c.water ?? c.isWater ?? (h < sea)) ? 1 : 0;
+    out[i] = isWater;
   }
   
   S.caches.isWater = out;
@@ -150,6 +152,27 @@ export function getWorld() {
     riverSteps: S.caches.riverSteps || null,
     landPaths: S.caches.landPaths || null,
   };
+}
+
+export function computeLandFraction(cells, sea) {
+  let land = 0;
+  for (const c of cells) if ((c.high ?? c.h ?? 0) >= sea) land++;
+  return land / (cells.length || 1);
+}
+
+export function tuneSeaLevelToTarget(cells, { target=0.35, step=0.01, maxIters=40 } = {}) {
+  if (!S.params) S.params = {};
+  if (!Number.isFinite(S.params.seaLevel)) S.params.seaLevel = 0.22;
+  for (let it=0; it<maxIters; it++) {
+    const lf = computeLandFraction(cells, S.params.seaLevel);
+    // Move sea up if too much land, down if too little
+    if (lf > target + 0.02) { S.params.seaLevel += step; }
+    else if (lf < target - 0.02) { S.params.seaLevel -= step; }
+    else break;
+  }
+  // clamp
+  S.params.seaLevel = Math.max(0.02, Math.min(0.80, S.params.seaLevel));
+  return S.params.seaLevel;
 }
 
 

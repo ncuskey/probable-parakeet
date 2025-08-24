@@ -5,10 +5,12 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 ## Features
 
 ### Core Generation
-- **Azgaar-style blob growth** terrain generation with BFS queue expansion
+- **Advanced blob growth** terrain generation with BFS queue expansion and domain warping
+- **Oval-shaped continents** with randomized aspect ratios and rotation
+- **Bounded continent generation** with auto-tuned sea levels and edge falloff masks
 - **Multiple terrain templates**: Volcanic Island (High Island), Low Island, Archipelago, Continental Islands
 - **Template composition** - mountains, hills, ranges, troughs, pits combined for realistic terrain
-- **Fixed coastline ≈ 0.2** with slider override capability
+- **Auto-tuned sea levels** - iterative adjustment to hit target land fraction (~35%)
 - **Coherent landmasses** - no more speckled blobs, produces realistic continents/islands
 
 ### Climate & Biomes
@@ -52,9 +54,12 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 ### Key Algorithms
 - **Voronoi cell generation** with Lloyd relaxation for natural spacing
-- **Azgaar-style blob growth** with BFS queue expansion and sharpness modifiers
+- **Advanced blob growth** with BFS queue expansion, domain warping, and sharpness modifiers
+- **Oval edge masks** - superellipse math with random aspect ratios and rotation
+- **Domain warping** - value noise modulates blob radius to create organic coastlines
 - **Template composition** - mountains, hills, ranges, troughs, pits for realistic terrain
 - **Interior cell seeding** - keeps seeds off borders for coherent landmasses
+- **Auto-tuned sea levels** - iterative adjustment to hit target land fraction
 - **Flood-fill lake detection** with spill level calculation
 - **BFS distance-to-coast** for realistic river flow direction
 - **Wind-biased precipitation** with orographic lift simulation
@@ -67,16 +72,19 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 ## Development Roadmap
 
-This implementation builds on the original Voronoi heightmap demo with several Azgaar-inspired enhancements:
+This implementation builds on the original Voronoi heightmap demo with several advanced terrain generation enhancements:
 
-1. ✅ **Azgaar-style Blob Growth** - BFS queue expansion with template composition
-2. ✅ **Terrain Templates** - Volcanic Island, Continental Islands, Archipelago, Low Island
-3. ✅ **Climate Simulation** - Temperature and precipitation modeling
-4. ✅ **Biome System** - Ecological zone classification and coloring
-5. ✅ **Enhanced Rivers** - Polygonal rendering with higher flux thresholds
-6. ✅ **Lake Systems** - Depression detection and outlet simulation
-7. ✅ **Coastline Detail** - Noise-based coastline perturbation
-8. ✅ **Fixed Coastline** - Default seaLevel = 0.20 with slider override
+1. ✅ **Advanced Blob Growth** - BFS queue expansion with domain warping and template composition
+2. ✅ **Oval Edge Masks** - Superellipse math with random aspect ratios and rotation
+3. ✅ **Bounded Continents** - Auto-tuned sea levels and edge falloff masks
+4. ✅ **Domain Warping** - Value noise modulates blob radius for organic coastlines
+5. ✅ **Terrain Templates** - Volcanic Island, Continental Islands, Archipelago, Low Island
+6. ✅ **Climate Simulation** - Temperature and precipitation modeling
+7. ✅ **Biome System** - Ecological zone classification and coloring
+8. ✅ **Enhanced Rivers** - Polygonal rendering with higher flux thresholds
+9. ✅ **Lake Systems** - Depression detection and outlet simulation
+10. ✅ **Coastline Detail** - Noise-based coastline perturbation
+11. ✅ **Auto-tuned Sea Levels** - Iterative adjustment to hit target land fraction (~35%)
 
 Future enhancements could include:
 - **Cultural features** (cities, roads, borders)
@@ -141,5 +149,5 @@ Cells group must have `id="mapCells"`. Regions group is `#regions`. Fallback lan
 
 In "Terrain" mode, CSS hides `#regions path.fallback-land` so terrain shading remains visible.
 
-**Azgaar-style Pipeline:**
-`ensureHeightsCleared` → `applyTemplate` → `normalizeHeightsIfNeeded` → `thermalErode` → `smoothLand` → `sinkOuterMargin` → `recolor` → `recomputePrecipIfNeeded` → `computeRiverSteps` → `computeRivers` → `computeAndDrawRegions` → `computeRoutes`
+**Advanced Pipeline:**
+`ensureHeightsCleared` → `applyTemplate` → `normalizeHeightsIfNeeded` → `thermalErode` → `smoothLand` → `applyOvalMask` → `tuneSeaLevelToTarget` → `recolor` → `recomputePrecipIfNeeded` → `computeRiverSteps` → `computeRivers` → `computeAndDrawRegions` → `computeRoutes`

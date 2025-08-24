@@ -5,7 +5,9 @@
 This is an interactive, client-side fantasy map generator inspired by Azgaar's Fantasy Map Generator. The application creates procedural terrain using Voronoi diagrams with advanced features including climate simulation, biome generation, and realistic river systems.
 
 **Key Features:**
-- **Azgaar-style blob growth** terrain generation with BFS queue expansion
+- **Advanced blob growth** terrain generation with BFS queue expansion and domain warping
+- **Oval-shaped continents** with randomized aspect ratios and rotation
+- **Bounded continent generation** with auto-tuned sea levels and edge falloff masks
 - Multiple terrain templates (Volcanic Island, Continental Islands, Archipelago, Low Island)
 - Climate simulation with temperature and precipitation modeling
 - Biome classification using Whittaker diagram principles
@@ -89,7 +91,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 ### State Management (`js/state.js`)
 ```javascript
-// Central state bag with getters/setters
+// Central state bag with getters/setters and sea level tuning
 export const S = {
   // Geometry / graph
   width: 1024, height: 768,
@@ -99,7 +101,7 @@ export const S = {
   seed: 12345, rng: mulberry32(12345),
   
   // Tunables / params
-  params: { seaLevel: 0.2, worldType: 'continents', regionCountK: 3 },
+  params: { seaLevel: 0.22, worldType: 'continents', regionCountK: 3 },
   
   // Derived data / caches
   caches: { isWater: null, landPaths: null, precip: null, /* ... */ },
@@ -110,6 +112,18 @@ export const S = {
   // View state
   currentViewMode: 'terrain'
 };
+
+// Sea level auto-tuning functions
+export function computeLandFraction(cells, sea) {
+  // Calculate land percentage for sea level tuning
+}
+
+export function tuneSeaLevelToTarget(cells, { target=0.35, step=0.01, maxIters=40 } = {}) {
+  // Auto-tune sea level to hit target land fraction
+  // Target: 35% land fraction with ±2% tolerance
+  // Step size: 0.01, max iterations: 40
+  // Clamps sea level between 0.02 and 0.80
+}
 
 // Getters/setters for state access
 export function getWorld() { /* ... */ }
@@ -155,38 +169,95 @@ export function repaintCellsForMode(mode) {
 }
 ```
 
-### Terrain System (`js/terrain.js`) - **AZGAAR-STYLE BLOB GROWTH**
+### Terrain System (`js/terrain.js`) - **ADVANCED BLOB GROWTH WITH DOMAIN WARPING**
 ```javascript
-// Azgaar-style blob growth system with BFS queue expansion
+// Advanced blob growth system with BFS queue expansion, domain warping, and oval edge masks
+
+// --------- Math helpers ----------
+function _smooth01(x){ return x<=0?0:x>=1?1:(x*x*(3-2*x)); }
+
+// sample rotated normalized coords in [-1,1] with an inner margin (px)
+function _normUV(cx, cy, W, H, marginPx) {
+  const iw = W - marginPx*2, ih = H - marginPx*2;
+  const x = (cx - marginPx) / Math.max(1, iw) * 2 - 1;
+  const y = (cy - marginPx) / Math.max(1, ih) * 2 - 1;
+  return {u:x, v:y};
+}
+
+// --------- tiny value noise (tileable-enough for our use) ----------
+function _hash(x,y){ // deterministic; uses WORLD dims as salt
+  let h = ((x*73856093) ^ (y*19349663) ^ (WORLD.width|0) ^ ((WORLD.height|0)<<1)) >>> 0;
+  h ^= h<<13; h ^= h>>>17; h ^= h<<5;
+  return (h & 0xfffffff) / 0xfffffff;
+}
+function _lerp(a,b,t){ return a + (b-a)*t; }
+function _noise2(x,y){ // grid value-noise
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi,      yf = y - yi;
+  const v00=_hash(xi,yi), v10=_hash(xi+1,yi), v01=_hash(xi,yi+1), v11=_hash(xi+1,yi+1);
+  const tx = _smooth01(xf), ty = _smooth01(yf);
+  return _lerp(_lerp(v00,v10,tx), _lerp(v01,v11,tx), ty);
+}
+
+// Core blob operations with domain warping
+export function makeBlobField({ startIndex, peak=1, radius=0.925, sharpness=0.08, stop=0.025, warpAmp=0.06, warpFreq=0.0025 }) {
+  // BFS queue expansion with domain warping
+  // Domain warp: vary decay by gentle noise around target neighbors
+  // Noise modulates radius per neighbor: rad = rBase + noise_offset
+  // Clamps radius between 0.80 and 0.99 to prevent extreme values
+  // Breaks up straight coastlines and creates natural variation
+}
+
+// Superellipse membership: |u|^n + |v|^n <= 1 (n ~ 2..3), rotated
+export function applyOvalMask({innerPx=null, ax=1.0, ay=0.7, rot=0.0, n=2.4, pow=1.7} = {}) {
+  // Creates oval-shaped continents with random aspect ratios and rotation
+  // Prevents canvas-aligned coastlines
+  // Uses superellipse math for natural continent shapes
+}
+
+// Legacy rectangular edge mask (kept for compatibility)
+export function applyEdgeMask({ innerMarginPx=null, power=1.6 } = {}) {
+  // Multiply heights by a border mask: 0 at edge -> 1 in interior
+}
 
 // Core blob operations
-function growBlob({ startIndex, peak = 1, radius = 0.94, sharpness = 0.12, stop = 0.01 }) {
-  // BFS queue expansion: children height = parentHeight * radius * modifier
+function opMountain(opts = {}) {
+  const { peak = 1, radius = 0.985, sharpness = 0.06 } = opts;
+  const f = makeBlobField({ startIndex: interiorCellIndex(), peak, radius, sharpness, stop: 0.025, warpAmp:0.06, warpFreq:0.003 });
+  applyFieldAdd(f, 1);
 }
 
-function opMountain({ peak = 1, radius = 0.95, sharpness = 0.12 } = {}) {
-  // Single peak blob growth
-}
-
-function opHill({ peak = 0.5, radius = 0.95, sharpness = 0.10 } = {}) {
-  // Smaller hill blobs
+function opHill(opts = {}) {
+  const { peak = 0.42, radius = 0.985, sharpness = 0.06 } = opts;
+  const f = makeBlobField({ startIndex: interiorCellIndex(), peak, radius, sharpness, stop: 0.025, warpAmp:0.06, warpFreq:0.003 });
+  applyFieldAdd(f, 1);
 }
 
 function opRange({ peak = 0.8, steps = 6, stepRadius = 0.93, sharpness = 0.10 } = {}) {
   // Chain of mountains along a path
 }
 
-function opTrough(args = {}) {
-  // Negative linear features (valleys)
+function opTrough(opts = {}) {
+  const { peak = 0.40, steps = 6, stepRadius = 0.94, sharpness = 0.07, strength = 0.25 } = opts;
+  // Negative linear features (valleys) - tamed parameters to prevent map destruction
 }
 
 function opPit({ depth = 0.35, radius = 0.94, sharpness = 0.10 } = {}) {
   // Negative circular blobs (depressions)
 }
 
-// Azgaar-style templates
+// Advanced templates with oval masks and warped blobs
+export function continentalIslands() {
+  // 3 cores + 28-40 hills + 2 troughs + oval edge mask
+  // Cores: 3 interior darts with warped blob growth
+  // Hills: 28 + (RNG()*12) hills with lower peaks (0.35 + RNG()*0.09)
+  // Troughs: 2 gentle troughs with reduced strength (0.25)
+  // Oval mask: random aspect ratios (ax: 0.80-1.05, ay: 0.55-0.80) and rotation
+  // Auto-tuned sea level to target ~35% land fraction
+}
+
 export function volcanicIsland() {
-  // "High Island": mountain + 15 hills + 2 ranges + 2 troughs + 3 pits
+  // "High Island": mountain + hills + ranges + troughs + pits
 }
 
 export function lowIsland() {
@@ -194,11 +265,7 @@ export function lowIsland() {
 }
 
 export function archipelago() {
-  // mountain + 15 hills + 2 troughs + 8 pits
-}
-
-export function continentalIslands() {
-  // mountain + 5 troughs (long linear features)
+  // mountain + hills + troughs + pits
 }
 
 // Template registry and application
@@ -207,7 +274,7 @@ export function registerDefaultTemplates() {
 }
 
 export function applyTemplate(tplKey, uiVals = {}) {
-  // Applies Azgaar-style blob templates
+  // Applies advanced blob templates with domain warping
 }
 
 export function ensureHeightsCleared() {
@@ -221,6 +288,20 @@ export function normalizeHeightsIfNeeded({ minMax = 0.3, maxTarget = 0.85 } = {}
 
 export function sinkOuterMargin(pct = 0.04, amount = 0.15) {
   // Gentle post-pass to avoid border spill
+}
+
+export function capHeights(maxH=0.92){
+  // Optional height capping to prevent plateau-y interiors
+}
+
+// Interior seeding with stronger margins
+function interiorCellIndex(minEdgePx = Math.min(WORLD.width, WORLD.height) * 0.10) {
+  // Keeps seeds further from borders (increased from 0.06 to 0.10)
+}
+
+export function interiorDarts(k, minDistPx) {
+  const minD2 = (minDistPx ?? Math.min(WORLD.width, WORLD.height) * 0.22) ** 2;
+  // Increased minimum distance from 0.18 to 0.22 for better continent separation
 }
 ```
 
@@ -477,16 +558,16 @@ window.generate = async function() {
 
 ## Generation Pipeline
 
-### **AZGAAR-STYLE BLOB GROWTH PIPELINE**
-The main generation pipeline follows this exact order with Azgaar-style blob growth:
+### **ADVANCED BLOB GROWTH PIPELINE WITH OVAL MASKS**
+The main generation pipeline follows this exact order with advanced blob growth:
 
 1. **ensureHeightsCleared** - Clear height data for new generation
-2. **applyTemplate** - Apply Azgaar-style blob templates (volcanicIsland, continentalIslands, etc.)
+2. **applyTemplate** - Apply advanced blob templates with domain warping
 3. **normalizeHeightsIfNeeded** - Only if template ends up too flat (max<0.3)
 4. **thermalErode** - Thermal erosion simulation
 5. **smoothLand** - Land smoothing
-6. **sinkOuterMargin** - Gentle post-pass to avoid border spill
-7. **Fixed coastline** - Set seaLevel = 0.20 (slider overrides)
+6. **applyOvalMask** - Oval edge mask with random aspect ratios and rotation
+7. **Auto-tune sea level** - tuneSeaLevelToTarget() to hit ~35% land fraction
 8. **recolor** - Terrain painting (logs "Land fraction ~ ...")
 9. **recomputePrecipIfNeeded** - Precipitation computation
 10. **computeRiverSteps** - River steps computation (logs "⏱ Compute river steps (BFS): ...")
@@ -503,8 +584,18 @@ try {
   normalizeHeightsIfNeeded();
   thermalErode(talus, thermalStrength, 2);
   smoothLand(smoothAlpha);
-  sinkOuterMargin(0.04, 0.15);
+  // pick a random oval aspect & rotation so coastlines aren't canvas-aligned
+  const A = 0.80 + RNG()*0.25;        // ax
+  const B = 0.55 + RNG()*0.25;        // ay
+  const TH = RNG() * Math.PI;         // rotation
+  applyOvalMask({ ax:A, ay:B, rot:TH, n:2.6, pow:1.9 });
 } catch (e) { console.warn('[generate] terrain generation failed', e); }
+
+try { 
+  // Auto-tune sea level to hit target land fraction
+  const tunedSea = tuneSeaLevelToTarget(getWorld().cells, { target: 0.35, step: 0.01 });
+  console.log('[sea] tuned to', tunedSea);
+} catch (e) { console.warn('[generate] sea level tuning failed', e); }
 
 try { 
   await recolor(run);
@@ -549,12 +640,17 @@ body.view-mode-terrain #regions path.fallback-land {
 - **Spatial indexing** for efficient neighbor lookups
 - **Cell polygon generation** with proper edge handling
 
-### 2. **AZGAAR-STYLE TERRAIN GENERATION**
+### 2. **ADVANCED TERRAIN GENERATION WITH DOMAIN WARPING**
 - **Blob growth with BFS queue** - children height = parentHeight * radius * modifier
+- **Domain warping** - noise modulates radius per neighbor to break straight coastlines
+- **Oval edge masks** - superellipse math with random aspect ratios and rotation
+- **Bounded continent generation** - interior seeding with stronger margins (0.10 vs 0.06)
+- **Auto-tuned sea levels** - iterative adjustment to hit target land fraction (~35%)
+- **Tamed parameters** - reduced hill peaks and trough strength for natural decoration
 - **Template composition** - mountains, hills, ranges, troughs, pits combined
 - **Interior cell seeding** - keeps seeds off borders for coherent landmasses
 - **Sharpness modifiers** - random variation around ~1 for natural appearance
-- **Fixed coastline ≈ 0.2** - with slider override capability
+- **Fixed coastline ≈ 0.22** - with slider override capability
 - **Thermal erosion** simulation
 - **Water border masking** for realistic coastlines
 - **Lake detection** with spill level calculation
@@ -632,9 +728,16 @@ body.view-mode-terrain #regions path.fallback-land {
 - **Error Recovery** - Fixed syntax and runtime errors with proper fallbacks
 - **AZGAAR-STYLE BLOB GROWTH** - Complete implementation of Azgaar's proven terrain algorithm
 - **Template Composition** - volcanicIsland, continentalIslands, archipelago, lowIsland templates
-- **Fixed Coastline** - Default seaLevel = 0.20 with slider override
+- **Fixed Coastline** - Default seaLevel = 0.22 with slider override
 - **Coherent Landmasses** - No more speckled blobs, produces realistic continents/islands
 - **Higher River Thresholds** - 35% flux threshold for fewer, larger rivers
+- **FLOOD FILL FIXES** - Fixed makeBlobField to prevent 1.0 plateau and ensure amplitude decay
+- **BOUNDED CONTINENTS** - Stronger interior seeding, edge falloff masks, auto-tuned sea levels
+- **OVAL EDGE MASKS** - Superellipse math with random aspect ratios and rotation
+- **DOMAIN WARPING** - Value noise modulates blob radius to create organic coastlines
+- **AUTO-TUNED SEA LEVELS** - Iterative adjustment to hit target land fraction (~35%)
+- **TAMED PARAMETERS** - Reduced hill peaks and trough strength for natural decoration
+- **ENHANCED TEMPLATES** - continentalIslands with 3 cores, 28-40 hills, oval masks
 - Core terrain generation with multiple templates
 - Climate simulation and biome classification
 - River generation with polygonal rendering
@@ -655,10 +758,13 @@ body.view-mode-terrain #regions path.fallback-land {
 - **Dev guard rails** - Sanity checks for missing layers
 - **CSS integration** - Proper fallback land hiding in terrain mode
 - **Documentation updates** - README and codemap reflect all changes
-- **Azgaar-style blob growth** - Replaced plate/noise approach with proven BFS algorithm
+- **Advanced blob growth** - Domain warping, oval masks, bounded continents
 - **Template mapping** - "continents" maps to continentalIslands()
-- **Generation order** - Proper sequencing with normalizeHeightsIfNeeded and sinkOuterMargin
+- **Generation order** - Proper sequencing with oval masks and sea level tuning
 - **River optimization** - Higher thresholds for fewer, larger rivers
+- **Sea level auto-tuning** - computeLandFraction() and tuneSeaLevelToTarget() functions
+- **Value noise system** - Deterministic hash-based noise for domain warping
+- **Oval mask math** - Superellipse membership with rotation and aspect ratios
 
 ### In Progress 🔄
 - Route system refinements (per TODO.md)
