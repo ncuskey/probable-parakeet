@@ -2,7 +2,7 @@
 import { setViewMode } from './render.js';
 import { recolor } from './recolor.js';
 import { applyTemplate } from './terrain.js';
-import { S, setSeed, setParam, getParam } from './state.js';
+import { S, setSeed, setParam, getParam, state } from './state.js';
 import { toggleSettings } from './ui-overlays.js';
 import { regenerateNames } from './legacy-main.js';
 
@@ -98,6 +98,24 @@ export function wireUI() {
   // Regenerate names (legacy helper, if still present)
   bind('regenNamesBtn', 'click', () => {
     try { regenerateNames?.(); } catch (e) { console.warn('[ui] regenerateNames failed', e); }
+  });
+
+  // NEW: Random map button for Azgaar-Lite
+  bind('randomMapBtn', 'click', async () => {
+    try { 
+      // Switch to Azgaar-Lite mode with random hills
+      state.terrainMode = 'azgaar-lite';
+      state.randomSmallHills = 11; // like the fiddle's "Random map"
+      
+      const generate = window.generate;
+      if (typeof generate === 'function') {
+        await generate(); 
+      } else {
+        console.warn('[ui] generate function not available');
+      }
+    } catch (e) { 
+      console.warn('[ui] random map failed', e); 
+    }
   });
 
   // Export buttons - handle based on text content since we removed onclick attributes

@@ -89,3 +89,16 @@ export function computeCoastAndDistance(mesh, isLand, isOcean) {
 
   return { isCoast, distToCoast };
 }
+
+export function computeShallow(mesh, isLand, isOcean) {
+  const N = isLand.length;
+  const shallow = new Uint8Array(N);
+  const ns = mesh.cells.neighbors;
+  for (let i = 0; i < N; i++) {
+    if (!isOcean[i]) continue;
+    for (let k = 0; k < ns[i].length; k++) {
+      if (isLand[ns[i][k]]) { shallow[i] = 1; break; }
+    }
+  }
+  return shallow;
+}

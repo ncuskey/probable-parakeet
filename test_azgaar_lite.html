@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Azgaar-Lite Test</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+    .test-container { max-width: 1200px; margin: 0 auto; }
+    .controls { margin-bottom: 20px; }
+    button { margin: 5px; padding: 10px 15px; }
+    svg { border: 1px solid #ccc; }
+    .status { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <div class="test-container">
+    <h1>Azgaar-Lite Baseline Generator Test</h1>
+    
+    <div class="controls">
+      <button id="generateBtn">Generate Azgaar-Lite</button>
+      <button id="randomMapBtn">Random Map (11 hills)</button>
+      <button id="switchModeBtn">Switch to Current Mode</button>
+    </div>
+    
+    <div class="status" id="status">Ready to test...</div>
+    
+    <svg id="map" width="1200" height="800" viewBox="0 0 1200 800"></svg>
+  </div>
+
+  <!-- D3 v7 (uses d3.pointer and d3-delaunay for Voronoi) -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  
+  <!-- Test script -->
+  <script type="module">
+    import { state } from './js/state.js';
+    import { generateAzgaarLite } from './js/generators/azgaar-lite.js';
+    import { renderAzgaarLite } from './js/render/azgaar-lite-svg.js';
+
+    const status = document.getElementById('status');
+    const svg = document.getElementById('map');
+
+    function updateStatus(msg) {
+      status.textContent = msg;
+      console.log(msg);
+    }
+
+    async function testAzgaarLite() {
+      try {
+        updateStatus('Generating Azgaar-Lite world...');
+        const start = performance.now();
+        
+        const world = generateAzgaarLite();
+        renderAzgaarLite(svg, world);
+        
+        const time = performance.now() - start;
+        updateStatus(`✅ Azgaar-Lite generated in ${time.toFixed(1)}ms - ${world.polygons.length} cells, ${world.coastLoops.length} coast loops`);
+        
+        // Log some stats
+        const landCount = world.isLand.reduce((a,b) => a + b, 0);
+        const oceanCount = world.isOcean.reduce((a,b) => a + b, 0);
+        console.log(`Land: ${landCount}, Ocean: ${oceanCount}, Total: ${world.polygons.length}`);
+        
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`);
+        console.error(error);
+      }
+    }
+
+    async function testRandomMap() {
+      try {
+        updateStatus('Generating Random Map (11 hills)...');
+        const start = performance.now();
+        
+        const world = generateAzgaarLite({ randomSmallHills: 11 });
+        renderAzgaarLite(svg, world);
+        
+        const time = performance.now() - start;
+        updateStatus(`✅ Random Map generated in ${time.toFixed(1)}ms - ${world.polygons.length} cells, ${world.coastLoops.length} coast loops`);
+        
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`);
+        console.error(error);
+      }
+    }
+
+    function switchMode() {
+      state.terrainMode = state.terrainMode === 'azgaar-lite' ? 'current' : 'azgaar-lite';
+      updateStatus(`Switched to ${state.terrainMode} mode`);
+    }
+
+    // Wire up buttons
+    document.getElementById('generateBtn').addEventListener('click', testAzgaarLite);
+    document.getElementById('randomMapBtn').addEventListener('click', testRandomMap);
+    document.getElementById('switchModeBtn').addEventListener('click', switchMode);
+
+    // Initial test
+    testAzgaarLite();
+  </script>
+</body>
+</html>

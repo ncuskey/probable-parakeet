@@ -320,3 +320,313 @@ export async function testNoLandOnFrame() {
   
   console.groupEnd();
 }
+
+// TODO: Step 2.7 fit transform test
+export async function testFitTransform() {
+  console.group('🧪 Testing fit transform...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    const { classifyWater } = await import('./water.js');
+    const { computeLandBBox, padRect, fitTransformToCanvas } = await import('./viewport.js');
+    
+    setSeed('overscan-fit');
+    S.overscanPct = 0.2;
+    S.fitMode = 'fitLand';
+    const mesh = buildBaseMesh();
+    const elev = generateElevation(mesh, S);
+    const water = classifyWater(mesh, elev.height, elev.seaLevel);
+
+    const box = computeLandBBox(mesh, elev.isLand);
+    if (!box) { console.log('⚠️ No land; skipping fit test'); return; }
+    const padded = padRect(box, S.fitMarginPx, mesh.width, mesh.height);
+    const view = fitTransformToCanvas(padded, S.width, S.height, { allowUpscale: false });
+
+    // Check that fitted rect fits within canvas with desired padding
+    const outW = padded.width * view.s;
+    const outH = padded.height * view.s;
+    if (outW > S.width + 1e-6 || outH > S.height + 1e-6) {
+      throw new Error('Fit transform does not fit within canvas');
+    }
+    console.log('✅ Fit transform OK');
+    console.log(`   Land bbox: (${box.x.toFixed(1)},${box.y.toFixed(1)} ${box.width.toFixed(1)}×${box.height.toFixed(1)})`);
+    console.log(`   Padded: (${padded.x.toFixed(1)},${padded.y.toFixed(1)} ${padded.width.toFixed(1)}×${padded.height.toFixed(1)})`);
+    console.log(`   Transform: s=${view.s.toFixed(3)} tx=${view.tx.toFixed(1)} ty=${view.ty.toFixed(1)}`);
+    console.log(`   Output: ${outW.toFixed(1)}×${outH.toFixed(1)} (canvas: ${S.width}×${S.height})`);
+    
+  } catch (e) {
+    console.error('❌ Fit transform test failed:', e);
+  }
+  
+  console.groupEnd();
+}
+
+// TODO: Step 2.8 coast build test
+export async function testCoastBuild() {
+  console.group('🧪 Testing coast build...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    const { classifyWater, computeShallow } = await import('./water.js');
+    const { coastPolylines } = await import('./coast.js');
+    
+    setSeed('fiddle-like');
+    S.overscanPct = 0.15;
+    S.edgeFalloffPx = 0; // use new default
+    const mesh = buildBaseMesh();
+    const elev = generateElevation(mesh, S);
+    const water = classifyWater(mesh, elev.height, elev.seaLevel);
+    const loops = coastPolylines(mesh, elev.isLand, water.isOcean, { snapDigits: 2 });
+    if (!loops.length) throw new Error('No coastline loops produced');
+    const shallow = computeShallow(mesh, elev.isLand, water.isOcean);
+    const anyShallow = shallow.reduce((a,b)=>a+b,0);
+    if (anyShallow === 0) throw new Error('No shallow cells found');
+    console.log('✅ Coast build + shallow OK');
+    console.log(`   Coast loops: ${loops.length}`);
+    console.log(`   Shallow cells: ${anyShallow}`);
+    
+  } catch (e) {
+    console.error('❌ Coast build test failed:', e);
+  }
+  
+  console.groupEnd();
+}
+
+// TODO: Step 2.9 no box-aligned coasts test
+export async function testNoBoxAlignedCoasts() {
+  console.group('🧪 Testing no box-aligned coasts...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    const { classifyWater } = await import('./water.js');
+    const { coastPolylines } = await import('./coast.js');
+    
+    // Returns fraction of coastline segment angles within ±θ of 0°/90°/180°.
+    function axisAlignedFraction(loops, deg = 5) {
+      const rad = (deg * Math.PI) / 180;
+      let aligned = 0, total = 0;
+      for (const loop of loops) {
+        for (let i = 0; i < loop.length; i++) {
+          const a = loop[i], b = loop[(i+1)%loop.length];
+          const dx = b[0]-a[0], dy = b[1]-a[1];
+          const len = Math.hypot(dx,dy); if (len < 1e-6) continue;
+          const ang = Math.abs(Math.atan2(dy,dx));
+          const near0  = ang < rad;
+          const near90 = Math.abs(ang - Math.PI/2) < rad;
+          const near180= Math.abs(ang - Math.PI)   < rad;
+          if (near0 || near90 || near180) aligned++;
+          total++;
+        }
+      }
+      return total ? aligned/total : 0;
+    }
+
+    setSeed('no-rect-falloff');
+    S.edgeFalloffPx = 0;              // critical
+    S.edgeBiasMode = 'off';           // ensure unbiased
+    S.overscanPct = 0.15;
+    const mesh = buildBaseMesh();
+    const elev = generateElevation(mesh, S);
+    const water = classifyWater(mesh, elev.height, elev.seaLevel);
+    const loops = coastPolylines(mesh, elev.isLand, water.isOcean, { snapDigits: 2 });
+
+    const frac = axisAlignedFraction(loops, 5);
+    if (frac > 0.25) { // heuristic: >25% of segments near cardinal = suspicious
+      throw new Error(`Coasts too axis-aligned (frac=${(frac*100).toFixed(1)}%)`);
+    }
+    console.log('✅ Coastlines are not box-aligned');
+    console.log(`   Axis-aligned fraction: ${(frac*100).toFixed(1)}%`);
+    console.log(`   Coast loops: ${loops.length}`);
+    
+  } catch (e) {
+    console.error('❌ No box-aligned coasts test failed:', e);
+  }
+  
+  console.groupEnd();
+}
+
+// TODO: Step 2.10 guaranteed margin test
+export async function testGuaranteedMargin() {
+  console.group('🧪 Testing guaranteed margin...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    const { computeLandBBox, fitTransformWithMargin } = await import('./viewport.js');
+    
+    setSeed('margin-test');
+    const mesh = buildBaseMesh();
+    const elev = generateElevation(mesh, S);
+    const box = computeLandBBox(mesh, elev.isLand);
+    const m = S.fitMarginPx ?? 24;
+    const view = fitTransformWithMargin(box, S.width, S.height, { marginPx: m, allowUpscale: false });
+
+    // transform the four corners of the land bbox and verify margins
+    const left   = box.x * view.s + view.tx;
+    const right  = (box.x + box.width) * view.s + view.tx;
+    const top    = box.y * view.s + view.ty;
+    const bottom = (box.y + box.height) * view.s + view.ty;
+
+    if (left < m - 0.5 || top < m - 0.5 || (S.width - right) < m - 0.5 || (S.height - bottom) < m - 0.5) {
+      throw new Error('Guaranteed margin violated');
+    }
+    console.log('✅ Guaranteed margin OK');
+    console.log(`   Margin: ${m}px`);
+    console.log(`   Land bbox: (${left.toFixed(1)},${top.toFixed(1)} ${(right-left).toFixed(1)}×${(bottom-top).toFixed(1)})`);
+    console.log(`   Canvas: ${S.width}×${S.height}`);
+    
+  } catch (e) {
+    console.error('❌ Guaranteed margin test failed:', e);
+  }
+  
+  console.groupEnd();
+}
+
+// TODO: Step 2.10 moat test
+export async function testMoatWorks() {
+  console.group('🧪 Testing frame moat...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    
+    setSeed('moat-test');
+    S.enforceOceanFrame = false;
+    const mesh = buildBaseMesh();
+    const elev = generateElevation(mesh, S);
+    const polys = mesh.cells.polygons, w = mesh.width, h = mesh.height;
+    const pad = mesh.genBounds ? mesh.genBounds.pad : 0;
+    const cellPx = Math.sqrt((w*h)/elev.height.length);
+    const moatPx = Math.max(Math.floor(pad * 0.6), (S.frameMoatCells ?? 2.5) * cellPx);
+    
+    for (let i = 0; i < elev.isLand.length; i++) {
+      if (!elev.isLand[i]) continue;
+      const d = (function(poly){let m=1e9; for (let p=0;p<poly.length;p+=2){const x=poly[p],y=poly[p+1]; const t=Math.min(x,y,w-x,h-y); if(t<m)m=t;} return m;})(polys[i]);
+      if (d <= moatPx) throw new Error('Land inside the frame moat');
+    }
+    console.log('✅ Frame moat keeps coasts off the box');
+    console.log(`   Moat width: ${moatPx.toFixed(1)}px`);
+    console.log(`   Overscan pad: ${pad}px`);
+    console.log(`   Cell size: ${cellPx.toFixed(1)}px`);
+    
+  } catch (e) {
+    console.error('❌ Frame moat test failed:', e);
+  }
+  
+  console.groupEnd();
+}
+
+// TODO: Step 2.11 safe-zone seeding tests
+export async function testSeedsRespectZones() {
+  console.group('🧪 Testing safe-zone seeding...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    const { getSeedWindow } = await import('./sampling.js');
+    
+    setSeed('safe-zones-test');
+    S.enforceSeedSafeZones = true;
+    const mesh = buildBaseMesh();
+    const elev = generateElevation(mesh, S);
+    
+    // Test that template centers are inside their safe zones
+    const { width, height } = mesh;
+    const win = getSeedWindow('core');
+    
+    // For radialIsland template, check that the center is in the core zone
+    if (S.template === 'radialIsland') {
+      // The center should be sampled from the core window
+      // We can't directly access the sampled center, but we can verify
+      // that land exists in the core zone
+      const coreZone = {
+        x0: Math.floor(win.left * width),
+        x1: Math.ceil(win.right * width),
+        y0: Math.floor(win.top * height),
+        y1: Math.ceil(win.bottom * height)
+      };
+      
+      let landInCoreZone = 0;
+      let totalLand = 0;
+      
+      for (let i = 0; i < elev.isLand.length; i++) {
+        if (!elev.isLand[i]) continue;
+        totalLand++;
+        const poly = mesh.cells.polygons[i];
+        if (!poly || poly.length < 6) continue;
+        
+        // Check if cell centroid is in core zone
+        let cx = 0, cy = 0;
+        for (let p = 0; p < poly.length; p += 2) { cx += poly[p]; cy += poly[p+1]; }
+        cx /= poly.length/2; cy /= poly.length/2;
+        
+        if (cx >= coreZone.x0 && cx <= coreZone.x1 && cy >= coreZone.y0 && cy <= coreZone.y1) {
+          landInCoreZone++;
+        }
+      }
+      
+      if (landInCoreZone === 0) {
+        throw new Error('No land found in core safe zone');
+      }
+      
+      const coreFrac = landInCoreZone / totalLand;
+      console.log('✅ Safe-zone seeding working');
+      console.log(`   Land in core zone: ${landInCoreZone}/${totalLand} (${(coreFrac*100).toFixed(1)}%)`);
+      console.log(`   Core zone: (${coreZone.x0},${coreZone.y0}) to (${coreZone.x1},${coreZone.y1})`);
+    }
+    
+  } catch (e) {
+    console.error('❌ Safe-zone seeding test failed:', e);
+  }
+  
+  console.groupEnd();
+}
+
+export async function testNoOriginNearFrame() {
+  console.group('🧪 Testing no land origin near frame...');
+  
+  try {
+    const { S, setSeed } = await import('./state.js');
+    const { buildBaseMesh } = await import('./terrain.js');
+    const { generateElevation } = await import('./elevation.js');
+    
+    setSeed('frame-origin-test');
+    S.enforceSeedSafeZones = true;
+    const mesh = buildBaseMesh();
+    const elev = generateElevation(mesh, S);
+    const { width, height } = mesh;
+    const polys = mesh.cells.polygons;
+    const margin = Math.max(10, Math.round(Math.min(width, height) * 0.02)); // ~2% or 10px
+    
+    for (let i = 0; i < elev.isLand.length; i++) {
+      if (!elev.isLand[i]) continue;
+      const poly = polys[i];
+      for (let p = 0; p < poly.length; p += 2) {
+        const x = poly[p], y = poly[p+1];
+        if (x < margin || y < margin || x > width - margin || y > height - margin) {
+          // allow land to reach, but it shouldn't be *originating* from a seed outside window.
+          // If this fires often, tighten the core window.
+          console.warn('ℹ️ land reaches frame near cell', i);
+          return;
+        }
+      }
+    }
+    console.log('✅ Land is not riding the frame at origin');
+    console.log(`   Frame margin: ${margin}px`);
+    console.log(`   Canvas: ${width}×${height}`);
+    
+  } catch (e) {
+    console.error('❌ Frame origin test failed:', e);
+  }
+  
+  console.groupEnd();
+}

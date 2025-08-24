@@ -1,5 +1,78 @@
 # TODO List
 
+## ✅ COMPLETED: Azgaar-Lite Baseline Refactor
+
+**Goal**: Create a minimal generator that matches the JSFiddle behavior 1:1 so we can lock terrain fundamentals before layering features.
+
+### Phase 1: State Configuration ✅
+- [x] Added terrainMode switch to js/state.js ('azgaar-lite' | 'current')
+- [x] Added Azgaar-lite parameters (poissonRadius, blob settings, seaLevel, etc.)
+- [x] Set default terrainMode to 'azgaar-lite'
+- [x] Updated canvas dimensions to 1200x800
+
+### Phase 2: Azgaar-Lite Generator ✅
+- [x] Created js/generators/azgaar-lite.js with minimal, JSFiddle-faithful terrain
+- [x] Implemented Poisson disc sampling (ported from fiddle)
+- [x] Implemented Voronoi via d3-delaunay
+- [x] Implemented blob growth (BFS over neighbors)
+- [x] Implemented feature marking (border flood like fiddle)
+- [x] Implemented coastlines (land↔water edges)
+- [x] Implemented edge chaining and Chaikin smoothing
+- [x] No overscan, no falloff, no moat, no erosion, no tuning
+
+### Phase 3: Minimal Renderer ✅
+- [x] Created js/render/azgaar-lite-svg.js
+- [x] Implemented ocean mask with island clipping
+- [x] Implemented spectral color mapping for land cells
+- [x] Implemented coastline rendering
+- [x] Implemented shallow hatch pattern
+- [x] Matches JSFiddle visual behavior
+
+### Phase 4: Pipeline Integration ✅
+- [x] Updated js/app.js with terrain mode switch
+- [x] Added imports for Azgaar-Lite generator and renderer
+- [x] Wired generateWorld() to use Azgaar-Lite when terrainMode === 'azgaar-lite'
+- [x] Preserved existing pipeline for terrainMode === 'current'
+
+### Phase 5: UI Integration ✅
+- [x] Added random map button to js/ui.js
+- [x] Added random map button to index.html
+- [x] Implemented one-button "random map" with 11 hills
+- [x] Added mode switching functionality
+
+### Phase 6: Testing ✅
+- [x] Created test_azgaar_lite.html for standalone testing
+- [x] Verified syntax of all new files
+- [x] Tested Azgaar-Lite generation and rendering
+- [x] Tested random map functionality
+
+### Acceptance Criteria ✅
+- [x] Azgaar-Lite generator matches JSFiddle behavior 1:1
+- [x] Minimal implementation with no extras (no overscan, falloff, moat, erosion, tuning)
+- [x] Proper terrain mode switching (azgaar-lite vs current)
+- [x] One-button "random map" functionality
+- [x] Clean integration with existing codebase
+- [x] All parameters configurable via state
+- [x] Comprehensive testing validates functionality
+
+### Summary ✅
+**Azgaar-Lite Baseline Complete!** 
+
+Successfully implemented:
+- Minimal, JSFiddle-faithful terrain generator (`js/generators/azgaar-lite.js`)
+- Poisson disc sampling with Voronoi tessellation
+- Blob growth height generation with central island + random hills
+- Border-flood ocean classification
+- Coastline detection and Chaikin smoothing
+- Minimal SVG renderer with ocean masking (`js/render/azgaar-lite-svg.js`)
+- Terrain mode switching in app pipeline (`js/app.js`)
+- UI integration with random map button (`js/ui.js`, `index.html`)
+- Standalone test page (`test_azgaar_lite.html`)
+
+The system now provides a clean baseline for terrain fundamentals that matches the JSFiddle behavior exactly, allowing for feature layering on top of this stable foundation.
+
+---
+
 ## P6 — Yielding in burg seeding
 
 - [x] Open seedBurgCandidates and make it async
@@ -415,3 +488,294 @@ Successfully implemented:
 - Comprehensive testing validates no land touches frame when enabled
 
 The system now ensures no land cells touch the map border when frame safety is enabled, providing clean ocean edges and preventing clipped land masses.
+
+---
+
+# TODO: Step 2.7 - Overscan + Fit-to-Canvas (no clipped coasts)
+
+## Phase 1: State Configuration
+- [x] Add overscan generation knobs to js/state.js
+- [x] Add fit-to-canvas transform parameters
+- [x] Set reasonable defaults for overscan and fit behavior
+
+## Phase 2: Overscan Generation
+- [x] Update buildBaseMesh in js/terrain.js to use overscan generation box
+- [x] Compute overscan size based on percentage or absolute pixels
+- [x] Adjust cell spacing to maintain target density in larger area
+- [x] Stash generation bounds for later transforms
+
+## Phase 3: Viewport Utilities
+- [x] Create js/viewport.js with viewport utilities
+- [x] Implement computeLandBBox function
+- [x] Implement padRect function for margin handling
+- [x] Implement fitTransformToCanvas function
+- [x] Implement applySvgGroupTransform function
+
+## Phase 4: Pipeline Integration
+- [x] Wire fit-to-canvas transform into app.js orchestrator
+- [x] Compute land bounding box after water classification
+- [x] Apply padding and fit transform
+- [x] Stash view transform in state for renderers
+- [x] Apply transform to SVG world group if present
+
+## Phase 5: Testing & Validation
+- [x] Add testFitTransform to js/selftest.js
+- [x] Verify fit transform keeps land within canvas bounds
+- [x] Test overscan generation with different parameters
+- [x] Ensure integration with existing water classification
+
+## Acceptance Criteria
+- [x] Overscan generation creates larger world box (15% per side by default)
+- [x] Fit-to-canvas transform finds land bbox and fits it to canvas with margin
+- [x] Transform is applied at render time without data mutation
+- [x] No land is clipped at canvas edges when fit mode is enabled
+- [x] All parameters are configurable via state
+- [x] Comprehensive testing validates fit transform behavior
+
+## Summary
+✅ **Step 2.7 Complete!** 
+
+Successfully implemented:
+- Overscan generation with configurable padding (percentage or absolute pixels)
+- Fit-to-canvas transform that finds land bounding box and fits it to canvas
+- Viewport utilities for computing transforms and applying them to SVG groups
+- Integration with existing elevation and water classification pipeline
+- Comprehensive testing validates transform behavior and canvas bounds
+- All parameters configurable via state (overscanPct, fitMode, fitMarginPx, allowUpscale)
+
+The system now generates mesh/elevation on an enlarged generation box and applies a transform to fit all land inside the canvas with a margin, preventing clipped coasts and providing better world composition.
+
+---
+
+# TODO: Step 2.8 - Azgaar-style coastlines: seed window + shallow shelf + coast mask
+
+## Phase 1: State Configuration
+- [x] Add knobs and defaults to js/state.js
+- [x] Add edge falloff parameters for central bias
+- [x] Add seed window configuration for template centers
+- [x] Add coast smoothing and rendering toggles
+
+## Phase 2: Template Center Sampling
+- [x] Add sampleInWindow function to js/elevation.js
+- [x] Update generateElevation to use windowed centers
+- [x] Implement deterministic center sampling for radialIsland and twinContinents
+- [x] Maintain compatibility with existing continentalGradient template
+
+## Phase 3: Shallow Shelf Ring
+- [x] Add computeShallow function to js/water.js
+- [x] Implement ocean cells adjacent to land detection
+- [x] Return shallow mask for rendering
+
+## Phase 4: Coastline Stitching & Smoothing
+- [x] Create js/coast.js with coastline utilities
+- [x] Implement coastPolylines function for land↔ocean edge detection
+- [x] Implement smoothClosedChaikin function for coastline smoothing
+- [x] Chain edges into closed polylines with vertex deduplication
+
+## Phase 5: SVG Rendering Helpers
+- [x] Create js/render/svg.js with SVG utilities
+- [x] Implement ensureSvgScene for mask and layer setup
+- [x] Implement updateOceanMaskWithIslands for ocean masking
+- [x] Implement drawCoastlines and drawShallowCells for rendering
+- [x] Add shallow hatch pattern for visual distinction
+
+## Phase 6: Pipeline Integration
+- [x] Wire coastline processing into app.js orchestrator
+- [x] Add shallow shelf computation to pipeline
+- [x] Integrate coast polylines generation and smoothing
+- [x] Add SVG scene setup and rendering
+- [x] Apply world transform to rendered elements
+
+## Phase 7: Testing & Validation
+- [x] Add testCoastBuild to js/selftest.js
+- [x] Verify coastline loops are produced
+- [x] Verify shallow cells are detected
+- [x] Test integration with existing pipeline
+
+## Acceptance Criteria
+- [x] Template centers sampled from central window (prevents edge riding)
+- [x] Shallow shelf ring computed (ocean cells adjacent to land)
+- [x] Coastline polylines built from land↔ocean Voronoi edges
+- [x] Coastlines smoothed with Chaikin algorithm
+- [x] Ocean mask prevents blue overrun of land
+- [x] Pretty coastlines drawn with proper styling
+- [x] All parameters configurable via state
+- [x] Comprehensive testing validates coastline generation
+
+## Summary
+✅ **Step 2.8 Complete!** 
+
+Successfully implemented:
+- Azgaar-style central bias with seed window sampling
+- Shallow shelf ring detection (ocean cells adjacent to land)
+- Coastline polylines from land↔ocean Voronoi edges
+- Chaikin smoothing for beautiful coastlines
+- SVG mask system to prevent ocean overrun
+- Comprehensive rendering pipeline with shallow patterns
+- Integration with existing overscan and fit-to-canvas system
+- All parameters configurable via state (seedWindow, coastSmoothIters, etc.)
+
+The system now generates Azgaar-style coastlines with proper central bias, shallow shelf rings, and beautiful smoothed coastlines that prevent ocean overrun of land masses.
+
+---
+
+# TODO: Step 2.9 - Remove rectangular falloff (no more box-aligned coasts)
+
+## Phase 1: State Configuration
+- [x] Update knobs in js/state.js
+- [x] Set edgeFalloffPx = 0 to disable rectangular falloff
+- [x] Add optional noisy edge bias parameters
+- [x] Set edgeBiasMode = 'off' by default
+
+## Phase 2: Elevation Generation Update
+- [x] Remove rectangular edge falloff from js/elevation.js
+- [x] Add optional noisy edge bias function
+- [x] Replace rectEdgeWeight with noisyEdgeWeight when enabled
+- [x] Keep overscan + border flood + frame safety
+
+## Phase 3: Testing & Validation
+- [x] Add testNoBoxAlignedCoasts to js/selftest.js
+- [x] Implement axis-aligned fraction detection
+- [x] Verify coastlines are not box-aligned
+- [x] Update existing tests to use new defaults
+
+## Acceptance Criteria
+- [x] Rectangular falloff disabled by default (edgeFalloffPx = 0)
+- [x] No box-parallel iso-lines in coastlines
+- [x] Optional noisy edge bias available (edgeBiasMode = 'noisy')
+- [x] Overscan + border flood + frame safety preserved
+- [x] Comprehensive testing validates no box-aligned coasts
+- [x] All parameters configurable via state
+
+## Summary
+✅ **Step 2.9 Complete!** 
+
+Successfully implemented:
+- Disabled rectangular edge falloff by default (edgeFalloffPx = 0)
+- Removed box-parallel iso-lines from coastlines
+- Added optional noisy edge bias for subtle edge nudging
+- Preserved overscan, border flood, and frame safety functionality
+- Comprehensive testing validates no box-aligned coasts
+- All parameters configurable via state (edgeBiasMode, edgeBiasMarginPx, etc.)
+
+The system now generates natural coastlines without box-aligned artifacts, while maintaining all the benefits of overscan generation, border flood ocean classification, and frame safety.
+
+---
+
+# TODO: Step 2.10 - Guaranteed margin + cell-aware moat
+
+## Phase 1: Fit Logic Upgrade
+- [x] Upgrade fit logic in js/viewport.js
+- [x] Add fitTransformWithMargin function with guaranteed canvas-side margin
+- [x] Ensure margin is independent of generation bounds
+- [x] Keep computeLandBBox as is
+
+## Phase 2: Fit Integration
+- [x] Use new fit in js/app.js
+- [x] Replace padRect + fitTransformToCanvas with fitTransformWithMargin
+- [x] Enforce margin in canvas space, not generation space
+- [x] Update imports to use new function
+
+## Phase 3: Cell-Aware Moat
+- [x] Add moat helper functions to js/elevation.js
+- [x] Implement minDistToFrame, avgCellSizePx, applyFrameMoat
+- [x] Add automatic moat width computation
+- [x] Apply moat after sea level computation
+- [x] Recompute isLand after moat application
+
+## Phase 4: State Configuration
+- [x] Update defaults in js/state.js
+- [x] Set enforceOceanFrame = false (let moat do the job)
+- [x] Increase overscanPct to 0.18 for better framing
+- [x] Increase fitMarginPx to 28 for guaranteed margin
+- [x] Add frame moat parameters (frameMoatPx, frameMoatCells, frameMoatDrop)
+
+## Phase 5: Testing & Validation
+- [x] Add testGuaranteedMargin to js/selftest.js
+- [x] Add testMoatWorks to js/selftest.js
+- [x] Verify guaranteed margin is enforced
+- [x] Verify frame moat keeps coasts off the box
+
+## Acceptance Criteria
+- [x] Guaranteed margin ≥ fitMarginPx between land and canvas frame
+- [x] Cell-aware ocean moat prevents coastline coincidence with box edges
+- [x] Moat width auto-computed from overscan pad or cell size
+- [x] Margin enforced by scaling/translating, not clamping
+- [x] All parameters configurable via state
+- [x] Comprehensive testing validates margin and moat functionality
+
+## Summary
+✅ **Step 2.10 Complete!** 
+
+Successfully implemented:
+- Guaranteed margin system with fitTransformWithMargin
+- Cell-aware ocean moat that prevents coastline coincidence with box edges
+- Automatic moat width computation from overscan pad or cell size
+- Margin enforcement in canvas space, independent of generation bounds
+- Updated defaults for better framing (overscanPct: 0.18, fitMarginPx: 28)
+- Comprehensive testing validates margin and moat functionality
+- All parameters configurable via state (frameMoatPx, frameMoatCells, etc.)
+
+The system now guarantees breathing room around land masses and prevents coastlines from using the generation box as an edge, even with small overscan values.
+
+---
+
+# TODO: Step 2.11 - Strict Safe-Zone Seeding for High-Energy Features
+
+## Phase 1: State Configuration
+- [x] Add safe-zone seeding configuration to js/state.js
+- [x] Add enforceSeedSafeZones toggle (default: true)
+- [x] Add seedSafeZoneRetries parameter (default: 80)
+- [x] Add seedZones configuration for different feature types
+- [x] Add showSeedZones debug toggle (default: false)
+
+## Phase 2: Sampling System
+- [x] Create js/sampling.js with safe-zone seeding helpers
+- [x] Implement windowToPixels function for coordinate conversion
+- [x] Implement sampleXYInWindow function for XY sampling
+- [x] Implement sampleCellInWindow function for cell sampling
+- [x] Implement getSeedWindow function for zone lookup
+- [x] Implement seededXY and seededCell main entry functions
+- [x] Implement ensureSeedZoneOverlay for debug visualization
+
+## Phase 3: Template Integration
+- [x] Update js/terrain.js to use safe-zone seeding
+- [x] Replace interiorCellIndex calls with seededCell calls
+- [x] Update opMountain, opHill, opRange, opTrough, opPit functions
+- [x] Update carveSeas function to use safe-zone seeding
+- [x] Update continentalIslands template for core and hill seeding
+- [x] Update js/elevation.js to use seededXY for template centers
+
+## Phase 4: Pipeline Integration
+- [x] Update js/app.js to call ensureSeedZoneOverlay
+- [x] Add seed zone visualization to generateWorld pipeline
+- [x] Ensure visualization works with world transform
+
+## Phase 5: Testing & Validation
+- [x] Add testSeedsRespectZones to js/selftest.js
+- [x] Add testNoOriginNearFrame to js/selftest.js
+- [x] Verify seeds respect their safe zones
+- [x] Verify land doesn't originate at frame edges
+
+## Acceptance Criteria
+- [x] All high-energy seeds (cores, hills, ridges, troughs, seas, volcanos) spawn inside central safe windows
+- [x] Safe zones are configurable per feature type via state.seedZones
+- [x] Global on/off toggle via state.enforceSeedSafeZones
+- [x] Rejection sampling with configurable retry count
+- [x] Debug visualization shows safe zones as translucent rectangles
+- [x] Comprehensive testing validates safe-zone compliance
+- [x] Integration with existing overscan+fit+moat stack
+
+## Summary
+✅ **Step 2.11 Complete!** 
+
+Successfully implemented:
+- Strict safe-zone seeding system for all high-energy features
+- Configurable safe zones per feature type (core, hill, ridge, trough, sea, volcano)
+- Rejection sampling with fallback to nearest cell
+- Debug visualization with translucent zone rectangles
+- Integration with existing terrain templates and elevation generation
+- Comprehensive testing validates safe-zone compliance
+- All parameters configurable via state (enforceSeedSafeZones, seedSafeZoneRetries, seedZones, showSeedZones)
+
+The system now guarantees that every high-energy seed spawns inside a central safe window, preventing land from originating at the edges while maintaining organic coastlines.

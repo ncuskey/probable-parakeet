@@ -1,5 +1,6 @@
 // TODO: Step 2.6 - Elevation generation with templates, noise, auto sea-level tuning, and frame safety
 import { makeNoise2D, fbm2, warp2 } from './noise.js';
+import { seededXY } from './sampling.js';
 
 // Frame safety helpers
 function touchesBorder(poly, width, height, eps = 1e-3) {
@@ -10,12 +11,69 @@ function touchesBorder(poly, width, height, eps = 1e-3) {
   return false;
 }
 
-// Rectangular edge falloff (soft, not an oval)
+// Sample template centers from window (now uses safe-zone seeding)
+function sampleInWindow(rng, width, height, win) {
+  // Use the new safe-zone seeding system
+  return seededXY({ width, height }, rng.float ? rng : { float: rng }, 'core');
+}
+
+// Rectangular edge falloff (soft, not an oval) - DEPRECATED
 function rectEdgeWeight(x, y, width, height, marginPx, exp = 1.5) {
   if (marginPx <= 0) return 1;
   const d = Math.min(x, y, width - x, height - y);
   const t = Math.max(0, Math.min(1, d / marginPx));      // 0 at frame, →1 inside
   return Math.pow(t, exp);                                // smooth-ish
+}
+
+function clamp01(x){ return x < 0 ? 0 : x > 1 ? 1 : x; }
+function smoothstep(t){ return t*t*(3-2*t); }
+
+// Optional "noisy edge bias": pushes values down near edges with noise modulation.
+// This avoids rectangular isolines.
+function noisyEdgeWeight(noise2, x, y, width, height, {
+  marginPx = 0, amp = 0.2, scale = 900, octaves = 3, gain = 0.5, lacunarity = 2.0
+} = {}) {
+  if (!marginPx || marginPx <= 0 || amp <= 0) return 1.0;
+  const d = Math.min(x, y, width - x, height - y);     // distance to frame
+  let t = clamp01(d / marginPx);                        // 0 at frame → 1 inside
+  // add low-freq variety so isolines aren't parallel to the box
+  const n = fbm2(noise2, x, y, { octaves, gain, lacunarity, scale }); // [-1,1]
+  const nn = 0.5*(n+1);                                  // [0,1]
+  // modulate t by noise (± ~20% of band)
+  t = clamp01(t + 0.2*(nn - 0.5));
+  // mix between 1 (no bias) and t (edge penalty) by amp
+  return (1 - amp) + amp * smoothstep(t);
+}
+
+function minDistToFrame(poly, width, height) {
+  let md = Infinity;
+  for (let i = 0; i < poly.length; i += 2) {
+    const x = poly[i], y = poly[i+1];
+    const d = Math.min(x, y, width - x, height - y);
+    if (d < md) md = d;
+  }
+  return md;
+}
+
+// Estimate average cell span from area / N (cheap and good enough)
+function avgCellSizePx(mesh, N) {
+  return Math.sqrt((mesh.width * mesh.height) / Math.max(1, N));
+}
+
+// Force any cell within 'moatPx' of the frame to be below sea level
+function applyFrameMoat(mesh, elevation, seaLevel, moatPx, drop = 1e-4) {
+  if (!moatPx || moatPx <= 0) return 0;
+  const { width, height } = mesh;
+  const polys = mesh.cells.polygons;
+  let changed = 0;
+  for (let i = 0; i < elevation.length; i++) {
+    const md = minDistToFrame(polys[i], width, height);
+    if (md <= moatPx) {
+      const newH = Math.min(elevation[i], seaLevel - drop);
+      if (newH !== elevation[i]) { elevation[i] = newH; changed++; }
+    }
+  }
+  return changed;
 }
 
 // Compute minimal sea level to remove *all* border land; cap boost.
@@ -131,8 +189,18 @@ export function generateElevation(mesh, state) {
   const noise2 = makeNoise2D(state.seed);
   const elevation = new Float32Array(N);
 
+  // Centers used by templates
+  const rng = state.getRng ? state.getRng() : { float: Math.random };
+  const win = state.seedWindow || { left: 0.2, right: 0.8, top: 0.2, bottom: 0.8 };
+  const [cx1, cy1] = sampleInWindow(rng, width, height, win);
+  let cx2 = width * 0.67, cy2 = height * 0.5; // fallback
+  {
+    const off = 0.20 + 0.15 * rng.float(); // ~20–35% width offset
+    cx2 = Math.min(width  * (win.right - 0.05), Math.max(width * (win.left + 0.05), cx1 + off * (rng.float() < 0.5 ? -1 : 1) * width));
+    cy2 = cy1 + (rng.float() - 0.5) * 0.15 * height;
+  }
+
   // precompute normalizers
-  const cx = width * 0.5, cy = height * 0.5;
   const diag = Math.hypot(width, height);
 
   for (let i = 0; i < N; i++) {
@@ -141,17 +209,14 @@ export function generateElevation(mesh, state) {
     // 1) template base
     let t0 = 0;
     if (template === 'radialIsland') {
-      t0 = radialIslandTemplate(cx, cy, x, y);
-      t0 = (t0 / (0.5 * diag));  // scale radius to ~0..1 range
-      t0 = Math.max(0, 1 - Math.min(1, t0)); // invert & clamp for island (high center)
+      let t = 1 - (Math.hypot(x - cx1, y - cy1) / (0.5 * Math.hypot(width, height)));
+      t0 = Math.max(0, Math.min(1, t));
     } else if (template === 'continentalGradient') {
       t0 = continentalGradientTemplate(width, height, x, y, templateDir);
     } else if (template === 'twinContinents') {
-      const r = Math.max(
-        1 - (Math.hypot(x - width*0.33, y - cy) / (0.45 * diag)),
-        1 - (Math.hypot(x - width*0.67, y - cy) / (0.45 * diag))
-      );
-      t0 = Math.max(0, r);
+      const r1 = 1 - (Math.hypot(x - cx1, y - cy1) / (0.45 * Math.hypot(width, height)));
+      const r2 = 1 - (Math.hypot(x - cx2, y - cy2) / (0.45 * Math.hypot(width, height)));
+      t0 = Math.max(0, Math.max(r1, r2));
     } else {
       t0 = continentalGradientTemplate(width, height, x, y, 'WtoE');
     }
@@ -170,9 +235,22 @@ export function generateElevation(mesh, state) {
     // 4) blend template with noise (bias so template dominates large shape)
     const v = 0.72 * t0 + 0.28 * ((n + 1) * 0.5); // 0..1-ish
     
-    // 5) optional edge falloff (soft rectangular, not oval)
-    const w = rectEdgeWeight(x, y, width, height, state.edgeFalloffPx, state.edgeFalloffExp);
-    elevation[i] = v * w;
+    let val = v; // your template+noise blend
+
+    // Optional, *non-rectangular* edge bias
+    if (state.edgeBiasMode === 'noisy') {
+      const noise2 = makeNoise2D(state.seed + ':edgebias');
+      const w = noisyEdgeWeight(noise2, x, y, width, height, {
+        marginPx: state.edgeBiasMarginPx,
+        amp: state.edgeBiasAmp,
+        scale: state.edgeBiasNoiseScale,
+        octaves: state.edgeBiasOctaves,
+        gain: state.edgeBiasGain
+      });
+      val *= w;
+    }
+
+    elevation[i] = val;
   }
 
   // Normalize 0..1
@@ -193,7 +271,24 @@ export function generateElevation(mesh, state) {
     }
   }
 
-  // (re)compute masks with the possibly-boosted sea level
+  // —— after seaLevel is set ——
+  // Use overscan pad if available; otherwise derive from cell size
+  const pad = mesh.genBounds ? mesh.genBounds.pad : 0;
+  const cellPx = avgCellSizePx(mesh, N);           // ~mean cell diameter
+  const moatCells = state.frameMoatCells ?? 2.5;   // 2–3 cells is enough
+  let moatPx = state.frameMoatPx ?? 0;
+
+  if (!moatPx) {
+    moatPx = Math.max(
+      Math.floor(pad * 0.6),         // ~60% of overscan pad
+      Math.round(moatCells * cellPx) // or at least a few cells
+    );
+  }
+
+  const moatChanged = applyFrameMoat(mesh, elevation, seaLevel, moatPx, state.frameMoatDrop ?? 1e-4);
+  if (moatChanged) console.log(`[moat] oceanized ${moatChanged} cells within ${moatPx}px of frame`);
+
+  // Now recompute isLand from (possibly adjusted) elevation
   const isLand = new Uint8Array(N);
   for (let i = 0; i < N; i++) isLand[i] = elevation[i] > seaLevel ? 1 : 0;
 

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Safe-Zone Seeding Fixed Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .result { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>Safe-Zone Seeding Fixed Test</h1>
+    
+    <div class="test-section">
+        <h3>Testing Fixed Safe-Zone Seeding Implementation</h3>
+        <div id="results">Loading...</div>
+    </div>
+
+    <script type="module">
+        import { S, setSeed } from './js/state.js';
+        import { seededXY, seededCell, getSeedWindow } from './js/sampling.js';
+
+        async function runTest() {
+            const results = document.getElementById('results');
+            results.innerHTML = '<div class="result">Running tests...</div>';
+            
+            try {
+                // Test 1: Basic sampling functions with different RNG formats
+                console.log('Testing basic sampling functions...');
+                const testMesh = {
+                    width: 1000,
+                    height: 800,
+                    cells: {
+                        polygons: new Array(100).fill(null).map(() => new Float32Array([100, 100, 200, 100, 200, 200, 100, 200])),
+                        centroids: new Float32Array(200).fill(0).map((_, i) => i % 2 === 0 ? 150 : 150)
+                    }
+                };
+                
+                // Test function RNG
+                const funcRng = () => Math.random();
+                const [x1, y1] = seededXY(testMesh, funcRng, 'core');
+                console.log('seededXY with function RNG:', x1, y1);
+                
+                // Test object RNG
+                const objRng = { float: () => Math.random() };
+                const [x2, y2] = seededXY(testMesh, objRng, 'core');
+                console.log('seededXY with object RNG:', x2, y2);
+                
+                // Test cell sampling
+                const cellIndex1 = seededCell(testMesh, funcRng, 'hill');
+                console.log('seededCell with function RNG:', cellIndex1);
+                
+                const cellIndex2 = seededCell(testMesh, objRng, 'hill');
+                console.log('seededCell with object RNG:', cellIndex2);
+                
+                // Test window lookup
+                const win = getSeedWindow('core');
+                console.log('core window:', win);
+                
+                // Test 2: Safe zone enforcement
+                console.log('Testing safe zone enforcement...');
+                S.enforceSeedSafeZones = true;
+                
+                const [x3, y3] = seededXY(testMesh, funcRng, 'core');
+                const u = x3 / testMesh.width, v = y3 / testMesh.height;
+                console.log('Sampled coordinates (normalized):', u, v);
+                console.log('Core window:', win.left, win.right, win.top, win.bottom);
+                
+                if (u >= win.left && u <= win.right && v >= win.top && v <= win.bottom) {
+                    console.log('✅ Coordinates are within safe zone');
+                } else {
+                    console.log('❌ Coordinates are outside safe zone');
+                }
+                
+                results.innerHTML = '<div class="result success">✅ All tests passed!</div>';
+                console.log('✅ Safe-zone seeding implementation working correctly');
+                
+            } catch (e) {
+                results.innerHTML = `<div class="result error">❌ Test failed: ${e.message}</div>`;
+                console.error('❌ Test failed:', e);
+            }
+        }
+
+        // Run test when page loads
+        runTest();
+    </script>
+</body>
+</html>

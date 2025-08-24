@@ -1,0 +1,284 @@
+// js/generators/azgaar-lite.js
+// Azgaar-lite: minimal, JSFiddle-faithful terrain
+// No overscan, no falloff, no moat, no erosion, no tuning.
+// Dependencies: d3-delaunay (preferred) or existing Delaunay/Voronoi you already bundle.
+
+import { state } from '../state.js';
+
+// ---------- Poisson (ported from the fiddle) ----------
+function poissonDiscSampler(width, height, radius) {
+  const k = 30, r2 = radius*radius, R = 3*r2,
+        cell = radius * Math.SQRT1_2,
+        gw = Math.ceil(width / cell),
+        gh = Math.ceil(height / cell),
+        grid = new Array(gw * gh);
+  const queue = [];
+  let qSize = 0, sSize = 0;
+
+  function far(x,y){
+    const i = (x/cell)|0, j = (y/cell)|0;
+    const i0 = Math.max(i-2,0), j0 = Math.max(j-2,0),
+          i1 = Math.min(i+3,gw), j1 = Math.min(j+3,gh);
+    for (let yy=j0; yy<j1; yy++){
+      const o = yy*gw;
+      for (let xx=i0; xx<i1; xx++){
+        const s = grid[o+xx]; if (!s) continue;
+        const dx=s[0]-x, dy=s[1]-y;
+        if (dx*dx + dy*dy < r2) return false;
+      }
+    }
+    return true;
+  }
+  function sample(x,y){
+    const s = [x,y];
+    queue[qSize++] = s;
+    grid[gw*(((y/cell)|0)) + ((x/cell)|0)] = s;
+    sSize++; return s;
+  }
+
+  return function next(){
+    if (!sSize) return sample(Math.random()*width, Math.random()*height);
+    while (qSize){
+      const i = (Math.random()*qSize)|0, s = queue[i];
+      for (let j=0; j<k; j++){
+        const a = 2*Math.PI*Math.random();
+        const r = Math.sqrt(Math.random()*R + r2);
+        const x = s[0] + r*Math.cos(a), y = s[1] + r*Math.sin(a);
+        if (x>=0 && x<width && y>=0 && y<height && far(x,y)) return sample(x,y);
+      }
+      queue[i] = queue[--qSize]; queue.length = qSize;
+    }
+  };
+}
+
+// ---------- Voronoi via d3-delaunay (or your internal) ----------
+function buildVoronoi(points, width, height) {
+  const DelaunayCtor = (window.d3 && window.d3.Delaunay) || (window.d3 && window.d3.voronoi && null);
+  if (!DelaunayCtor) {
+    throw new Error('d3-delaunay not found: please expose d3.Delaunay');
+  }
+  const D = DelaunayCtor.from(points);
+  const V = D.voronoi([0,0,width,height]);
+  const N = points.length;
+
+  // polygons + neighbors like the fiddle
+  const polygons = new Array(N);
+  const neighbors = new Array(N);
+  for (let i=0;i<N;i++){
+    polygons[i] = V.cellPolygon(i).flat();               // [x0,y0,x1,y1,...]
+    neighbors[i] = Array.from(D.neighbors(i));           // indices
+  }
+  return { delaunay: D, voronoi: V, polygons, neighbors, width, height };
+}
+
+// ---------- Blob growth (BFS over neighbors) ----------
+function growBlob(polygons, neighbors, start, opts) {
+  const { maxHeight, radius, sharpness } = opts;
+  const N = polygons.length;
+  const H = new Float32Array(N);      // height field
+  const used = new Uint8Array(N);
+  const q = [start]; used[start]=1; H[start]+=maxHeight;
+
+  for (let qi=0; qi<q.length && H[q[qi]]>0.01; qi++){
+    const i = q[qi];
+    let h = H[i] * radius;
+    for (const n of neighbors[i]) {
+      if (used[n]) continue;
+      let mod = Math.random()*sharpness + 1.1 - sharpness;
+      if (sharpness === 0) mod = 1;
+      H[n] += h * mod;
+      if (H[n] > 1) H[n] = 1;
+      used[n] = 1;
+      q.push(n);
+    }
+  }
+  return H;
+}
+
+// ---------- Feature marking (border flood like fiddle) ----------
+function markFeatures(polygons, neighbors, H, seaLevel, width, height) {
+  const N = polygons.length;
+  const type = new Uint8Array(N); // 0=unmarked,1=Ocean,2=Island,3=Lake
+  const name = new Array(N);      // optional
+  const isLand = new Uint8Array(N);
+  for (let i=0;i<N;i++) isLand[i] = H[i] >= seaLevel ? 1 : 0;
+
+  // ocean flood from a border cell (use corner 0,0 like fiddle)
+  // find cell nearest (0,0)
+  let start = 0, sx=Infinity;
+  for (let i=0;i<N;i++){
+    const p = polygons[i];
+    const dx=p[0]-0, dy=p[1]-0;
+    const d = dx*dx+dy*dy;
+    if (d<sx) {sx=d; start=i;}
+  }
+  const q=[start], used=new Uint8Array(N);
+  used[start]=1; type[start]=1;
+  while(q.length){
+    const i=q.shift();
+    for (const n of neighbors[i]){
+      if (used[n]) continue;
+      if (!isLand[n]) { type[n]=1; used[n]=1; q.push(n); }
+    }
+  }
+
+  // islands & lakes: BFS unmarked sets
+  let island=0, lake=0;
+  for(let i=0;i<N;i++){
+    if (type[i]) continue;
+    const land = !!isLand[i];
+    const mark = land ? 2 : 3;
+    const q2=[i]; type[i]=mark;
+    while(q2.length){
+      const j=q2.shift();
+      for (const n of neighbors[j]){
+        if (type[n]) continue;
+        if (!!isLand[n] === land) { type[n]=mark; q2.push(n); }
+      }
+    }
+    if (land) island++; else lake++;
+  }
+
+  return { isLand, isOcean: type.map ? type.map(v=>v===1) : Uint8Array.from(type,v=>+(v===1)), type };
+}
+
+// ---------- Coastlines (land↔water edges) ----------
+function coastEdges(polygons, neighbors, isLand, isOcean){
+  const N = polygons.length;
+  const edges = [];
+  for (let i=0;i<N;i++){
+    if (!isLand[i]) continue;
+    const poly = polygons[i];
+    // loop polygon edges, test neighbor water
+    for (let p=0;p<poly.length;p+=2){
+      const x1=poly[p], y1=poly[p+1];
+      const p2=(p+2)%poly.length;
+      const x2=poly[p2], y2=poly[p2+1];
+      // decide if this edge borders ocean: check any neighbor that shares it
+      // (cheap check: if any neighbor is ocean and has a nearly-collinear matching segment)
+      let oceanTouch=false;
+      for (const n of neighbors[i]){
+        if (!isOcean[n]) continue;
+        const polyN = polygons[n];
+        for (let k=0;k<polyN.length;k+=2){
+          const nx1=polyN[k], ny1=polyN[k+1];
+          const k2=(k+2)%polyN.length;
+          const nx2=polyN[k2], ny2=polyN[k2+1];
+          // share if endpoints equal (within epsilon)
+          const e = 1e-6;
+          const same = (Math.hypot(nx1-x2,ny1-y2)<e && Math.hypot(nx2-x1,ny2-y1)<e) ||
+                       (Math.hypot(nx1-x1,ny1-y1)<e && Math.hypot(nx2-x2,ny2-y2)<e);
+          if (same){ oceanTouch=true; break; }
+        }
+        if (oceanTouch) break;
+      }
+      if (oceanTouch) edges.push([[x1,y1],[x2,y2]]);
+    }
+  }
+  return edges;
+}
+
+// chain edges into loops (very small, robust)
+function chainLoops(edges){
+  const map = new Map();
+  const key = ([x,y]) => `${Math.round(x*100)}/${Math.round(y*100)}`;
+  for (const [a,b] of edges){
+    const ka=key(a), kb=key(b);
+    if (!map.has(ka)) map.set(ka,[]);
+    if (!map.has(kb)) map.set(kb,[]);
+    map.get(ka).push(kb);
+    map.get(kb).push(ka);
+  }
+  const used = new Set();
+  const loops = [];
+  for (const [a,b] of edges){
+    const ek = key(a)+'|'+key(b);
+    if (used.has(ek)) continue;
+    let curr = [a,b]; used.add(ek);
+    // forward
+    while(true){
+      const last = curr[curr.length-1];
+      const arr = map.get(key(last))||[];
+      const next = arr.find(k => {
+        const npt = k.split('/').map(v=>parseFloat(v)/100);
+        const ek2 = key(last)+'|'+k;
+        return !used.has(ek2);
+      });
+      if (!next) break;
+      const [nx,ny] = next.split('/').map(v=>parseFloat(v)/100);
+      used.add(key(last)+'|'+next);
+      curr.push([nx,ny]);
+      if (Math.hypot(nx-curr[0][0], ny-curr[0][1]) < 1e-6) break;
+    }
+    if (curr.length>=3) loops.push(curr);
+  }
+  return loops;
+}
+
+// Chaikin smoothing (closed)
+function smoothChaikinClosed(points, iters=2, t=0.25){
+  let pts = points;
+  for (let it=0; it<iters; it++){
+    const out=[];
+    for (let i=0;i<pts.length;i++){
+      const p=pts[i], q=pts[(i+1)%pts.length];
+      out.push([(1-t)*p[0]+t*q[0], (1-t)*p[1]+t*q[1]]);
+      out.push([t*p[0]+(1-t)*q[0], t*p[1]+(1-t)*q[1]]);
+    }
+    pts=out;
+  }
+  return pts;
+}
+
+// ---------- Public entry ----------
+export function generateAzgaarLite(opts = {}) {
+  const W = opts.width  ?? state.width;
+  const H = opts.height ?? state.height;
+  const pr = opts.poissonRadius ?? state.poissonRadius;
+
+  // 1) Poisson → Voronoi (bounded to canvas)
+  const sampler = poissonDiscSampler(W,H,pr);
+  const pts = []; for (let s; (s=sampler()); ) pts.push(s);
+  const { polygons, neighbors } = buildVoronoi(pts, W, H);
+
+  // 2) Heights via blob growth
+  // big island: seed inside central window
+  const win = state.seedWindow;
+  const cx = (win.left + (win.right-win.left)*Math.random()) * W;
+  const cy = (win.top  + (win.bottom-win.top)*Math.random()) * H;
+  // find nearest cell to (cx,cy)
+  let start=0, dmin=Infinity;
+  for (let i=0;i<polygons.length;i++){
+    const dx=polygons[i][0]-cx, dy=polygons[i][1]-cy, d=dx*dx+dy*dy;
+    if (d<dmin){dmin=d; start=i;}
+  }
+  let Hfield = growBlob(polygons, neighbors, start, state.blob);
+
+  // a few random hills (like Random map)
+  for (let k=0;k<(opts.randomSmallHills ?? state.randomSmallHills); k++){
+    const rnd = (Math.random()*polygons.length)|0;
+    const add = growBlob(polygons, neighbors, rnd, {
+      maxHeight: Math.random()*0.4 + 0.1,
+      radius: 0.99,
+      sharpness: state.blob.sharpness
+    });
+    for (let i=0;i<Hfield.length;i++) Hfield[i] = Math.min(1, Hfield[i] + add[i]);
+  }
+
+  // 3) Water classes (fixed threshold + border flood)
+  const sea = opts.seaLevel ?? state.seaLevel;
+  const water = markFeatures(polygons, neighbors, Hfield, sea, W, H);
+
+  // 4) Coastlines
+  const edges = coastEdges(polygons, neighbors, water.isLand, water.isOcean);
+  let loops = chainLoops(edges);
+  loops = loops.map(l => smoothChaikinClosed(l, state.smoothCoastIters));
+
+  return {
+    width: W, height: H,
+    polygons, neighbors,
+    height: Hfield, seaLevel: sea,
+    isLand: water.isLand, isOcean: water.isOcean,
+    coastLoops: loops
+  };
+}

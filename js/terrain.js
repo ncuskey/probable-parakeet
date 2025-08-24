@@ -11,6 +11,7 @@ import { S, getWorld, resetCaches, getRng as getStateRng } from './state.js';
 import { mulberry32, rngFromSeed, clamp, randRange, choice } from './utils.js';
 import { samplePoints } from './mesh/poisson.js';
 import { buildMesh } from './mesh/mesh.js';
+import { seededXY, seededCell } from './sampling.js';
 
 // One canonical RNG for this run (legacy - use getStateRng for new code)
 export function getTerrainRng(){ return mulberry32(S.seed); }
@@ -51,6 +52,40 @@ export function bindWorld() {
   if (!Array.isArray(CELLS) || CELLS.length === 0) {
     throw new Error('[terrain] bindWorld(): cells not ready');
   }
+  return WORLD;
+}
+
+// Bridge function to convert new mesh to old WORLD structure
+export function bindMeshAsWorld(mesh) {
+  if (!mesh || !mesh.cells) {
+    throw new Error('[terrain] bindMeshAsWorld(): invalid mesh');
+  }
+  
+  // Convert new mesh structure to old WORLD structure
+  const cells = [];
+  for (let i = 0; i < mesh.cells.polygons.length; i++) {
+    const poly = mesh.cells.polygons[i];
+    if (!poly || poly.length < 6) continue;
+    
+    // Compute centroid
+    let cx = 0, cy = 0;
+    for (let p = 0; p < poly.length; p += 2) { cx += poly[p]; cy += poly[p+1]; }
+    cx /= poly.length/2; cy /= poly.length/2;
+    
+    cells.push({
+      cx, cy,
+      neighbors: mesh.cells.neighbors[i] || [],
+      i: i
+    });
+  }
+  
+  WORLD = {
+    width: mesh.width,
+    height: mesh.height,
+    cells: cells
+  };
+  CELLS = cells;
+  
   return WORLD;
 }
 
@@ -289,18 +324,21 @@ export function capHeights(maxH=0.92){
 // Positive add
 function opMountain(opts = {}) {
   const { peak = 1, radius = 0.975, sharpness = 0.065 } = opts; // wider, smoother
-  const f = makeBlobField({ startIndex: interiorCellIndex(undefined, 0.65), peak, radius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
+  const startIndex = seededCell(WORLD, () => RNG(), 'volcano');
+  const f = makeBlobField({ startIndex, peak, radius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   applyFieldAdd(f, 1);
 }
 
 function opHill(opts = {}) {
   const { peak = 0.42, radius = 0.975, sharpness = 0.065 } = opts; // many broad hills
-  const f = makeBlobField({ startIndex: interiorCellIndex(undefined, 0.65), peak, radius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
+  const startIndex = seededCell(WORLD, () => RNG(), 'hill');
+  const f = makeBlobField({ startIndex, peak, radius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   applyFieldAdd(f, 1);
 }
 
 function opRange({ peak = 0.8, steps = 6, stepRadius = 0.92, sharpness = 0.105 } = {}) {
-  let x = RNG() * WORLD.width, y = RNG() * WORLD.height, dir = RNG() * Math.PI * 2;
+  let [x, y] = seededXY(WORLD, () => RNG(), 'ridge');
+  let dir = RNG() * Math.PI * 2;
   for (let s = 0; s < steps; s++) {
     const f = makeBlobField({ startIndex: nearestCellIndex(x, y), peak, radius: stepRadius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
     applyFieldAdd(f, 1);
@@ -313,7 +351,8 @@ function opRange({ peak = 0.8, steps = 6, stepRadius = 0.92, sharpness = 0.105 }
 // Negative: subtract gently (scale k)
 function opTrough(opts = {}) {
   const { peak = 0.40, steps = 6, stepRadius = 0.935, sharpness = 0.075, strength = 0.25 } = opts;
-  let x = RNG() * WORLD.width, y = RNG() * WORLD.height, dir = RNG() * Math.PI * 2;
+  let [x, y] = seededXY(WORLD, () => RNG(), 'trough');
+  let dir = RNG() * Math.PI * 2;
   for (let s = 0; s < steps; s++) {
     const idx = nearestCellIndex(x, y);
     const f = makeBlobField({ startIndex: idx, peak, radius: stepRadius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
@@ -325,13 +364,14 @@ function opTrough(opts = {}) {
 }
 
 function opPit({ depth = 0.35, radius = 0.935, sharpness = 0.105 } = {}) {
-  const f = makeBlobField({ startIndex: interiorCellIndex(undefined, 0.65), peak: depth, radius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
+  const startIndex = seededCell(WORLD, () => RNG(), 'sea');
+  const f = makeBlobField({ startIndex, peak: depth, radius, sharpness, stop: 0.035, warpAmp:0.055, warpFreq:0.003, maskClip:0.35 });
   applyFieldSub(f, 1);
 }
 
 function carveSeas({count=3, minMask=0.55} = {}){
   for (let k=0;k<count;k++){
-    const seed = interiorCellIndex(undefined, minMask);
+    const seed = seededCell(WORLD, () => RNG(), 'sea');
     // Wide, soft trough; allow carving closer to rim (looser maskClip)
     const f = makeBlobField({
       startIndex: seed,
@@ -465,7 +505,14 @@ export function continentalIslands() {
   bindWorld();             // make sure CELLS is bound
   resolveHeightKey();      // ensure we write the property recolor reads
   // TODO: Step 2.5 - bindOvalMaskForRun() removed (replaced by border-flood oceans)
-  const cores = interiorDarts(3, undefined, /*minMask*/0.72); // deeper inside
+  
+  // Use safe-zone seeding for cores
+  const cores = [];
+  for (let i = 0; i < 3; i++) {
+    const idx = seededCell(WORLD, () => RNG(), 'core');
+    cores.push(idx);
+  }
+  
   for (const idx of cores) {
     const f = makeBlobField({ startIndex: idx, peak: 1, radius: 0.985, sharpness: 0.06, stop: 0.025, warpAmp:0.06, warpFreq:0.003 });
     const nz = f.reduce((a,v)=>a+(v>0),0);
@@ -477,7 +524,7 @@ export function continentalIslands() {
   const hills = 22 + ((RNG()*8)|0); // fewer hills; less global fill
   for (let i=0;i<hills;i++){
     const f = makeBlobField({
-      startIndex: interiorCellIndex(undefined, 0.75),
+      startIndex: seededCell(WORLD, () => RNG(), 'hill'),
       peak: 0.33 + RNG()*0.08, radius: 0.935, sharpness: 0.075, stop: 0.035,
       warpAmp:0.055, warpFreq:0.003, maskClip:0.46
     });
@@ -611,21 +658,37 @@ export function _probeAddOnce(){
  * @returns {Object} Mesh object with cached topology
  */
 export function buildBaseMesh() {
-  const { width, height, cellCountTarget } = S;
+  const { width: viewW, height: viewH, cellCountTarget } = S;
   const rng = getStateRng();
 
-  // TODO: Derive spacing from desired cell count
-  const area = width * height;
-  const c = 1.2; // Packing efficiency factor
-  const spacing = Math.sqrt((area / cellCountTarget) * c);
+  // compute overscan size
+  const pad =
+    S.overscanPx != null
+      ? S.overscanPx
+      : Math.max(0, Math.round(Math.min(viewW, viewH) * (S.overscanPct || 0)));
+
+  const genW = viewW + 2 * pad;
+  const genH = viewH + 2 * pad;
+
+  // derive spacing from desired *visible* cell target; compensate for bigger area
+  const effectiveTarget = Math.max(1000, Math.round(cellCountTarget * (genW * genH) / (viewW * viewH)));
+  const area = genW * genH;
+  const c = 1.2;
+  const spacing = Math.sqrt((area / effectiveTarget) * c);
 
   const t0 = performance.now();
-  const points = samplePoints({ width, height, minDist: spacing, k: 30 }, rng);
+  const points = samplePoints({ width: genW, height: genH, minDist: spacing, k: 30 }, rng);
   const t1 = performance.now();
-  const mesh = buildMesh({ width, height, points });
+  const mesh = buildMesh({ width: genW, height: genH, points });
   const t2 = performance.now();
 
-  console.log(`[mesh] points=${points.length/2} poisson=${(t1-t0).toFixed(1)}ms delaunay+voronoi=${(t2-t1).toFixed(1)}ms`);
+  // stash generation bounds for later transforms
+  mesh.genBounds = { x: 0, y: 0, width: genW, height: genH, pad, viewW, viewH };
+
+  console.log(
+    `[mesh] points=${points.length/2} genBox=${genW}×${genH} (pad=${pad}) ` +
+    `poisson=${(t1-t0).toFixed(1)}ms delaunay+voronoi=${(t2-t1).toFixed(1)}ms`
+  );
   
   // TODO: Cache mesh in state
   S.caches.mesh = mesh;

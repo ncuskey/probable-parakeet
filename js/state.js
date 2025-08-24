@@ -8,8 +8,8 @@ import { makeRng } from './rng.js';
  */
 export const S = {
   // Geometry / graph
-  width: 1024,
-  height: 768,
+  width: 1200,
+  height: 800,
   cells: [],       // array of cell objects
   edges: [],       // optional
   vertices: [],    // optional
@@ -21,6 +21,24 @@ export const S = {
 
   // TODO: Mesh generation parameters
   cellCountTarget: 8000,  // Target number of cells for Poisson sampling
+
+  // NEW: Azgaar-Lite baseline generator switch
+  terrainMode: 'azgaar-lite',     // 'azgaar-lite' | 'current'
+
+  // Azgaar-lite params (match the fiddle's UX)
+  poissonRadius: 4,               // "Points radius"
+  blob: {                         // defaults like the sliders
+    maxHeight: 0.9,               // "Max Height"
+    radius: 0.90,                 // "Blob Radius" (decay per ring)
+    sharpness: 0.2                // "Blob Sharpness" (random mod)
+  },
+  seaLevel: 0.2,                  // fixed threshold like the fiddle
+  seedWindow: { left: 0.25, right: 0.75, top: 0.20, bottom: 0.75 }, // where big island can spawn
+  randomSmallHills: 10,           // count for "Random map"
+  smoothCoastIters: 2,            // Chaikin passes (visual parity to curveBasisClosed)
+  drawMaskOcean: true,
+  drawCoastlines: true,
+  drawShallow: true,
 
   // NEW: elevation/template controls
   template: 'radialIsland',     // 'radialIsland' | 'continentalGradient' | 'twinContinents'
@@ -36,13 +54,64 @@ export const S = {
   warpAmp: 45,
 
   // frame safety
-  enforceOceanFrame: true,     // ensure no land touches the outer box
+  enforceOceanFrame: false,     // let the moat do the job
   frameEpsilon: 1e-4,          // how far above offending border cell to lift sea
   maxSeaBoost: 0.06,           // cap on how much we're allowed to raise sea level
 
-  // optional soft rectangular falloff (off by default)
-  edgeFalloffPx: 0,            // e.g. set to Math.min(width,height)*0.08 to enable
-  edgeFalloffExp: 1.5,         // curvature of the falloff (1–3 good range)
+  // frame moat (cell-aware ocean border)
+  frameMoatPx: null,            // let it auto-compute
+  frameMoatCells: 2.5,          // ≈2–3 cell layers at the edge
+  frameMoatDrop: 1e-4,
+
+  // Turn OFF the old rectangular falloff by default
+  edgeFalloffPx: 0,          // ← was ~0.12*minWH; set to 0 to disable
+  edgeFalloffExp: 1.6,       // kept for backward compat, unused when px=0
+
+  // Optional: noise-modulated edge bias (disabled by default)
+  edgeBiasMode: 'off',       // 'off' | 'noisy'
+  edgeBiasMarginPx: 0,       // e.g. Math.round(0.10 * Math.min(width,height))
+  edgeBiasAmp: 0.2,          // 0..1 intensity of bias; 0.15–0.3 is subtle
+  edgeBiasNoiseScale: 900,   // big features
+  edgeBiasOctaves: 3,
+  edgeBiasGain: 0.5,
+
+  // overscan generation (bigger world box)
+  overscanPct: 0.18,      // a touch more overscan helps framing
+  overscanPx: null,       // optional absolute px override; if null uses overscanPct
+
+  // fit transform
+  fitMode: 'fitLand',     // 'none' | 'fitLand'
+  fitMarginPx: 28,        // guaranteed margin (can tune)
+  allowUpscale: false,    // if false, don't scale above 1 (only shrink/translate)
+
+  // Template center sampling window (fraction of canvas)
+  seedWindow: { left: 0.18, right: 0.82, top: 0.18, bottom: 0.82 },
+
+  // Coast smoothing
+  coastSmoothIters: 2,      // Chaikin passes
+  coastSnapDigits: 2,       // vertex dedup precision for edge chaining
+
+  // Rendering toggles
+  drawShallow: true,
+  drawCoastlines: true,
+
+  // Strict Safe-Zone Seeding for High-Energy Features
+  enforceSeedSafeZones: true,     // hard requirement for all high-energy kernels
+  seedSafeZoneRetries: 80,        // rejection-sampling attempts per seed
+
+  // Default "central box" in percentages of the generation box
+  // (Tune per project; mirrors Azgaar's randomMap ranges)
+  seedZones: {
+    core:   { left: 0.18, right: 0.82, top: 0.18, bottom: 0.82 },
+    hill:   { left: 0.12, right: 0.88, top: 0.15, bottom: 0.88 },
+    ridge:  { left: 0.12, right: 0.88, top: 0.15, bottom: 0.88 },
+    trough: { left: 0.10, right: 0.90, top: 0.12, bottom: 0.90 },
+    sea:    { left: 0.10, right: 0.90, top: 0.10, bottom: 0.90 },
+    volcano:{ left: 0.20, right: 0.80, top: 0.20, bottom: 0.80 }
+  },
+
+  // Debug
+  showSeedZones: false,
 
   // Tunables / params
   params: {

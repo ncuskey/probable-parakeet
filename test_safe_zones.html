@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Safe-Zone Seeding Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        button { padding: 10px 15px; margin: 5px; background: #007cba; color: white; border: none; cursor: pointer; }
+        button:hover { background: #005a87; }
+        .result { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>Safe-Zone Seeding Test</h1>
+    
+    <div class="test-section">
+        <h3>Test Safe-Zone Seeding</h3>
+        <button onclick="testSafeZones()">Run Safe-Zone Test</button>
+        <button onclick="testNoFrameOrigin()">Run Frame Origin Test</button>
+        <button onclick="toggleSeedZones()">Toggle Seed Zone Visualization</button>
+        <div id="results"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Generate World with Safe-Zone Seeding</h3>
+        <button onclick="generateWorld()">Generate World</button>
+        <div id="world-results"></div>
+    </div>
+
+    <script type="module">
+        import { testSeedsRespectZones, testNoOriginNearFrame } from './js/selftest.js';
+        import { generateWorld } from './js/app.js';
+        import { S } from './js/state.js';
+
+        window.testSafeZones = async function() {
+            const results = document.getElementById('results');
+            results.innerHTML = '<div class="result">Running safe-zone test...</div>';
+            
+            try {
+                await testSeedsRespectZones();
+                results.innerHTML = '<div class="result success">✅ Safe-zone seeding test passed!</div>';
+            } catch (e) {
+                results.innerHTML = `<div class="result error">❌ Safe-zone seeding test failed: ${e.message}</div>`;
+            }
+        };
+
+        window.testNoFrameOrigin = async function() {
+            const results = document.getElementById('results');
+            results.innerHTML = '<div class="result">Running frame origin test...</div>';
+            
+            try {
+                await testNoOriginNearFrame();
+                results.innerHTML = '<div class="result success">✅ Frame origin test passed!</div>';
+            } catch (e) {
+                results.innerHTML = `<div class="result error">❌ Frame origin test failed: ${e.message}</div>`;
+            }
+        };
+
+        window.toggleSeedZones = function() {
+            S.showSeedZones = !S.showSeedZones;
+            const results = document.getElementById('results');
+            results.innerHTML = `<div class="result">Seed zone visualization: ${S.showSeedZones ? 'ON' : 'OFF'}</div>`;
+        };
+
+        window.generateWorld = async function() {
+            const results = document.getElementById('world-results');
+            results.innerHTML = '<div class="result">Generating world...</div>';
+            
+            try {
+                const result = await generateWorld();
+                results.innerHTML = '<div class="result success">✅ World generated successfully!</div>';
+                console.log('World generation result:', result);
+            } catch (e) {
+                results.innerHTML = `<div class="result error">❌ World generation failed: ${e.message}</div>`;
+                console.error('World generation error:', e);
+            }
+        };
+    </script>
+</body>
+</html>
