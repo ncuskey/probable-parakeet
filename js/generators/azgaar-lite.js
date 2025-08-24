@@ -40,6 +40,87 @@ function makeRng(seedStr){
   return rng;
 }
 
+// Simple Poisson disc sampler (returns a function that yields points)
+function poissonDiscSampler(width, height, radius, rng) {
+  const k = 30; // attempts per active point
+  const cellSize = radius / Math.SQRT2;
+  const gridW = Math.ceil(width / cellSize);
+  const gridH = Math.ceil(height / cellSize);
+  const grid = new Int32Array(gridW * gridH).fill(-1);
+  const points = [];
+  const active = [];
+
+  function gridIndex(x, y) { return (y * gridW + x) | 0; }
+
+  function insert(p, idx) {
+    const gx = Math.floor(p[0] / cellSize);
+    const gy = Math.floor(p[1] / cellSize);
+    grid[gridIndex(gx, gy)] = idx;
+  }
+
+  function inRange(p) { 
+    return p[0] >= 0 && p[0] < width && p[1] >= 0 && p[1] < height; 
+  }
+
+  function isFar(p) {
+    const gx = Math.floor(p[0] / cellSize);
+    const gy = Math.floor(p[1] / cellSize);
+    
+    for (let y = Math.max(0, gy - 2); y <= Math.min(gridH - 1, gy + 2); y++) {
+      for (let x = Math.max(0, gx - 2); x <= Math.min(gridW - 1, gx + 2); x++) {
+        const gi = gridIndex(x, y);
+        if (grid[gi] !== -1) {
+          const q = points[grid[gi]];
+          const dx = q[0] - p[0], dy = q[1] - p[1];
+          if (dx * dx + dy * dy < radius * radius) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  // Seed with initial point
+  const p0 = [rng() * width, rng() * height];
+  points.push(p0); 
+  active.push(0); 
+  insert(p0, 0);
+
+  // Return generator function
+  return function() {
+    if (active.length === 0) return null;
+    
+    const i = active[(active.length * rng()) | 0];
+    let found = false;
+    
+    for (let n = 0; n < k; n++) {
+      const r = radius * (1 + rng());
+      const theta = 2 * Math.PI * rng();
+      const p = [
+        points[i][0] + r * Math.cos(theta), 
+        points[i][1] + r * Math.sin(theta)
+      ];
+      
+      if (inRange(p) && isFar(p)) {
+        points.push(p);
+        insert(p, points.length - 1);
+        active.push(points.length - 1);
+        found = true; 
+        break;
+      }
+    }
+    
+    if (!found) {
+      const last = active.pop();
+      if (last !== i) {
+        const idx = active.indexOf(i);
+        if (idx !== -1) active[idx] = last;
+      }
+    }
+    
+    return points[points.length - 1];
+  };
+}
+
 // NEW: Quantile helper for percentile sea level
 function quantile01(arr, p) {
   const a = Array.from(arr); // copy
@@ -49,32 +130,76 @@ function quantile01(arr, p) {
   return a[i];
 }
 
-// NEW: JSFiddle-faithful cell picker with window + height constraints
-function pickCellInWindow(world, rng, win, maxHeightAllowed = 1, maxTries = 50, Hfield = null) {
-  const { width: W, height: H, findCell, sites } = world;
+// NEW: Analytic safe-zone seeding helpers
+
+// Does a cell's polygon touch the frame?
+function cellTouchesFrame(poly, W, H, eps = 1e-6) {
+  for (let p = 0; p < poly.length; p += 2) {
+    const x = poly[p], y = poly[p + 1];
+    if (x <= eps || x >= W - eps || y <= eps || y >= H - eps) return true;
+  }
+  return false;
+}
+
+// BFS graph distance (in cells) from each cell to the frame
+function distToFrame(world) {
+  const { polygons, neighbors, width: W, height: H } = world;
+  const N = polygons.length;
+  const dist = new Int32Array(N).fill(-1);
+  const q = [];
+  for (let i = 0; i < N; i++) {
+    if (cellTouchesFrame(polygons[i], W, H)) { dist[i] = 0; q.push(i); }
+  }
+  for (let qi = 0; qi < q.length; qi++) {
+    const i = q[qi], d = dist[i] + 1;
+    for (const j of neighbors[i]) if (dist[j] === -1) { dist[j] = d; q.push(j); }
+  }
+  return dist;
+}
+
+// Expected multiplicative falloff per ring.
+// In the fiddle: mod ~ U[1.1 - sharpness, 1.1] → E[mod] = 1.1 - 0.5*sharpness.
+function meanFalloff(radius, sharpness) {
+  const m = (1.1 - 0.5 * (sharpness ?? 0.2));
+  return Math.max(0.01, Math.min(0.999, (radius ?? 0.9) * m));
+}
+
+// How many neighbor rings until a value drops below sea?
+// k = ceil( log(sea/height0) / log(f) ) with safety padding
+function influenceSteps(height0, radius, sharpness, sea, safetySteps = null) {
+  if (!(height0 > sea)) return 0;
+  const f = meanFalloff(radius, sharpness);
+  const k = Math.ceil(Math.log(sea / height0) / Math.log(f));
+  return Math.max(0, k + (safetySteps ?? state.safeZone?.safetySteps ?? 2));
+}
+
+// NEW: Safe cell picker with window + min distance to frame
+function pickCellInWindowSafe(world, rng, win, minDistSteps, opts = {}) {
+  const { width: W, height: H, findCell, sites, distFrame } = world;
+  const maxTries = opts.maxTries ?? state.safeZone?.maxTries ?? state.seedSafeZoneRetries ?? 80;
+  const maxHeightAllowed = opts.maxHeightAllowed ?? Infinity;
+  const Hfield = opts.Hfield ?? null;
+
+  const WminX = win.left * W, WmaxX = win.right * W;
+  const WminY = win.top  * H, WmaxY = win.bottom * H;
+
+  let best = -1, bestd = -1;
+
   for (let t = 0; t < maxTries; t++) {
     const x = (win.left + (win.right - win.left) * rng()) * W;
     const y = (win.top  + (win.bottom - win.top ) * rng()) * H;
     const i = findCell(x, y);
     if (i == null || i < 0) continue;
-    if (Hfield && Hfield[i] > maxHeightAllowed) continue;  // match fiddle: skip tall cells
+
     const [sx, sy] = sites[i];
-    // quick guard: ensure site itself is inside the window (prevents near-frame creeps)
-    if (sx < win.left * W || sx > win.right * W) continue;
-    if (sy < win.top  * H || sy > win.bottom * H) continue;
-    return i;
+    if (sx < WminX || sx > WmaxX || sy < WminY || sy > WmaxY) continue;
+    if (Hfield && Hfield[i] > maxHeightAllowed) continue;
+
+    const d = distFrame[i];
+    if (d > minDistSteps) return i;       // success
+    if (d > bestd) { bestd = d; best = i; } // remember farthest-in-window
   }
-  // fallback: pick any cell whose site is in-window
-  const WminX = win.left * world.width,  WmaxX = win.right * world.width;
-  const WminY = win.top  * world.height, WmaxY = win.bottom * world.height;
-  for (let i = 0; i < sites.length; i++) {
-    const [sx, sy] = sites[i];
-    if (sx >= WminX && sx <= WmaxX && sy >= WminY && sy <= WmaxY) {
-      if (!Hfield || Hfield[i] <= maxHeightAllowed) return i;
-    }
-  }
-  // ultimate fallback: center cell
-  return world.findCell(world.width * 0.5, world.height * 0.5);
+  return best >= 0 ? best : world.findCell(W * 0.5, H * 0.5);
 }
 
 // ---------- Voronoi via d3-delaunay (or your internal) ----------
@@ -98,7 +223,11 @@ function buildVoronoi(points, width, height) {
 
   const findCell = (x, y) => D.find(x, y);
 
-  return { delaunay: D, voronoi: V, polygons, neighbors, sites, findCell, width, height };
+  const world = {
+    delaunay: D, voronoi: V, polygons, neighbors, sites, findCell, width, height
+  };
+  world.distFrame = distToFrame(world); // ⬅️ NEW
+  return world;
 }
 
 // ---------- Blob growth (BFS over neighbors) ----------
@@ -328,24 +457,37 @@ export function generateAzgaarLite(opts = {}) {
   const H = opts.height ?? state.height;
   const pr = opts.poissonRadius ?? state.poissonRadius;
 
-  const rng = makeRng(opts.seed ?? state.rngSeed);     // ← NEW
+  const rng = makeRng(opts.seed ?? state.rngSeed);
 
-  // 1) Poisson → Voronoi (bounded to canvas)
-  const sampler = poissonDiscSampler(W,H,pr, rng);   // ← pass rng
-  const pts = []; for (let s; (s=sampler()); ) pts.push(s);
-  const world = buildVoronoi(pts, W, H);  // has polygons, neighbors, sites, findCell
+  // 1) Voronoi
+  const sampler = poissonDiscSampler(W, H, pr, rng);
+  const pts = []; for (let s; (s = sampler()); ) pts.push(s);
+  const world = buildVoronoi(pts, W, H);
 
-  // 2) Heights via blob growth
-  const win = state.seedWindow;  // {left:.25,right:.75,top:.20,bottom:.75}
+  const win = state.seedWindow;
+  // conservative sea threshold for safe-zone math
+  const seaRef = (state.seaLevelMode === 'fixed' ? (state.seaLevel ?? 0.2) : 0.2);
 
-  // Big island seed (windowed)
-  const start = pickCellInWindow(world, rng, win);
+  // === Big island ===
+  const kIsland = influenceSteps(
+    state.blob.maxHeight ?? 0.9,
+    state.blob.radius ?? 0.90,
+    state.blob.sharpness ?? 0.2,
+    seaRef
+  );
+  const start = pickCellInWindowSafe(world, rng, win, kIsland);
   let Hfield = growBlob(world.polygons, world.neighbors, start, state.blob, rng);
 
-  // 2b) Optional second big island (archipelago-lite)
+  // === Optional 2nd big island ===
   if (state.secondBlobEnabled) {
-    const start2 = pickCellInWindow(world, rng, win);
     const amp = Math.max(0, Math.min(1, state.secondBlobScale ?? 0.7));
+    const k2 = influenceSteps(
+      (state.blob.maxHeight ?? 0.9) * amp,
+      state.blob.radius ?? 0.90,
+      state.blob.sharpness ?? 0.2,
+      seaRef
+    );
+    const start2 = pickCellInWindowSafe(world, rng, win, k2);
     const H2 = growBlob(world.polygons, world.neighbors, start2, {
       maxHeight: (state.blob.maxHeight ?? 0.9) * amp,
       radius: state.blob.radius ?? 0.90,
@@ -354,38 +496,34 @@ export function generateAzgaarLite(opts = {}) {
     for (let i = 0; i < Hfield.length; i++) Hfield[i] = Math.min(1, Hfield[i] + H2[i]);
   }
 
-  // 2c) Small random hills — strictly inside window AND only on low cells
+  // === Small hills ===
   const hillsCount = opts.randomSmallHills ?? state.randomSmallHills;
-  for (let k = 0; k < hillsCount; k++) {
-    // JSFiddle skips cells with height > 0.25 and restricts to window (with ~50 tries)
-    const rnd = pickCellInWindow(world, rng, win, /*maxHeightAllowed*/ 0.25, /*maxTries*/ 50, Hfield);
+  for (let h = 0; h < hillsCount; h++) {
+    const h0 = rng() * 0.4 + 0.1; // same as fiddle
+    const kHill = influenceSteps(h0, 0.99, state.blob.sharpness ?? 0.2, seaRef);
+    const rnd = pickCellInWindowSafe(world, rng, win, kHill, {
+      maxHeightAllowed: 0.25, // fiddle behavior
+      Hfield
+    });
     const add = growBlob(world.polygons, world.neighbors, rnd, {
-      maxHeight: rng() * 0.4 + 0.1,   // same range as fiddle
+      maxHeight: h0,
       radius: 0.99,
       sharpness: state.blob.sharpness
     }, rng);
     for (let i = 0; i < Hfield.length; i++) Hfield[i] = Math.min(1, Hfield[i] + add[i]);
   }
 
-  // 3) Water classes (fixed threshold + border flood)
+  // === Sea level + water + robust coasts (unchanged) ===
   let sea = opts.seaLevel ?? state.seaLevel ?? 0.2;
-  if (state.seaLevelMode === 'percentile') {
-    sea = quantile01(Hfield, state.seaPercentile ?? 0.35);
-  }
-  const water = markFeatures(world.polygons, world.neighbors, Hfield, sea, W, H);
+  if (state.seaLevelMode === 'percentile') sea = quantile01(Hfield, state.seaPercentile ?? 0.35);
 
-  // 4) Coastlines
+  const water = markFeatures(world.polygons, world.neighbors, Hfield, sea, W, H);
   const segments = coastSegments(world.polygons, water.isLand, water.isOcean);
   let loops = chainCoastLoops(segments);
   loops = loops.map(l => smoothChaikinClosed(l, state.smoothCoastIters));
 
   return {
-    width: W, height: H,
-    polygons: world.polygons,
-    neighbors: world.neighbors,
-    sites: world.sites,
-    height: Hfield, seaLevel: sea,
-    isLand: water.isLand, isOcean: water.isOcean,
-    coastLoops: loops
+    width: W, height: H, polygons: world.polygons, neighbors: world.neighbors, sites: world.sites,
+    height: Hfield, seaLevel: sea, isLand: water.isLand, isOcean: water.isOcean, coastLoops: loops
   };
 }

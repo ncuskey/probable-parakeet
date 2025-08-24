@@ -6,6 +6,8 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 
 ### Core Generation
 - **Advanced blob growth** terrain generation with BFS queue expansion and domain warping
+- **Azgaar-Lite generator** - Minimal, JSFiddle-faithful terrain with analytic safe-zone seeding
+- **Analytic safe-zone seeding** - Mathematical calculation prevents islands/hills from touching map edges
 - **Deterministic noise system** - Hash-based 2D noise with FBM and domain warping
 - **Elevation templates** - radialIsland, continentalGradient, twinContinents with auto sea-level tuning
 - **Frame safety** - Optional sea level boosting to prevent land clipping at map borders
@@ -71,6 +73,9 @@ An interactive, client-side fantasy map generator inspired by Azgaar's Fantasy M
 - **Border-flood ocean classification** - FMG-style algorithm distinguishes oceans from lakes
 - **Ocean-aware coast detection** - Coasts defined by ocean neighbors, not lakes
 - **Advanced blob growth** with BFS queue expansion, domain warping, and sharpness modifiers
+- **Azgaar-Lite generation** - Poisson disc sampling → Voronoi → analytic safe-zone seeding → blob growth
+- **Analytic safe-zone seeding** - BFS distance to frame + closed-form influence radius calculation
+- **Safe cell placement** - Mathematical formula determines minimum safe distance from edges
 - **Oval edge masks** - superellipse math with random aspect ratios and rotation
 - **Template composition** - mountains, hills, ranges, troughs, pits for realistic terrain
 - **Interior cell seeding** - keeps seeds off borders for coherent landmasses
@@ -98,6 +103,7 @@ This implementation builds on the original Voronoi heightmap demo with several a
 7. ✅ **Biome System** - Ecological zone classification and coloring
 8. ✅ **Enhanced Rivers** - Polygonal rendering with higher flux thresholds
 9. ✅ **Lake Systems** - Depression detection and outlet simulation
+10. ✅ **Azgaar-Lite Generator** - Minimal, JSFiddle-faithful terrain with analytic safe-zone seeding
 10. ✅ **Coastline Detail** - Noise-based coastline perturbation
 11. ✅ **Auto-tuned Sea Levels** - Iterative adjustment to hit target land fraction (~35%)
 12. ✅ **Deterministic Noise System** - Hash-based 2D noise with FBM and domain warping

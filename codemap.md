@@ -308,6 +308,93 @@ export function interiorDarts(k, minDistPx) {
 }
 ```
 
+### Azgaar-Lite Generator (`js/generators/azgaar-lite.js`) - **ANALYTIC SAFE-ZONE SEEDING**
+```javascript
+// Minimal, JSFiddle-faithful terrain generator with analytic safe-zone seeding
+// No overscan, no falloff, no moat, no erosion, no tuning
+
+// ---------- Analytic Safe-Zone Seeding ----------
+function cellTouchesFrame(poly, W, H, eps = 1e-6) {
+  // Checks if a cell's polygon touches the frame boundaries
+}
+
+function distToFrame(world) {
+  // BFS graph distance (in cells) from each cell to the frame
+  // Returns Int32Array with distance values for each cell
+  // Frame-touching cells have distance 0, others have positive distances
+}
+
+function meanFalloff(radius, sharpness) {
+  // Expected multiplicative falloff per ring
+  // Models the fiddle's random modification: mod ~ U[1.1 - sharpness, 1.1]
+  // Returns E[mod] = 1.1 - 0.5*sharpness
+}
+
+function influenceSteps(height0, radius, sharpness, sea, safetySteps = null) {
+  // Calculates how many neighbor rings until a value drops below sea level
+  // Uses formula: k = ceil( log(sea/height0) / log(f) ) + safetySteps
+  // Uses state parameters: state.safeZone?.safetySteps ?? 2
+}
+
+function pickCellInWindowSafe(world, rng, win, minDistSteps, opts = {}) {
+  // Safe cell picker with window + min distance to frame
+  // Ensures selected cells are at least minDistSteps away from frame
+  // Fallback: Returns farthest-in-window cell if no valid cell found
+  // Options: maxTries, maxHeightAllowed, Hfield
+}
+
+// ---------- Poisson Disc Sampling ----------
+function poissonDiscSampler(width, height, radius, rng) {
+  // Simple Poisson disc sampler (returns a function that yields points)
+  // Uses Bridson algorithm with grid acceleration
+}
+
+// ---------- Voronoi Construction ----------
+function buildVoronoi(points, width, height) {
+  // Builds Voronoi diagram with d3-delaunay
+  // Now computes and stores distFrame array for safe-zone calculations
+  // Added: world.distFrame = distToFrame(world);
+}
+
+// ---------- Blob Growth ----------
+function growBlob(polygons, neighbors, start, opts, rng) {
+  // BFS blob growth over neighbors with random modification
+  // Matches JSFiddle behavior exactly
+}
+
+// ---------- Feature Marking ----------
+function markFeatures(polygons, neighbors, H, seaLevel, width, height) {
+  // Border flood algorithm for ocean classification
+  // Islands & lakes: BFS unmarked sets
+}
+
+// ---------- Robust Coastline Extraction ----------
+function coastSegments(polygons, isLand, isOcean) {
+  // Extract only edges that separate land from ocean
+  // Ignores frame edges (they have only one adjacent cell)
+}
+
+function chainCoastLoops(segments) {
+  // Chain segments into closed loops by exact endpoint keys
+  // Pick the next edge by smallest left-turn to keep smooth traversal
+}
+
+// ---------- Main Generator ----------
+export function generateAzgaarLite(opts = {}) {
+  // Main Azgaar-Lite generation pipeline:
+  // 1. Poisson disc sampling → Voronoi diagram
+  // 2. Compute distance to frame (BFS)
+  // 3. Big island: analytic safe distance + safe placement
+  // 4. Optional 2nd blob: scaled safe distance + safe placement
+  // 5. Small hills: individual safe distances + safe placement
+  // 6. Sea level + water classification + robust coasts
+  // 7. Return complete world with height, land/ocean, coastlines
+  
+  return { width, height, polygons, neighbors, sites, height, seaLevel, isLand, isOcean, coastLoops };
+}
+```
+```
+
 ### Noise System (`js/noise.js`)
 ```javascript
 // Deterministic hash-based 2D noise + FBM + domain warp

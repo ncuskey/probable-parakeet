@@ -111,6 +111,12 @@ export const S = {
   enforceSeedSafeZones: true,     // hard requirement for all high-energy kernels
   seedSafeZoneRetries: 80,        // rejection-sampling attempts per seed
 
+  // NEW: Analytic Safe-Zone Seeding (Azgaar-Lite)
+  safeZone: {
+    safetySteps: 2,     // extra rings beyond analytic radius
+    maxTries: 80        // per seed
+  },
+
   // Default "central box" in percentages of the generation box
   // (Tune per project; mirrors Azgaar's randomMap ranges)
   seedZones: {
