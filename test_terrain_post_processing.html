@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Terrain Post-Processing Flag Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .pass { background: #d4edda; color: #155724; }
+        .fail { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+        .console-output { background: #000; color: #0f0; padding: 10px; border-radius: 3px; font-family: monospace; max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>Terrain Post-Processing Flag Test</h1>
+    <div id="results"></div>
+    <h3>Console Output:</h3>
+    <div id="console-output" class="console-output"></div>
+
+    <script type="module">
+        const results = document.getElementById('results');
+        const consoleOutput = document.getElementById('console-output');
+        
+        // Capture console.log output
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+        
+        function captureConsole(type, ...args) {
+            const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' ');
+            const div = document.createElement('div');
+            div.textContent = `[${type.toUpperCase()}] ${message}`;
+            consoleOutput.appendChild(div);
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+        
+        console.log = (...args) => {
+            captureConsole('log', ...args);
+            originalLog.apply(console, args);
+        };
+        console.warn = (...args) => {
+            captureConsole('warn', ...args);
+            originalWarn.apply(console, args);
+        };
+        console.error = (...args) => {
+            captureConsole('error', ...args);
+            originalError.apply(console, args);
+        };
+        
+        function log(message, type = 'pass') {
+            const div = document.createElement('div');
+            div.className = `test-result ${type}`;
+            div.textContent = message;
+            results.appendChild(div);
+        }
+
+        async function runTests() {
+            try {
+                log('🧪 Starting terrain post-processing flag tests...', 'info');
+                
+                // Test 1: Try to import the state module
+                log('Testing module imports...', 'info');
+                let state, TerrainFlags;
+                
+                try {
+                    const stateModule = await import('./js/state.js');
+                    state = stateModule.state || stateModule.S;
+                    TerrainFlags = stateModule.TerrainFlags;
+                    log('✅ Successfully imported state.js module');
+                } catch (importError) {
+                    log(`❌ Failed to import state.js: ${importError.message}`, 'fail');
+                    log('This might be due to CORS issues when running locally. Try running through a local server.', 'info');
+                    log('You can start a local server with: python3 -m http.server 8000', 'info');
+                    return;
+                }
+                
+                // Test 2: Default flag state
+                log('Testing default flag state...', 'info');
+                if (TerrainFlags && TerrainFlags.useLegacyTerrainPost === false) {
+                    log('✅ TerrainFlags.useLegacyTerrainPost defaults to false');
+                } else {
+                    log(`❌ Expected TerrainFlags.useLegacyTerrainPost to be false, got ${TerrainFlags?.useLegacyTerrainPost}`, 'fail');
+                }
+                
+                if (state && state.useLegacyTerrainPost === false) {
+                    log('✅ state.useLegacyTerrainPost defaults to false');
+                } else {
+                    log(`❌ Expected state.useLegacyTerrainPost to be false, got ${state?.useLegacyTerrainPost}`, 'fail');
+                }
+                
+                // Test 3: Flag toggle functionality
+                log('Testing flag toggle functionality...', 'info');
+                if (TerrainFlags) {
+                    TerrainFlags.useLegacyTerrainPost = true;
+                    if (TerrainFlags.useLegacyTerrainPost === true) {
+                        log('✅ TerrainFlags.useLegacyTerrainPost can be set to true');
+                    } else {
+                        log('❌ Failed to set TerrainFlags.useLegacyTerrainPost to true', 'fail');
+                    }
+                    
+                    TerrainFlags.useLegacyTerrainPost = false;
+                    if (TerrainFlags.useLegacyTerrainPost === false) {
+                        log('✅ TerrainFlags.useLegacyTerrainPost can be set to false');
+                    } else {
+                        log('❌ Failed to set TerrainFlags.useLegacyTerrainPost to false', 'fail');
+                    }
+                }
+                
+                if (state) {
+                    state.useLegacyTerrainPost = true;
+                    if (state.useLegacyTerrainPost === true) {
+                        log('✅ state.useLegacyTerrainPost can be set to true');
+                    } else {
+                        log('❌ Failed to set state.useLegacyTerrainPost to true', 'fail');
+                    }
+                    
+                    state.useLegacyTerrainPost = false;
+                    if (state.useLegacyTerrainPost === false) {
+                        log('✅ state.useLegacyTerrainPost can be set to false');
+                    } else {
+                        log('❌ Failed to set state.useLegacyTerrainPost to false', 'fail');
+                    }
+                }
+                
+                // Test 4: Check if the flag is exported correctly
+                log('Testing flag export structure...', 'info');
+                if (TerrainFlags && typeof TerrainFlags === 'object') {
+                    log('✅ TerrainFlags is exported as an object');
+                    if ('useLegacyTerrainPost' in TerrainFlags) {
+                        log('✅ useLegacyTerrainPost property exists in TerrainFlags');
+                    } else {
+                        log('❌ useLegacyTerrainPost property missing from TerrainFlags', 'fail');
+                    }
+                } else {
+                    log('❌ TerrainFlags is not exported correctly', 'fail');
+                }
+                
+                // Test 5: Check state object structure
+                if (state && typeof state === 'object') {
+                    log('✅ state is exported as an object');
+                    if ('useLegacyTerrainPost' in state) {
+                        log('✅ useLegacyTerrainPost property exists in state');
+                    } else {
+                        log('❌ useLegacyTerrainPost property missing from state', 'fail');
+                    }
+                } else {
+                    log('❌ state is not exported correctly', 'fail');
+                }
+                
+                log('🎉 Basic terrain post-processing flag tests completed!', 'pass');
+                log('Note: For full integration testing, run the main application and check console output.', 'info');
+                
+            } catch (error) {
+                log(`❌ Test failed: ${error.message}`, 'fail');
+                console.error('Test error:', error);
+            }
+        }
+
+        // Run tests when page loads
+        runTests();
+    </script>
+</body>
+</html>

@@ -1,5 +1,14 @@
 /* === MAP CSS - SVG/map layer styles (terrain, rivers, roads, trails, labels) === */
 
+/* Good defaults for cell layers (no !important) */
+#cells path.cell { stroke: none; }     /* grid lines hidden; we paint fill inline */
+#grid  path      { stroke: #0e2b3a; stroke-opacity: .15; fill: none; } /* if you keep a grid layer */
+
+/* REMOVE any of these if present: */
+/* #cells path { fill: none !important; } */
+/* #map path { fill: none !important; } */
+/* .cell { fill: none !important; } */
+
 /* Coastline styling */
 .coast { 
   fill: none; 

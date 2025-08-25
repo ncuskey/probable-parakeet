@@ -3,6 +3,14 @@ import { mulberry32 } from './utils.js';
 import { makeRng } from './rng.js';
 
 /**
+ * Terrain post-processing (legacy)
+ */
+export const TerrainFlags = {
+  useLegacyTerrainPost: false, // default off - noise elevation is authoritative
+  // you can add more switches here later if needed
+};
+
+/**
  * Central state bag. Avoid touching DOM/d3 here.
  * Everything else should import from this module.
  */
@@ -18,6 +26,9 @@ export const S = {
   seed: 'azgaar-perilous-0001',  // TODO: Enhanced string seed support
   rng: mulberry32(12345),
   _rng: null,  // TODO: Memoized enhanced RNG instance
+
+  // Terrain post-processing (legacy)
+  useLegacyTerrainPost: false, // default off - noise elevation is authoritative
 
   // TODO: Mesh generation parameters
   cellCountTarget: 8000,  // Target number of cells for Poisson sampling

@@ -258,15 +258,23 @@ export function computeRoutes(run = 0) {
   
   console.log("computeRoutes() vKNN");
   // progress: 93 = starting land routes, 94 = primary done, 95 = sea starting, 97 = sea done
-  const {cells, isWater, burgs, s} = getWorld();
+  // Guard against old world references
+  const world = S?.world ?? getWorld?.() ?? {};
+  const {cells, isWater, burgs, s} = world;
   
-  if (!cells.length) { 
+  if (!cells?.length) { 
     console.warn('[RUN', run, '] no cells yet, skipping computeRoutes'); 
     if (window.__state) window.__state.routesInFlight = false;
     return; 
   }
   
-  const islandOf = s.islandOf || {};
+  if (!isWater?.length) {
+    console.warn('[RUN', run, '] no water mask yet, skipping computeRoutes');
+    if (window.__state) window.__state.routesInFlight = false;
+    return;
+  }
+  
+  const islandOf = s?.islandOf || {};
 
   // Lock/pending hooks if present (RoutesLock not defined, so skip locking)
   const unlock = null;

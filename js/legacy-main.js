@@ -20,6 +20,7 @@ import {
 
 import {
   S,
+  TerrainFlags,
   getWorld,
   setSize, setCells, setEdges, setVertices,
   setSeed, setParam, getParam,
@@ -69,7 +70,8 @@ import {
   repaintCellsForMode
 } from './render.js';
 
-import { recolor, ensureTerrainCanvas } from './recolor.js';
+import { recolor, recolorTerrain, ensureTerrainCanvas } from './recolor.js';
+import { buildCellPaths } from './geom/cellpaths.js';
 import { computePrecipArray } from './climate.js';
 import { ProgressManager } from './ui-overlays.js';
 
@@ -3376,9 +3378,17 @@ window.generate = async function() {
       // TODO: Step 1 - Build base mesh (Poisson → Delaunay/Voronoi)
       ProgressManager.setPhase('mesh');
       try {
-        const { buildBaseMesh } = await import('./terrain.js');
+        const { buildBaseMesh, bindMeshAsWorld } = await import('./terrain.js');
         const mesh = buildBaseMesh();
         console.log(`[mesh] Generated ${mesh.cellCount} cells with ${mesh.edgeCount} edges`);
+        
+        // Ensure fresh world bound to this mesh
+        const WORLD = bindMeshAsWorld(mesh);
+        S.mesh  = mesh;           // <- add this
+        S.world = WORLD;                       // single source of truth
+        
+        // Console markers for verification
+        console.log('[mesh/world]', { meshCells: mesh.cellCount, worldCells: S.world.cells.length });
         
         // TODO: Step 2 - Elevation + sea level autotune
         ProgressManager.setPhase('elevation');
@@ -3410,12 +3420,56 @@ window.generate = async function() {
             
             // Store water data in state for later use
             S.water = water;
-          } catch (e) {
-            console.warn('[generate] water classification failed', e);
-          }
+            S.caches.isWater = water.isWater;   // <- make getWorld().isWater real
+            
+            // Assert array alignment before proceeding
+            const nWorld = S.world?.cells?.length ?? -1;
+            const nElev  = elev.height?.length ?? -1;
+            const nWater = water.isWater?.length ?? -1;
+            
+            console.log('[assert]', { nWorld, nElev, nWater });
+            if (!(nWorld === nElev && nElev === nWater)) {
+              console.error('[assert] Cell count mismatch – abort recolor to avoid confetti');
+              // Early return to force a fix instead of painting garbage
+              return;
+            }
+            
+            // Console markers for verification
+            console.log('[wire] recolor seaLevel source:', S.elevation?.seaLevel?.toFixed(3));
+            console.log('[wire] isWater mask size:', S.caches?.isWater?.length);
+                      console.log('[elev/water]', { elev: elev.height.length, water: water.isWater.length });
+          
+          // Build cell paths before painting
+          const { built, skipped } = buildCellPaths(S);
+          console.log('[cellpaths] summary', { built, skipped });
+          
+          // Paint terrain with defensive fills
+          recolorTerrain(S);
+        } catch (e) {
+          console.warn('[generate] water classification failed', e);
+        }
           
           // Store elevation data in state for later use
-          S.elevation = elev;
+          S.elevation = elev;                 // keep a reference to the authoritative elevation bundle
+          if (!S.params) S.params = {};
+          S.params.seaLevel = elev.seaLevel;  // back-compat for any legacy readers
+          
+          // Transfer heights to cells using the aligned world
+          const cells = S.world.cells;
+          for (let i = 0; i < cells.length; i++) {
+            cells[i].high = elev.height[i];   // same index space
+          }
+          console.log(`[terrain] transferred elevation data to ${cells.length} cells`);
+          
+          // Console markers for verification
+          console.log('[terrain] elevation.js complete', {
+            seaLevel: S.elevation?.seaLevel,
+            landFrac: landFrac
+          });
+          
+          console.log('[terrain] legacy post-processing:',
+            TerrainFlags.useLegacyTerrainPost ? 'ENABLED' : 'DISABLED'
+          );
         } catch (e) {
           console.warn('[generate] elevation generation failed', e);
         }
@@ -3423,46 +3477,54 @@ window.generate = async function() {
         console.warn('[generate] mesh generation failed', e);
       }
       
-      applyTemplate(tplKey, uiVals);
-      
-      // Cap to [0,1] and normalize if too flat
-      normalizeHeights({ maxTarget: 0.9 });
-      thermalErode(talus, thermalStrength, 1);  // gentle
-      smoothLand(smoothAlpha);
+      // Gate legacy post-elevation transforms
+      if (TerrainFlags.useLegacyTerrainPost === true) {
+        // Legacy terrain post-processing (template/erosion/masks)
+        applyTemplate(tplKey, uiVals);
+        
+        // Cap to [0,1] and normalize if too flat
+        normalizeHeights({ maxTarget: 0.9 });
+        thermalErode(talus, thermalStrength, 1);  // gentle
+        smoothLand(smoothAlpha);
 
-      // AFTER applyTemplate (and before any mask/clamp)
-      _debugHeights('post-template');
+        // AFTER applyTemplate (and before any mask/clamp)
+        _debugHeights('post-template');
 
-      // Keep ocean border
-      ProgressManager.setPhase('terrain');
-      applyBorderMask();
+        // Keep ocean border
+        ProgressManager.setPhase('terrain');
+        applyBorderMask();
 
-      // Erode & smooth
-      ProgressManager.setPhase('erosion');
+        // Erode & smooth
+        ProgressManager.setPhase('erosion');
 
-      // AFTER erosion
-      _debugHeights('post-erosion');
+        // AFTER erosion
+        _debugHeights('post-erosion');
 
-      // Re-apply the water border after erosion/smoothing
-      applyBorderMask();
+        // Re-apply the water border after erosion/smoothing
+        applyBorderMask();
 
-      // Fixed coastline (blog): default 0.22 unless slider set
-      if (!Number.isFinite(S.params.seaLevel)) S.params.seaLevel = 0.22; // small uplift to avoid flooding lowlands
-      const seaIn = document.getElementById('seaLevelInput');
-      if (seaIn && seaIn.value !== '') S.params.seaLevel = +seaIn.value;
+        // Fixed coastline (blog): default 0.22 unless slider set
+        if (!Number.isFinite(S.params.seaLevel)) S.params.seaLevel = 0.22; // small uplift to avoid flooding lowlands
+        const seaIn = document.getElementById('seaLevelInput');
+        if (seaIn && seaIn.value !== '') S.params.seaLevel = +seaIn.value;
 
-      // Auto-tune sea level to hit target land fraction
-      const tunedSea = tuneSeaLevelToTarget(getWorld().cells, { target: 0.35, step: 0.01 });
-      console.log('[sea] tuned to', tunedSea);
+        // Auto-tune sea level to hit target land fraction
+        const tunedSea = tuneSeaLevelToTarget(getWorld().cells, { target: 0.35, step: 0.01 });
+        console.log('[sea] tuned to', tunedSea);
 
-      // recompute mask & paint
-      resetCaches('isWater'); // make sure this deletes S.caches.isWater
-      setIsWater(ensureIsWater(getWorld().cells));
+        // recompute mask & paint
+        resetCaches('isWater'); // make sure this deletes S.caches.isWater
+        setIsWater(ensureIsWater(getWorld().cells));
 
-      // Remove salt-and-pepper: keep a few biggest landmasses
-      sinkSmallIslands({ keep: 2, minCells: 300, epsilon: 0.02 });
-      resetCaches('isWater');
-      setIsWater(ensureIsWater(cells));
+        // Remove salt-and-pepper: keep a few biggest landmasses
+        sinkSmallIslands({ keep: 2, minCells: 300, epsilon: 0.02 });
+        resetCaches('isWater');
+        setIsWater(ensureIsWater(cells));
+      } else {
+        // Skip legacy transforms; elevation from elevation.js is authoritative
+        // Ensure downstream uses S.elevation (or the structure returned by generateElevation)
+        console.log('[terrain] skipping legacy post-processing - using noise elevation as authoritative');
+      }
 
       // Mark terrain dirty for raster
       ensureTerrainCanvas().setDirty();

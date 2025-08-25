@@ -1,6 +1,15 @@
 // js/recolor.js — terrain recolor + canvas/SVG paint
 import { S, getWorld } from './state.js';
-import { getLayers, ensureRasterImage, repaintCellsForMode } from './render.js';
+import { getLayers, ensureRasterImage, repaintCellsForMode, ensureCellLayer, dumpComputed } from './render.js';
+import { polygonToPath } from './geom/cellpaths.js';
+
+// Defensive guard: d3 should be loaded globally in index.html
+function d3req() {
+  if (!('d3' in window)) {
+    console.warn('[recolor] d3 not found on window. Include D3 in index.html.');
+  }
+  return window.d3;
+}
 
 // ---- Color ramps (MOVE your existing helpers here) -------------------------
 /** Land color ramp: dark green lowlands → light green → tan → white peaks */
@@ -158,21 +167,31 @@ export function ensureTerrainCanvas() {
  * Returns { landFraction } and logs "Land fraction ~ X.XX".
  */
 export function recolor(run = 0) {
-  const { width, height, cells, isWater } = getWorld();
-  const sea = (S.params?.seaLevel ?? 0.5);
+  // Use elevation sea level if available, otherwise fall back to params
+  const sea = (S.elevation?.seaLevel ?? S.params?.seaLevel ?? 0.5);
+  const cells = S.world?.cells ?? [];
+  const mask = (S.water?.isWater && S.water.isWater.length === cells.length) ? S.water.isWater : null;
 
   if (!cells?.length) return { landFraction: 0 };
 
   // --- Compute land fraction (same way you did before)
   let landCount = 0;
-  if (isWater) {
-    for (let i = 0; i < cells.length; i++) if (!isWater[i]) landCount++;
-  } else {
-    // If no mask yet, derive from height vs. sea (keep identical to legacy)
-    for (let i = 0; i < cells.length; i++) if ((cells[i].high ?? 0) >= sea) landCount++;
+  for (let i = 0; i < cells.length; i++) {
+    const waterHere = mask ? !!mask[i] : ((cells[i].high ?? 0) < sea);
+    if (!waterHere) landCount++;
   }
   const landFraction = cells.length ? +(landCount / cells.length).toFixed(2) : 0;
   console.log(`Land fraction ~ ${landFraction.toFixed(2)}`);
+  
+  // Console markers for quick verification
+  console.log('[recolor] sea=', sea.toFixed(3), 'mask=', !!mask, 'maskLen=', mask?.length);
+  console.log('[recolor]', { sea, cells: cells.length, mask: !!mask });
+  
+  // Helper function to get cell index consistently
+  function cellIndex(d) {
+    // d may be a plain data object or bound with an index/id property
+    return (d?.index ?? d?.id ?? d?.i ?? null);
+  }
 
   // --- Painting: decide between canvas raster + SVG
   const { mapCells } = getLayers();
@@ -195,7 +214,10 @@ export function recolor(run = 0) {
     canvas.height = height;
 
     cells.forEach(cell => {
-      if (isWater[cell.index]) {
+      const i = cellIndex(cell);
+      if (i == null) return; // skip unbound cells
+      const waterHere = mask ? !!mask[i] : ((cells[i].high ?? 0) < sea);
+      if (waterHere) {
         // Skip water cells - they're handled by ocean backdrop
         return;
       }
@@ -235,7 +257,10 @@ export function recolor(run = 0) {
     const sel = mapCells.selectAll('.mapCell');
     if (!sel.empty()) {
       sel.attr('fill', (d) => {
-        if (isWater[d.index]) {
+        const i = cellIndex(d);
+        if (i == null) return '#ccc'; // debug color if something is unbound
+        const waterHere = mask ? !!mask[i] : ((cells[i].high ?? 0) < sea);
+        if (waterHere) {
           return 'none';
         } else {
           let baseColor;
@@ -256,7 +281,10 @@ export function recolor(run = 0) {
       })
       .attr('stroke', 'none') // Ensure no cell borders after recoloring
       .style('fill', (d) => {
-        if (isWater[d.index]) {
+        const i = cellIndex(d);
+        if (i == null) return '#ccc'; // debug color if something is unbound
+        const waterHere = mask ? !!mask[i] : ((cells[i].high ?? 0) < sea);
+        if (waterHere) {
           return 'none';
         } else {
           let baseColor;
@@ -276,7 +304,10 @@ export function recolor(run = 0) {
         }
       })
       .attr('data-terrain-fill', (d) => {
-        if (isWater[d.index]) return 'none';
+        const i = cellIndex(d);
+        if (i == null) return '#ccc'; // debug color if something is unbound
+        const waterHere = mask ? !!mask[i] : ((cells[i].high ?? 0) < sea);
+        if (waterHere) return 'none';
         const tl = (d.high - sea) / Math.max(1 - sea, 0.0001);
         const tt = Math.max(0, Math.min(1, tl));
         return landColor(tt);
@@ -288,4 +319,169 @@ export function recolor(run = 0) {
   try { repaintCellsForMode(document.body.classList.contains('view-mode-terrain') ? 'terrain' : 'regions'); } catch (_e) {}
 
   return { landFraction };
+}
+
+/**
+ * Defensive terrain painting with explicit fill colors and proper layer management.
+ * Ensures land/water fills are visible and can't be overridden by CSS.
+ */
+export function recolorTerrain(S) {
+  const d3 = d3req();
+  const svg = d3.select('#map');
+  if (svg.empty()) throw new Error('#map svg root not found');
+
+  // Remove prior debug reset if it exists
+  const dbg = d3.select('#debug-reset');
+  if (!dbg.empty()) {
+    dbg.remove();
+    console.log('[recolor] removed debug reset style');
+  }
+
+  // Add hard preconditions for recolor
+  if (!S?.world?.cells?.length) {
+    console.warn('[recolor] abort: world cells not ready');
+    return;
+  }
+  if (!S?.elevation?.height?.length || typeof S?.elevation?.seaLevel !== 'number') {
+    console.warn('[recolor] abort: elevation not ready');
+    return;
+  }
+  if (!S?.water?.isWater?.length) {
+    console.warn('[recolor] abort: water mask not ready');
+    return;
+  }
+
+  // --- DEBUG: nuke anything that could hide paint ---
+  svg.attr('opacity', 1).attr('filter', null);
+  svg.selectAll('g').attr('opacity', 1).attr('filter', null).attr('mask', null).attr('clip-path', null)
+    .style('mix-blend-mode', 'normal');
+
+  // Hide known overlays that could cover everything
+  d3.select('#overlay').attr('display', 'none');
+  d3.select('#raster').attr('display', 'none');
+  d3.select('#shade').attr('display', 'none');
+
+  const { gSea, gCells } = ensureCellLayer();
+
+  const sea = (S.elevation?.seaLevel ?? S.params?.seaLevel ?? 0.5);
+  const cells = S.world?.cells ?? [];
+  const mask  = (S.water?.isWater && S.water.isWater.length === cells.length) ? S.water.isWater : null;
+
+  console.log('[recolor] sea=', sea.toFixed(3), 'cells=', cells.length, 'mask=', !!mask);
+
+  // --- 2a) paint a solid sea underlay so "water" is obvious ---
+  // Ensure the sea is actually under you
+  const vb = svg.attr('viewBox');
+  let w = +svg.attr('width'), h = +svg.attr('height');
+  if ((!w || !h) && vb) {
+    const parts = vb.split(/\s+/).map(Number);
+    w = parts[2]; h = parts[3];
+  }
+  if (!w || !h) { w = 2048; h = 1024; }
+  
+  gSea.selectAll('rect.sea-underlay').data([0]).join('rect')
+    .attr('class','sea-underlay')
+    .attr('x', 0).attr('y', 0)
+    .attr('width', w)
+    .attr('height', h)
+    .attr('fill', '#7fb1e6')          // visible blue
+    .attr('pointer-events', 'none');
+
+  // --- 2b) join cells and force visible land fills ---
+  // EXPECTATION: each cell object has .index or .id set to its canonical index
+  const keyFn = (d, i) => (d?.index ?? d?.id ?? i);
+
+  const sel = gCells.selectAll('path.cell').data(cells, keyFn);
+
+  sel.enter()
+    .append('path')
+    .attr('class','cell')
+    .merge(sel)
+    .attr('d', (d, i) => {
+      // Try cached path, then cached poly, then compute from mesh voronoi on the fly
+      if (d.path && d.path.length > 2) return d.path;
+
+      if (d.poly && d.poly.length >= 3) {
+        const p = polygonToPath(d.poly);
+        d.path = p;
+        return p;
+      }
+
+      const idx = d?.index ?? d?.id ?? i;
+      const v = S.mesh?.voronoi;
+      if (v && typeof v.cellPolygon === 'function') {
+        const poly = v.cellPolygon(idx);
+        if (poly && poly.length >= 3) {
+          d.poly = poly;
+          const p = polygonToPath(poly);
+          d.path = p;
+          return p;
+        }
+      }
+      // Last-resort tiny debug dot to make the cell visible
+      const cx = d.cx ?? d.x ?? d[0] ?? 0;
+      const cy = d.cy ?? d.y ?? d[1] ?? 0;
+      return `M${cx-0.5},${cy}h1v1h-1Z`;
+    })
+    .attr('stroke', 'none')                 // kill grid lines here
+    .attr('vector-effect', 'non-scaling-stroke')
+    .attr('fill-rule', 'evenodd')
+    .attr('fill', (d, i) => {
+      const idx = d?.index ?? d?.id ?? i;
+      const h = cells[idx]?.high ?? 0;
+      const waterHere = mask ? !!mask[idx] : (h < sea);
+      if (waterHere) return 'rgba(0,0,0,0)';    // transparent; sea underlay shows through
+      // Land ramp — deliberately simple & *visible*
+      // (replace with your palette later)
+      if (h > 0.85) return '#73431e';
+      if (h > 0.70) return '#9b5e2e';
+      if (h > 0.55) return '#c49a6c';
+      if (h > 0.45) return '#88b04b';
+      if (h > 0.35) return '#6ea04b';
+      return '#4a8f4a';
+    });
+
+  sel.exit().remove();
+
+  // Log computed styles of a sample cell
+  const sample = d3.select('#cells path.cell').node();
+  dumpComputed(sample, '[computed] path.cell');
+
+  // Sanity: how many paths missing 'd'?
+  const missingD = d3.selectAll('#cells path.cell').filter(function() {
+    const d = this.getAttribute('d'); return !d || d.length < 3;
+  }).size();
+  console.log('[recolor] after paint: missing d=', missingD);
+
+  // --- 2c) assert we actually painted land ---
+  let landCount = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const h = cells[i]?.high ?? 0;
+    const water = mask ? !!mask[i] : (h < sea);
+    if (!water) landCount++;
+  }
+  console.log('[recolor] painted land cells=', landCount, 'of', cells.length);
+
+  // DEBUG: if everything is still black, hard-force a visible land
+  if (landCount === 0) {
+    gCells.selectAll('path.cell').attr('fill', '#44cc55');
+    console.warn('[recolor] fallback applied: forced land fill for debug');
+  }
+
+  // Additional debugging for covering elements
+  console.log('SVG elements check:', [...document.querySelectorAll('#map *')].map(n => ({
+    n: n.tagName, 
+    id: n.id, 
+    cls: n.className?.baseVal || n.className, 
+    op: getComputedStyle(n).opacity, 
+    disp: getComputedStyle(n).display,
+    fill: getComputedStyle(n).fill
+  })).filter(el => el.fill === 'rgb(0, 0, 0)' || el.disp === 'none'));
+
+  // Count paths we painted transparent for water
+  const waterPaths = d3.selectAll('#cells path.cell').filter(function() {
+    const f = this.getAttribute('fill');
+    return f === 'none' || f === 'transparent' || f === 'rgba(0,0,0,0)';
+  }).size();
+  console.log('[recolor] painted water cells=', waterPaths, 'of', S.world.cells.length);
 }

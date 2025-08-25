@@ -81,7 +81,15 @@ let regionsQueued = window.__state?.regionsQueued || false;
 export async function computeAndDrawRegions(run = 0) {
   try {
     const { regions } = getLayers(); // group
-    const { cells, isWater } = getWorld();
+    // Guard against old world references
+    const world = S?.world ?? getWorld?.() ?? {};
+    const { cells, isWater } = world;
+    
+    // Ensure we have valid data
+    if (!cells || !isWater) {
+      console.warn('No valid world data for region computation');
+      return;
+    }
 
     // If you had parameter logs, keep them:
     // console.log('Region count K (capitals-matched default):', K);
@@ -94,7 +102,7 @@ export async function computeAndDrawRegions(run = 0) {
     regionsQueued = false;
 
     // console.log('computeAndDrawRegions called');
-    const {width, height, s} = getWorld();
+    const {width, height, s} = world;
     
     if (!cells.length) { console.warn('[RUN', run, '] no cells yet, skipping computeAndDrawRegions'); return; }
   

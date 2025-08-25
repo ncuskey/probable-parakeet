@@ -96,6 +96,54 @@ export function setViewMode(mode) {
 }
 
 /**
+ * Ensure proper cell layer structure with sea, cells, and grid groups.
+ * Enforces stacking order and baseline styles.
+ */
+export function ensureCellLayer() {
+  const d3 = d3req();
+  const svg = d3.select('#map');           // adjust if your root id differs
+  if (svg.empty()) throw new Error('#map svg root not found');
+
+  // Ensure group order: sea under land, grid above land
+  let gSea   = svg.select('#sea');
+  let gCells = svg.select('#cells');
+  let gGrid  = svg.select('#grid');
+
+  if (gSea.empty())   gSea   = svg.append('g').attr('id','sea');
+  if (gCells.empty()) gCells = svg.append('g').attr('id','cells');
+  if (gGrid.empty())  gGrid  = svg.append('g').attr('id','grid');
+
+  // enforce stacking (sea -> cells -> grid)
+  gSea.lower();
+  gGrid.raise();
+
+  // baseline styles (inline beats most CSS)
+  gSea.attr('opacity', 1.0);
+  gCells.attr('opacity', 1.0);
+  gGrid.attr('opacity', 1.0);
+
+  return { gSea, gCells, gGrid };
+}
+
+/**
+ * Debug utility to dump computed styles of an element.
+ */
+export function dumpComputed(el, label='[computed]') {
+  if (!el) return console.warn(label, 'no element');
+  const cs = getComputedStyle(el);
+  console.log(label, {
+    display: cs.display,
+    visibility: cs.visibility,
+    opacity: cs.opacity,
+    fill: cs.fill,
+    fillOpacity: cs.fillOpacity,
+    stroke: cs.stroke,
+    mixBlendMode: cs.mixBlendMode,
+    filter: cs.filter
+  });
+}
+
+/**
  * Lightweight repaint for mode switch (no heavy recompute).
  * Uses existing data attributes if your code sets them (e.g., data-terrain-fill).
  * Safe no-op if attributes weren't set yet; full recolor should still happen elsewhere.

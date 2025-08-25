@@ -79,10 +79,17 @@ export function bindMeshAsWorld(mesh) {
     });
   }
   
+  // Back-compat and hard invariants
+  for (let i = 0; i < cells.length; i++) {
+    cells[i].id = i;        // canonical
+    cells[i].index = i;     // legacy readers expect .index
+  }
+  
   WORLD = {
     width: mesh.width,
     height: mesh.height,
-    cells: cells
+    cells: cells,
+    numCells: cells.length
   };
   CELLS = cells;
   
